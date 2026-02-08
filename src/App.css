@@ -1,0 +1,351 @@
+:root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #d9dde3;
+    --text: #111827;
+    --muted: #6b7280;
+    --primary: #111827;
+    --danger: #b91c1c;
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+.page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.subtitle {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.chips {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.chip {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.chip.subtle { color: var(--muted); }
+
+.layout {
+    width: min(1200px, calc(100% - 36px));
+    margin: 16px auto 22px;
+    display: grid;
+    grid-template-columns: 1.8fr 1fr;
+    gap: 14px;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.chartCard {
+    display: flex;
+    flex-direction: column;
+    min-height: 560px;
+}
+
+.cardHeader {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cardHeader.tight {
+    border-bottom: none;
+    padding-bottom: 8px;
+}
+
+.cardTitle {
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+
+.cardHint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.chartWrap {
+    padding: 10px 12px 12px;
+    height: 520px;
+    user-select: none;
+}
+
+.side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.form {
+    padding: 0 14px 14px;
+    display: grid;
+    gap: 10px;
+}
+
+.field {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.field.compact input {
+    padding: 8px 10px;
+}
+
+input {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    outline: none;
+}
+
+input:focus {
+    border-color: #9ca3af;
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+}
+
+input.bad {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.10);
+}
+
+.btn {
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #f3f4f6;
+    color: var(--text);
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.btn:hover { background: #e9ecef; }
+
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.btn.primary {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.btn.primary:hover { filter: brightness(0.92); }
+
+.btn.ghost {
+    background: transparent;
+}
+
+.btn.danger {
+    background: #fff;
+    border-color: #ef4444;
+    color: var(--danger);
+}
+
+.btn.danger:hover { background: #fff5f5; }
+
+.listCard .list {
+    padding: 0 14px 14px;
+    display: grid;
+    gap: 10px;
+    max-height: 340px;
+    overflow: auto;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #fafafa;
+}
+
+.rowLeft {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.badge {
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.mono b { color: var(--text); }
+
+.empty {
+    padding: 0 14px 14px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.footer {
+    margin-top: auto;
+    padding: 14px 18px 18px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+}
+
+/* View controls under the chart */
+.viewControls {
+    border-top: 1px solid var(--border);
+    padding: 12px 14px 14px;
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr 120px;
+    gap: 10px 12px;
+    align-items: end;
+}
+
+.viewTitle {
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+    color: var(--text);
+    align-self: center;
+}
+
+.viewHint {
+    grid-column: 1 / -1;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+/* Tooltip */
+.tooltip {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 10px;
+    box-shadow: var(--shadow);
+}
+
+.tooltipTitle {
+    font-weight: 800;
+    font-size: 12px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+}
+
+.tooltipRow {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    margin: 2px 0;
+}
+
+.tooltipKey {
+    color: var(--muted);
+    width: 64px;
+}
+
+.tooltipVal {
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.tooltipNote {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+@media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .toolbar { flex-wrap: wrap; justify-content: flex-end; }
+    .chartWrap { height: 420px; }
+    .chartCard { min-height: 460px; }
+
+    .viewControls {
+        grid-template-columns: 1fr 1fr;
+    }
+    .viewTitle {
+        grid-column: 1 / -1;
+    }
+}
