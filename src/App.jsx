@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
     ResponsiveContainer,
@@ -13,25 +13,33 @@ import {
 
 const MAX_VALUE = 1_000_000_000; // 10^9
 const DIVISIONS = 10;
+const MAX_FILENAME_LEN = 80;
+
+// bench[200-299]_[delay]_[area]_[description]_[sender].bench
+const BENCH_NAME_RE =
+    /^bench(2\d\d)_(\d+)_(\d+)_([A-Za-z0-9-]+)_([A-Za-z0-9-]+)\.bench$/;
+
+const DELETE_PREVIEW_LIMIT = 3;
+
+const STATUS_LIST = ["non-verified", "verified", "failed"];
+const COMMAND_COUNT = 10;
+
+// Brighter, more separated palette
+const USER_PALETTE = [
+    "#ff1744",
+    "#ff9100",
+    "#ffea00",
+    "#00e676",
+    "#00e5ff",
+    "#2979ff",
+    "#651fff",
+    "#d500f9",
+    "#1de9b6",
+    "#f50057",
+];
 
 function uid() {
     return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
-function parseNonNegIntCapped(str, maxValue) {
-    if (str === "") return null;
-    if (!/^\d+$/.test(str)) return null;
-    const n = Number(str);
-    if (!Number.isSafeInteger(n) || n < 0 || n > maxValue) return null;
-    return n;
-}
-
-function parsePosIntCapped(str, maxValue) {
-    if (str === "") return null;
-    if (!/^\d+$/.test(str)) return null;
-    const n = Number(str);
-    if (!Number.isSafeInteger(n) || n < 1 || n > maxValue) return null;
-    return n;
 }
 
 function clamp(value, lo, hi) {
@@ -47,7 +55,6 @@ function formatIntNoGrouping(value) {
 function buildAxis(maxValue, divisions, hardCap) {
     const max = clamp(Math.floor(maxValue), 1, hardCap);
     const div = Math.max(1, Math.floor(divisions));
-
     const step = Math.max(1, Math.ceil(max / div));
 
     let overflow = max + step;
@@ -69,10 +76,78 @@ function TenPowNine() {
     );
 }
 
-function isBenchFile(file) {
-    if (!file) return false;
-    const name = (file.name || "").toLowerCase().trim();
-    return name.endsWith(".bench");
+function parsePosIntCapped(str, maxValue) {
+    if (str === "") return null;
+    if (!/^\d+$/.test(str)) return null;
+    const n = Number(str);
+    if (!Number.isSafeInteger(n) || n < 1 || n > maxValue) return null;
+    return n;
+}
+
+function statusColor(status) {
+    if (status === "verified") return "#16a34a"; // green
+    if (status === "failed") return "#dc2626"; // red
+    return "#2563eb"; // non-verified -> blue
+}
+
+function hashString(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
+
+function userColor(sender) {
+    const idx = hashString(sender || "unknown") % USER_PALETTE.length;
+    return USER_PALETTE[idx];
+}
+
+function parseBenchFileName(fileNameRaw) {
+    const fileName = (fileNameRaw || "").trim();
+    if (!fileName) return { ok: false, error: "Empty file name." };
+    if (fileName.length > MAX_FILENAME_LEN) {
+        return {
+            ok: false,
+            error: `File name is too long (max ${MAX_FILENAME_LEN}).`,
+        };
+    }
+
+    const m = fileName.match(BENCH_NAME_RE);
+    if (!m) {
+        return {
+            ok: false,
+            error:
+                "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>_<description>_<sender>.bench",
+        };
+    }
+
+    const benchmark = Number(m[1]);
+    const delay = Number(m[2]);
+    const area = Number(m[3]);
+    const description = m[4];
+    const sender = m[5];
+
+    if (!Number.isSafeInteger(benchmark) || benchmark < 200 || benchmark > 299) {
+        return { ok: false, error: "Benchmark must be in [200..299]." };
+    }
+    if (!Number.isSafeInteger(delay) || delay < 0 || delay > MAX_VALUE) {
+        return { ok: false, error: "Delay must be an integer in [0..10^9]." };
+    }
+    if (!Number.isSafeInteger(area) || area < 0 || area > MAX_VALUE) {
+        return { ok: false, error: "Area must be an integer in [0..10^9]." };
+    }
+
+    return {
+        ok: true,
+        benchmark,
+        delay,
+        area,
+        description,
+        sender,
+        fileName,
+    };
 }
 
 function CustomTooltip({ active, payload }) {
@@ -85,17 +160,33 @@ function CustomTooltip({ active, payload }) {
             <div className="tooltipTitle">Point</div>
 
             <div className="tooltipRow">
-                <span className="tooltipKey">original:</span>
-                <span className="tooltipVal">
-          (delay={p.originalDelayStr}, area={p.originalAreaStr})
-        </span>
+                <span className="tooltipKey">benchmark:</span>
+                <span className="tooltipVal">{p.benchmark}</span>
             </div>
 
             <div className="tooltipRow">
-                <span className="tooltipKey">shown:</span>
-                <span className="tooltipVal">
-          (delay={p.displayDelayLabel}, area={p.displayAreaLabel})
-        </span>
+                <span className="tooltipKey">sender:</span>
+                <span className="tooltipVal">{p.sender}</span>
+            </div>
+
+            <div className="tooltipRow">
+                <span className="tooltipKey">status:</span>
+                <span className="tooltipVal">{p.status}</span>
+            </div>
+
+            <div className="tooltipRow">
+                <span className="tooltipKey">name:</span>
+                <span className="tooltipVal">{p.description}</span>
+            </div>
+
+            <div className="tooltipRow">
+                <span className="tooltipKey">delay:</span>
+                <span className="tooltipVal">{formatIntNoGrouping(p.delay)}</span>
+            </div>
+
+            <div className="tooltipRow">
+                <span className="tooltipKey">area:</span>
+                <span className="tooltipVal">{formatIntNoGrouping(p.area)}</span>
             </div>
 
             {p.fileName ? (
@@ -104,99 +195,228 @@ function CustomTooltip({ active, payload }) {
                     <span className="tooltipVal">{p.fileName}</span>
                 </div>
             ) : null}
-
-            {p.isClipped && (
-                <div className="tooltipRow">
-                    <span className="tooltipKey">outside:</span>
-                    <span className="tooltipVal">
-            dDelay={p.outsideDelayStr}, dArea={p.outsideAreaStr}
-          </span>
-                </div>
-            )}
         </div>
     );
 }
 
+function randInt(lo, hiInclusive) {
+    return lo + Math.floor(Math.random() * (hiInclusive - lo + 1));
+}
+
+function randomChoice(arr) {
+    return arr[randInt(0, arr.length - 1)];
+}
+
+// Diamond for latest point
+function Diamond({ cx, cy, r, fill, stroke, strokeWidth, onClick }) {
+    const d = r * 1.35;
+    const points = `${cx},${cy - d} ${cx + d},${cy} ${cx},${cy + d} ${cx - d},${cy}`;
+    return (
+        <polygon
+            points={points}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            onClick={onClick}
+            tabIndex={-1}
+            focusable="false"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ cursor: "pointer" }}
+        />
+    );
+}
+
+function computeParetoFrontOriginal(points) {
+    const sorted = [...points].sort((a, b) => {
+        if (a.delay !== b.delay) return a.delay - b.delay;
+        return a.area - b.area;
+    });
+
+    const front = [];
+    let bestArea = Infinity;
+
+    for (const p of sorted) {
+        if (p.area < bestArea) {
+            front.push(p);
+            bestArea = p.area;
+        }
+    }
+    return front;
+}
+
+function pickInt(lo, hi) {
+    const a = Math.ceil(Math.min(lo, hi));
+    const b = Math.floor(Math.max(lo, hi));
+    if (a > b) return a;
+    return a + Math.floor(Math.random() * (b - a + 1));
+}
+
+function pickAbove(minExclusive, maxInclusive) {
+    const lo = Math.min(maxInclusive, minExclusive + 1);
+    const hi = maxInclusive;
+    if (lo > hi) return hi;
+    return pickInt(lo, hi);
+}
+
+/**
+ * Choose area for a delay that DOES NOT exist yet.
+ * We look at current Pareto-front points and find the nearest front point on the left and right by delay.
+ *
+ * If left has area1 and right has area2:
+ * 50% -> uniform in [min(area1, area2), max(area1, area2)]
+ * 50% -> uniform in (max(area1, area2), 1000]
+ *
+ * If only one side exists with areaS:
+ * 50% -> uniform in [100, areaS]
+ * 50% -> uniform in (areaS, 1000]
+ *
+ * If no front points exist yet: uniform [100..1000]
+ */
+function chooseAreaSmartFromParetoFront(frontPoints, newDelay) {
+    const sortedFront = [...frontPoints].sort((a, b) => a.delay - b.delay);
+
+    let left = null;
+    for (let i = sortedFront.length - 1; i >= 0; i--) {
+        if (sortedFront[i].delay < newDelay) {
+            left = sortedFront[i];
+            break;
+        }
+    }
+
+    let right = null;
+    for (let i = 0; i < sortedFront.length; i++) {
+        if (sortedFront[i].delay > newDelay) {
+            right = sortedFront[i];
+            break;
+        }
+    }
+
+    if (!left && !right) return pickInt(100, 1000);
+
+    if (left && right) {
+        const lo = Math.min(left.area, right.area);
+        const hi = Math.max(left.area, right.area);
+
+        if (Math.random() < 0.5) return pickInt(lo, hi);
+        return pickAbove(hi, 1000);
+    }
+
+    const areaS = (left ? left.area : right.area);
+    const capped = clamp(areaS, 100, 1000);
+
+    if (Math.random() < 0.5) return pickInt(100, capped);
+    return pickAbove(capped, 1000);
+}
+
 export default function App() {
-    const [points, setPoints] = useState(() => [
-        { id: uid(), delay: 2, area: 4, fileName: "example.bench" },
-        { id: uid(), delay: 5, area: 7, fileName: "example.bench" },
-        { id: uid(), delay: 8, area: 3, fileName: "example.bench" },
-        { id: uid(), delay: 3, area: 9, fileName: "example.bench" },
-        { id: uid(), delay: 100, area: 100000, fileName: "example.bench" },
-    ]);
+    const [points, setPoints] = useState(() => []);
+    const [lastAddedId, setLastAddedId] = useState(null);
 
-    // Add point inputs (0..10^9)
-    const [delayInput, setDelayInput] = useState("");
-    const [areaInput, setAreaInput] = useState("");
-
-    // Required .bench file for adding a point
+    // Upload (we DO NOT store the file itself)
     const [benchFile, setBenchFile] = useState(null);
+    const [uploadError, setUploadError] = useState(" ");
     const fileInputRef = useRef(null);
 
-    // View rectangle inputs (1..10^9)
-    const [delayMax, setDelayMax] = useState(10);
-    const [areaMax, setAreaMax] = useState(10);
-    const [delayMaxDraft, setDelayMaxDraft] = useState("10");
-    const [areaMaxDraft, setAreaMaxDraft] = useState("10");
+    // Filters (start in "test")
+    const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
+    const [colorMode, setColorMode] = useState("status");
+    const [statusFilter, setStatusFilter] = useState({
+        "non-verified": true,
+        verified: true,
+        failed: true,
+    });
+
+    const [deletePrefix, setDeletePrefix] = useState("");
+
+    // View rectangle inputs
+    const [delayMax, setDelayMax] = useState(50);
+    const [areaMax, setAreaMax] = useState(1000);
+    const [delayMaxDraft, setDelayMaxDraft] = useState("50");
+    const [areaMaxDraft, setAreaMaxDraft] = useState("1000");
+
+    // When switching to test benchmark, expand view to 50 / 1000
+    useEffect(() => {
+        if (benchmarkFilter === "test") {
+            setDelayMax(50);
+            setAreaMax(1000);
+            setDelayMaxDraft("50");
+            setAreaMaxDraft("1000");
+        }
+    }, [benchmarkFilter]);
 
     const delayAxis = useMemo(() => buildAxis(delayMax, DIVISIONS, MAX_VALUE), [delayMax]);
     const areaAxis = useMemo(() => buildAxis(areaMax, DIVISIONS, MAX_VALUE), [areaMax]);
-
     const delayOverflowLane = delayAxis.overflow;
     const areaOverflowLane = areaAxis.overflow;
-
-    // Point sizes
+    // point sizes
     const BASE_R = 4;
     const MIN_R = 2.8;
     const DIST_SCALE = 0.02;
 
     function computeRadius(p) {
-        if (!p.isClipped) return BASE_R;
-        const dist = Math.hypot(p.outsideDelay, p.outsideArea);
-        const r = BASE_R / (1 + dist * DIST_SCALE);
-        return clamp(r, MIN_R, BASE_R);
+        // no clipping shrinking here; we keep your existing logic
+        // (it only shrinks when clipped, but still ok)
+        const outsideDelay = Math.max(0, p.delay - delayMax);
+        const outsideArea = Math.max(0, p.area - areaMax);
+        const isClipped = outsideDelay > 0 || outsideArea > 0;
+
+        if (!isClipped) return BASE_R;
+        const dist = Math.hypot(outsideDelay, outsideArea);
+        const rr = BASE_R / (1 + dist * DIST_SCALE);
+        return clamp(rr, MIN_R, BASE_R);
     }
 
-    const plottedPoints = useMemo(() => {
-        return points.map((p) => {
-            const outsideDelay = Math.max(0, p.delay - delayMax);
-            const outsideArea = Math.max(0, p.area - areaMax);
-            const isClipped = outsideDelay > 0 || outsideArea > 0;
+    const availableBenchmarks = useMemo(() => {
+        const numeric = new Set();
+        for (const p of points) {
+            if (p.benchmark !== "test") numeric.add(Number(p.benchmark));
+        }
+        return Array.from(numeric).sort((a, b) => a - b);
+    }, [points]);
 
+    // Visible points = benchmark filter + status filter (NOT dependent on view rectangle)
+    const visiblePoints = useMemo(() => {
+        return points.filter((p) => {
+            if (benchmarkFilter === "test") {
+                if (p.benchmark !== "test") return false;
+            } else {
+                if (String(p.benchmark) !== String(benchmarkFilter)) return false;
+            }
+            if (!statusFilter[p.status]) return false;
+            return true;
+        });
+    }, [points, benchmarkFilter, statusFilter]);
+
+    // Pareto computed ONLY from visible points (does NOT depend on view rectangle)
+    const paretoBase = useMemo(() => {
+        return computeParetoFrontOriginal(visiblePoints);
+    }, [visiblePoints]);
+
+    // Pareto DISPLAY points: show only the segment inside the current rectangle
+    // (no recomputation of membership, only cropping for display)
+    const paretoDisplay = useMemo(() => {
+        const inBounds = paretoBase.filter((p) => p.delay <= delayMax && p.area <= areaMax);
+        // sort for line
+        return [...inBounds].sort((a, b) => {
+            if (a.delay !== b.delay) return a.delay - b.delay;
+            return a.area - b.area;
+        });
+    }, [paretoBase, delayMax, areaMax]);
+
+    // Display mapping for all visible points (includes overflow lane mapping)
+    const plottedPoints = useMemo(() => {
+        return visiblePoints.map((p) => {
             const displayDelay = p.delay > delayMax ? delayOverflowLane : p.delay;
             const displayArea = p.area > areaMax ? areaOverflowLane : p.area;
 
-            const displayDelayLabel =
-                p.delay > delayMax ? `>${formatIntNoGrouping(delayMax)}` : formatIntNoGrouping(p.delay);
-            const displayAreaLabel =
-                p.area > areaMax ? `>${formatIntNoGrouping(areaMax)}` : formatIntNoGrouping(p.area);
-
             return {
-                id: p.id,
-
-                // keys used by Recharts
-                delay: displayDelay,
-                area: displayArea,
-
-                // tooltip helpers
-                originalDelayStr: formatIntNoGrouping(p.delay),
-                originalAreaStr: formatIntNoGrouping(p.area),
-                displayDelayLabel,
-                displayAreaLabel,
-
-                outsideDelay,
-                outsideArea,
-                outsideDelayStr: formatIntNoGrouping(outsideDelay),
-                outsideAreaStr: formatIntNoGrouping(outsideArea),
-
-                isClipped,
-                fileName: p.fileName || "",
+                ...p,
+                delayDisp: displayDelay,
+                areaDisp: displayArea,
             };
         });
-    }, [points, delayMax, areaMax, delayOverflowLane, areaOverflowLane]);
+    }, [visiblePoints, delayMax, areaMax, delayOverflowLane, areaOverflowLane]);
 
-    // Prevent Y-axis label cropping for large numbers
     const areaAxisWidth = useMemo(() => {
         const labelA = `>${formatIntNoGrouping(areaMax)}`;
         const labelB = formatIntNoGrouping(areaOverflowLane);
@@ -204,43 +424,144 @@ export default function App() {
         return clamp(longest * 8 + 18, 52, 160);
     }, [areaMax, areaOverflowLane]);
 
+    function clearFileInput() {
+        setBenchFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+
     function onFileChange(e) {
         const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
         setBenchFile(file);
-    }
 
-    function clearFile() {
-        setBenchFile(null);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = "";
+        if (!file) {
+            setUploadError(" ");
+            return;
         }
+
+        const parsed = parseBenchFileName(file.name);
+        if (!parsed.ok) {
+            setUploadError(parsed.error);
+            return;
+        }
+
+        if (points.some((p) => p.fileName === parsed.fileName)) {
+            setUploadError("A point with this file name already exists.");
+            return;
+        }
+
+        setUploadError(" ");
     }
 
-    function addPoint(e) {
+    function addPointFromFile(e) {
         e.preventDefault();
+        if (!benchFile) return;
 
-        const delay = parseNonNegIntCapped(delayInput, MAX_VALUE);
-        const area = parseNonNegIntCapped(areaInput, MAX_VALUE);
-        const okFile = isBenchFile(benchFile);
+        const parsed = parseBenchFileName(benchFile.name);
+        if (!parsed.ok) {
+            setUploadError(parsed.error);
+            return;
+        }
 
-        if (delay === null || area === null || !okFile) return;
+        if (points.some((p) => p.fileName === parsed.fileName)) {
+            setUploadError("A point with this file name already exists.");
+            clearFileInput();
+            return;
+        }
 
-        setPoints((prev) => [
-            { id: uid(), delay, area, fileName: benchFile.name },
-            ...prev,
-        ]);
+        const point = {
+            id: uid(),
+            benchmark: parsed.benchmark,
+            delay: parsed.delay,
+            area: parsed.area,
+            description: parsed.description,
+            sender: parsed.sender,
+            fileName: parsed.fileName,
+            status: "non-verified",
+        };
 
-        setDelayInput("");
-        setAreaInput("");
-        clearFile();
+        setPoints((prev) => [point, ...prev]);
+        setLastAddedId(point.id);
+
+        // switch to that benchmark
+        setBenchmarkFilter(String(parsed.benchmark));
+
+        setUploadError(" ");
+        clearFileInput();
     }
 
-    function deletePoint(id) {
-        setPoints((prev) => prev.filter((p) => p.id !== id));
+    function deletePointById(id) {
+        const p = points.find((x) => x.id === id);
+        const label = p ? `${p.fileName}` : "this point";
+        if (!window.confirm(`Delete ${label}?`)) return;
+
+        setPoints((prev) => prev.filter((x) => x.id !== id));
+        if (lastAddedId === id) setLastAddedId(null);
     }
 
-    function clearAll() {
-        setPoints([]);
+    function clearAllTestNoConfirm() {
+        setPoints((prev) => prev.filter((p) => p.benchmark !== "test"));
+        if (benchmarkFilter === "test") setLastAddedId(null);
+    }
+
+    function generateRandomTestPoints() {
+        const count = randInt(10, 100);
+        const next = [];
+
+        // Track delays used in THIS generation
+        const usedDelays = new Set();
+
+        // We maintain a running set of generated points,
+        // and recompute Pareto front each time we need "nearest front neighbors".
+        const generatedSoFar = [];
+
+        let newestId = null;
+
+        for (let i = 1; i <= count; i++) {
+            const delay = randInt(10, 50);
+
+            const isNewDelay = !usedDelays.has(delay);
+
+            let area;
+            if (isNewDelay) {
+                const frontNow = computeParetoFrontOriginal(generatedSoFar);
+                area = chooseAreaSmartFromParetoFront(frontNow, delay);
+                usedDelays.add(delay);
+            } else {
+                // if delay already exists, choose area purely random (as you said earlier)
+                area = randInt(100, 1000);
+            }
+
+            const cmdNum = randInt(1, COMMAND_COUNT);
+            const sender = `command${cmdNum}`;
+            const status = randomChoice(STATUS_LIST);
+            const description = `point${i}`;
+            const fileName = `test_${delay}_${area}_points${i}_command${cmdNum}.bench`;
+
+            const id = uid();
+            newestId = id;
+
+            const p = {
+                id,
+                benchmark: "test",
+                delay,
+                area,
+                description,
+                sender,
+                status,
+                fileName,
+            };
+
+            next.push(p);
+            generatedSoFar.push(p);
+        }
+
+        // Replace all existing test points
+        setPoints((prev) => {
+            const nonTest = prev.filter((p) => p.benchmark !== "test");
+            return [...next, ...nonTest];
+        });
+
+        setLastAddedId(newestId);
     }
 
     function applyView(e) {
@@ -248,27 +569,23 @@ export default function App() {
         const dMax = parsePosIntCapped(delayMaxDraft, MAX_VALUE);
         const aMax = parsePosIntCapped(areaMaxDraft, MAX_VALUE);
         if (dMax === null || aMax === null) return;
-
         setDelayMax(dMax);
         setAreaMax(aMax);
     }
 
     function resetView() {
+        if (benchmarkFilter === "test") {
+            setDelayMax(50);
+            setAreaMax(1000);
+            setDelayMaxDraft("50");
+            setAreaMaxDraft("1000");
+            return;
+        }
         setDelayMax(10);
         setAreaMax(10);
         setDelayMaxDraft("10");
         setAreaMaxDraft("10");
     }
-
-    const delayValid = delayInput === "" || parseNonNegIntCapped(delayInput, MAX_VALUE) !== null;
-    const areaValid = areaInput === "" || parseNonNegIntCapped(areaInput, MAX_VALUE) !== null;
-
-    const delayParsed = parseNonNegIntCapped(delayInput, MAX_VALUE);
-    const areaParsed = parseNonNegIntCapped(areaInput, MAX_VALUE);
-
-    const fileIsValid = benchFile === null ? false : isBenchFile(benchFile);
-
-    const canAdd = delayParsed !== null && areaParsed !== null && fileIsValid;
 
     const delayViewValid =
         delayMaxDraft === "" || parsePosIntCapped(delayMaxDraft, MAX_VALUE) !== null;
@@ -278,6 +595,15 @@ export default function App() {
     const canApplyView =
         parsePosIntCapped(delayMaxDraft, MAX_VALUE) !== null &&
         parsePosIntCapped(areaMaxDraft, MAX_VALUE) !== null;
+
+    const canAdd =
+        benchFile !== null &&
+        (() => {
+            const parsed = parseBenchFileName(benchFile.name);
+            if (!parsed.ok) return false;
+            if (points.some((p) => p.fileName === parsed.fileName)) return false;
+            return true;
+        })();
 
     function formatDelayTick(value) {
         const v = Number(value);
@@ -293,11 +619,31 @@ export default function App() {
         return formatIntNoGrouping(v);
     }
 
+    function toggleStatus(key) {
+        setStatusFilter((prev) => ({ ...prev, [key]: !prev[key] }));
+    }
+
+    const deleteMatches = useMemo(() => {
+        const prefix = deletePrefix.trim().toLowerCase();
+        if (!prefix) return points;
+        return points.filter((p) => (p.fileName || "").toLowerCase().startsWith(prefix));
+    }, [points, deletePrefix]);
+
+    const deletePreview = useMemo(
+        () => deleteMatches.slice(0, DELETE_PREVIEW_LIMIT),
+        [deleteMatches]
+    );
+    const placeholdersCount = Math.max(0, DELETE_PREVIEW_LIMIT - deletePreview.length);
+    const deleteHasMore = deleteMatches.length > deletePreview.length;
+
+    const isTestBenchSelected = benchmarkFilter === "test";
+
     return (
         <div className="page">
             <header className="topbar">
                 <div className="brand">
-                    <div className="title">Points</div>
+                    <div className="title">Bench points</div>
+                    <div className="subtitle">Upload .bench files → points are created automatically</div>
                 </div>
             </header>
 
@@ -305,31 +651,44 @@ export default function App() {
                 <section className="card chartCard">
                     <div className="cardHeader">
                         <div>
-                            <div className="cardTitle">Scatter chart</div>
+                            <div className="cardTitle">Pareto curve</div>
+                            <div className="cardHint">
+                                Pareto frontier is computed from points visible by benchmark + status filters.
+                                Changing the view rectangle does not change the frontier — it only crops what part of
+                                it is visible.
+                            </div>
                         </div>
 
                         <div className="toolbar">
+                            {isTestBenchSelected ? (
+                                <>
+                                    <button className="btn ghost" onClick={generateRandomTestPoints}>
+                                        Generate random points
+                                    </button>
+                                    <button className="btn danger" onClick={clearAllTestNoConfirm}>
+                                        Clear all (test)
+                                    </button>
+                                </>
+                            ) : null}
+
                             <button className="btn ghost" onClick={resetView}>
                                 Reset view
-                            </button>
-                            <button className="btn ghost" onClick={clearAll} disabled={points.length === 0}>
-                                Clear all
                             </button>
                         </div>
                     </div>
 
-                    <div className="chartWrap">
+                    <div className="chartWrap" tabIndex={-1} onMouseDown={(e) => e.preventDefault()}>
                         <ResponsiveContainer width="100%" height="100%">
                             <ScatterChart margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
                                 <CartesianGrid strokeDasharray="2 2" />
                                 <ReferenceLine x={0} strokeOpacity={0.15} />
                                 <ReferenceLine y={0} strokeOpacity={0.15} />
-                                <ReferenceLine x={delayOverflowLane} strokeOpacity={0.10} />
-                                <ReferenceLine y={areaOverflowLane} strokeOpacity={0.10} />
+                                <ReferenceLine x={delayOverflowLane} strokeOpacity={0.1} />
+                                <ReferenceLine y={areaOverflowLane} strokeOpacity={0.1} />
 
                                 <XAxis
                                     type="number"
-                                    dataKey="delay"
+                                    dataKey="delayDisp"
                                     tickLine={false}
                                     axisLine={false}
                                     domain={[0, delayOverflowLane]}
@@ -337,10 +696,9 @@ export default function App() {
                                     ticks={delayAxis.ticks}
                                     tickFormatter={formatDelayTick}
                                 />
-
                                 <YAxis
                                     type="number"
-                                    dataKey="area"
+                                    dataKey="areaDisp"
                                     tickLine={false}
                                     axisLine={false}
                                     domain={[0, areaOverflowLane]}
@@ -352,13 +710,76 @@ export default function App() {
 
                                 <Tooltip content={<CustomTooltip />} />
 
+                                {/* Pareto curve (cropped to rectangle): strong double-stroke line */}
+                                <Scatter
+                                    data={paretoDisplay.map((p) => ({ ...p, delayDisp: p.delay, areaDisp: p.area }))}
+                                    line={{ stroke: "rgba(255,255,255,0.98)", strokeWidth: 4 }}
+                                    isAnimationActive={false}
+                                    shape={null}
+                                    fill="none"
+                                    style={{ pointerEvents: "none" }}
+                                />
+
+                                <Scatter
+                                    data={paretoDisplay.map((p) => ({ ...p, delayDisp: p.delay, areaDisp: p.area }))}
+                                    line={{ stroke: "rgba(17,24,39,0.98)", strokeWidth: 2 }}
+                                    isAnimationActive={false}
+                                    shape={(props) => {
+                                        const { cx, cy } = props;
+                                        return (
+                                            <circle
+                                                cx={cx}
+                                                cy={cy}
+                                                r={3.2}
+                                                fill="rgba(17,24,39,0.98)"
+                                                stroke="#ffffff"
+                                                strokeWidth={1}
+                                                tabIndex={-1}
+                                                focusable="false"
+                                                style={{ pointerEvents: "none" }}
+                                            />
+                                        );
+                                    }}
+                                    fill="none"
+                                    style={{ pointerEvents: "none" }}
+                                />
+
+                                {/* Main points: clickable delete */}
                                 <Scatter
                                     data={plottedPoints}
                                     isAnimationActive={false}
                                     shape={(props) => {
                                         const { cx, cy, payload } = props;
-                                        const r = computeRadius(payload);
-                                        const fill = payload.isClipped ? "rgba(17,24,39,0.55)" : "#111827";
+
+                                        const baseFill =
+                                            colorMode === "user" ? userColor(payload.sender) : statusColor(payload.status);
+
+                                        const isLatest = payload.id === lastAddedId;
+
+                                        const r0 = computeRadius(payload);
+                                        const r = isLatest ? r0 * 1.5 : r0; // +50% size for latest diamond
+
+                                        const fill =
+                                            payload.delay > delayMax || payload.area > areaMax
+                                                ? "rgba(17,24,39,0.55)"
+                                                : baseFill;
+
+                                        const onClick = () => deletePointById(payload.id);
+
+                                        if (isLatest) {
+                                            return (
+                                                <Diamond
+                                                    cx={cx}
+                                                    cy={cy}
+                                                    r={r}
+                                                    fill={fill}
+                                                    stroke="#ffffff"
+                                                    strokeWidth={1}
+                                                    onClick={onClick}
+                                                />
+                                            );
+                                        }
+
                                         return (
                                             <circle
                                                 cx={cx}
@@ -367,6 +788,11 @@ export default function App() {
                                                 fill={fill}
                                                 stroke="#ffffff"
                                                 strokeWidth={1}
+                                                onClick={onClick}
+                                                tabIndex={-1}
+                                                focusable="false"
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                style={{ cursor: "pointer" }}
                                             />
                                         );
                                     }}
@@ -375,11 +801,14 @@ export default function App() {
                         </ResponsiveContainer>
                     </div>
 
+                    {/* View rectangle */}
                     <form className="viewControls" onSubmit={applyView}>
                         <div className="viewTitle">View rectangle</div>
 
                         <label className="field compact">
-                            <span>delay max (≤ <TenPowNine />)</span>
+              <span>
+                delay max (≤ <TenPowNine />)
+              </span>
                             <input
                                 value={delayMaxDraft}
                                 onChange={(e) => setDelayMaxDraft(e.target.value)}
@@ -390,7 +819,9 @@ export default function App() {
                         </label>
 
                         <label className="field compact">
-                            <span>area max (≤ <TenPowNine />)</span>
+              <span>
+                area max (≤ <TenPowNine />)
+              </span>
                             <input
                                 value={areaMaxDraft}
                                 onChange={(e) => setAreaMaxDraft(e.target.value)}
@@ -410,33 +841,118 @@ export default function App() {
                     <section className="card">
                         <div className="cardHeader tight">
                             <div>
-                                <div className="cardTitle">Add a point</div>
+                                <div className="cardTitle">Filters</div>
                             </div>
                         </div>
 
-                        <form className="form" onSubmit={addPoint}>
+                        <div className="form">
                             <label className="field">
-                                <span>delay (0…<TenPowNine />)</span>
-                                <input
-                                    value={delayInput}
-                                    onChange={(e) => setDelayInput(e.target.value)}
-                                    placeholder="0..10^9"
-                                    inputMode="numeric"
-                                    className={!delayValid ? "bad" : ""}
-                                />
+                                <span>1) Benchmark</span>
+                                <select value={benchmarkFilter} onChange={(e) => setBenchmarkFilter(e.target.value)}>
+                                    <option value="test">test</option>
+                                    {availableBenchmarks.map((b) => (
+                                        <option key={b} value={String(b)}>
+                                            {b}
+                                        </option>
+                                    ))}
+                                </select>
                             </label>
 
                             <label className="field">
-                                <span>area (0…<TenPowNine />)</span>
-                                <input
-                                    value={areaInput}
-                                    onChange={(e) => setAreaInput(e.target.value)}
-                                    placeholder="0..10^9"
-                                    inputMode="numeric"
-                                    className={!areaValid ? "bad" : ""}
-                                />
+                                <span>2) Color by</span>
+                                <select value={colorMode} onChange={(e) => setColorMode(e.target.value)}>
+                                    <option value="status">Status</option>
+                                    <option value="user">User</option>
+                                </select>
                             </label>
 
+                            <div className="field">
+                                <span>3) Show statuses</span>
+                                <div className="checks">
+                                    <label className="check">
+                                        <input
+                                            type="checkbox"
+                                            checked={statusFilter["non-verified"]}
+                                            onChange={() => toggleStatus("non-verified")}
+                                        />
+                                        <span className="dot" style={{ background: statusColor("non-verified") }} />
+                                        <span>non-verified</span>
+                                    </label>
+
+                                    <label className="check">
+                                        <input
+                                            type="checkbox"
+                                            checked={statusFilter.verified}
+                                            onChange={() => toggleStatus("verified")}
+                                        />
+                                        <span className="dot" style={{ background: statusColor("verified") }} />
+                                        <span>verified</span>
+                                    </label>
+
+                                    <label className="check">
+                                        <input
+                                            type="checkbox"
+                                            checked={statusFilter.failed}
+                                            onChange={() => toggleStatus("failed")}
+                                        />
+                                        <span className="dot" style={{ background: statusColor("failed") }} />
+                                        <span>failed</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="card">
+                        <div className="cardHeader tight">
+                            <div>
+                                <div className="cardTitle">Add a point</div>
+
+                                <div className="cardHint">
+                                    <b>Expected file name pattern</b>:
+                                </div>
+
+                                <div className="cardHint">
+                  <span className="mono">
+                    bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}_{`{DESCRIPTION}`}_{`{SENDER}`}.bench
+                  </span>
+                                </div>
+
+                                <div className="cardHint">
+                                    Where:
+                                    <ul className="hintList">
+                                        <li>
+                                            <span className="mono">{`{BENCH}`}</span> is an integer from <b>200</b> to{" "}
+                                            <b>299</b>
+                                        </li>
+                                        <li>
+                                            <span className="mono">{`{DELAY}`}</span> and{" "}
+                                            <span className="mono">{`{AREA}`}</span> are integers (0..10^9)
+                                        </li>
+                                        <li>
+                                            <span className="mono">{`{DESCRIPTION}`}</span> and{" "}
+                                            <span className="mono">{`{SENDER}`}</span> contain only letters/digits/hyphen
+                                            (<span className="mono">A-Z a-z 0-9 -</span>)
+                                        </li>
+                                        <li>total file name length ≤ {MAX_FILENAME_LEN}</li>
+                                    </ul>
+                                </div>
+
+                                <div className="cardHint">
+                                    Example: <span className="mono">bench256_123_10000_test_command1.bench</span>
+                                </div>
+
+                                <div className="cardHint">
+                                    The latest added point is shown as a <b>diamond</b> on the chart.
+                                </div>
+
+                                <div className="cardHint">
+                                    The file is not saved anywhere — only the file name is parsed.
+                                </div>
+                            </div>
+                        </div>
+
+                        <form className="form" onSubmit={addPointFromFile}>
                             <label className="field">
                                 <span>file (.bench)</span>
                                 <input
@@ -444,12 +960,14 @@ export default function App() {
                                     type="file"
                                     accept=".bench"
                                     onChange={onFileChange}
-                                    className={benchFile && !fileIsValid ? "bad" : ""}
+                                    className={benchFile && !canAdd ? "bad" : ""}
                                 />
                             </label>
 
+                            {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
+
                             <button className="btn primary" type="submit" disabled={!canAdd}>
-                                Add
+                                Upload & create point
                             </button>
                         </form>
                     </section>
@@ -457,36 +975,68 @@ export default function App() {
                     <section className="card listCard">
                         <div className="cardHeader tight">
                             <div>
-                                <div className="cardTitle">Points</div>
+                                <div className="cardTitle">Delete points</div>
+                                <div className="cardHint">
+                                    Search by <b>file name prefix</b>. Shows exactly {DELETE_PREVIEW_LIMIT} slots.
+                                </div>
                             </div>
                         </div>
 
-                        {points.length === 0 ? (
-                            <div className="empty">No points yet.</div>
-                        ) : (
-                            <div className="list">
-                                {points.map((p, idx) => (
-                                    <div className="row" key={p.id}>
-                                        <div className="rowLeft">
-                                            <div className="badge">#{points.length - idx}</div>
-                                            <div className="mono">
-                                                delay=<b>{formatIntNoGrouping(p.delay)}</b>, area=<b>{formatIntNoGrouping(p.area)}</b>
-                                                {p.fileName ? (
-                                                    <>
-                                                        {" "}
-                                                        <span style={{ color: "#6b7280" }}>•</span>{" "}
-                                                        <span style={{ color: "#6b7280" }}>{p.fileName}</span>
-                                                    </>
-                                                ) : null}
-                                            </div>
+                        <div className="form">
+                            <label className="field">
+                                <span>file prefix</span>
+                                <input
+                                    value={deletePrefix}
+                                    onChange={(e) => setDeletePrefix(e.target.value)}
+                                    placeholder="e.g. bench256_123"
+                                />
+                            </label>
+                        </div>
+
+                        <div className="list compactList deleteListFixed">
+                            {deletePreview.map((p) => (
+                                <div className="row compactRow" key={p.id}>
+                                    <div className="compactMain">
+                                        <div className="compactTop">
+                                            <span className="pill subtle">by {p.sender}</span>
+                                            <span className="pill">name: {p.description}</span>
+                                            <span className="pill">
+                        <span className="dot" style={{ background: statusColor(p.status) }} />
+                                                {p.status}
+                      </span>
                                         </div>
-                                        <button className="btn danger" onClick={() => deletePoint(p.id)}>
-                                            Delete
-                                        </button>
+
+                                        <div className="compactBottom">
+                      <span className="mono">
+                        area=<b>{formatIntNoGrouping(p.area)}</b>
+                      </span>
+                                            <span className="mono">
+                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
+                      </span>
+                                            <span className="mono mutedMono">{p.fileName}</span>
+                                        </div>
                                     </div>
-                                ))}
+
+                                    <button className="btn danger small" onClick={() => deletePointById(p.id)}>
+                                        Delete
+                                    </button>
+                                </div>
+                            ))}
+
+                            {Array.from({ length: placeholdersCount }).map((_, i) => (
+                                <div className="row compactRow placeholderRow" key={`ph-${i}`}>
+                                    <div className="placeholderLine" />
+                                </div>
+                            ))}
+                        </div>
+
+                        {deleteMatches.length === 0 ? (
+                            <div className="empty">No points match this prefix.</div>
+                        ) : deleteHasMore ? (
+                            <div className="moreHint">
+                                Showing {deletePreview.length} of {deleteMatches.length} matches.
                             </div>
-                        )}
+                        ) : null}
                     </section>
                 </aside>
             </main>
