@@ -22,7 +22,7 @@ const BENCH_NAME_RE =
 const DELETE_PREVIEW_LIMIT = 3;
 
 const STATUS_LIST = ["non-verified", "verified", "failed"];
-const COMMAND_COUNT = 10;
+const COMMAND_COUNT = 15;
 
 // Brighter, more separated palette
 const USER_PALETTE = [
@@ -37,6 +37,30 @@ const USER_PALETTE = [
     "#1de9b6",
     "#f50057",
 ];
+
+// Static teams (commands) with GitHub-token-like keys.
+// Key format: key_<16 alphanumeric chars>
+const COMMANDS = [
+    { name: "command1", color: "#ff1744", key: "key_iK2ZWeqhFWCEPyYn" },
+    { name: "command2", color: "#ff9100", key: "key_9382dffx1kVZQ2tq" },
+    { name: "command3", color: "#ffea00", key: "key_pLIix6MEOLeMa61E" },
+    { name: "command4", color: "#00e676", key: "key_ptgUzEjfebzJ6sZW" },
+    { name: "command5", color: "#00e5ff", key: "key_NqVwYS81VP7Hb1DX" },
+    { name: "command6", color: "#2979ff", key: "key_YK0fFWqcajQLE9WV" },
+    { name: "command7", color: "#651fff", key: "key_u8jzPde0IgxLd6Gn" },
+    { name: "command8", color: "#d500f9", key: "key_ox9yimTcfipZGnzP" },
+    { name: "command9", color: "#1de9b6", key: "key_DNxril3RavGD5Mfv" },
+    { name: "command10", color: "#f50057", key: "key_KcBEKanD0F0rPZkc" },
+    { name: "command11", color: "#22c55e", key: "key_C3J27XDCG2LmlZGE" },
+    { name: "command12", color: "#e11d48", key: "key_ErQHQwjyaxErPZDS" },
+    { name: "command13", color: "#0ea5e9", key: "key_qsR6RZ24lPoQj3oP" },
+    { name: "command14", color: "#a855f7", key: "key_gNSWPH8prVqsUeQC" },
+    { name: "command15", color: "#14b8a6", key: "key_9naHVck6pbd4ZRj2" },
+];
+
+const COMMAND_BY_KEY = new Map(COMMANDS.map((c) => [c.key, c]));
+const COMMAND_BY_NAME = new Map(COMMANDS.map((c) => [c.name, c]));
+
 
 function uid() {
     return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -103,6 +127,24 @@ function userColor(sender) {
     const idx = hashString(sender || "unknown") % USER_PALETTE.length;
     return USER_PALETTE[idx];
 }
+
+
+function commandColor(sender) {
+    // If this is a test sender like "test_command7", map it to "command7" colors.
+    const s = String(sender || "");
+    const testMatch = s.match(/^test_command(\d+)$/);
+    if (testMatch) {
+        const mapped = `command${testMatch[1]}`;
+        const mappedCmd = COMMAND_BY_NAME.get(mapped);
+        if (mappedCmd) return mappedCmd.color;
+        return userColor(mapped);
+    }
+
+    const cmd = COMMAND_BY_NAME.get(s);
+    if (cmd) return cmd.color;
+    return userColor(s);
+}
+
 
 function parseBenchFileName(fileNameRaw) {
     const fileName = (fileNameRaw || "").trim();
@@ -312,6 +354,48 @@ export default function App() {
     const [points, setPoints] = useState(() => []);
     const [lastAddedId, setLastAddedId] = useState(null);
 
+    // Simple access gate: user enters a command key before using the site.
+    // We keep the key in localStorage so the user does not need to re-enter it each time.
+    const [authKeyDraft, setAuthKeyDraft] = useState(() => localStorage.getItem("bench_auth_key") || "");
+    const [currentCommand, setCurrentCommand] = useState(() => {
+        const saved = localStorage.getItem("bench_auth_key") || "";
+        return COMMAND_BY_KEY.get(saved) || null;
+    });
+    const [authError, setAuthError] = useState("");
+
+    function tryLogin(e) {
+        e.preventDefault();
+        const k = authKeyDraft.trim();
+        const cmd = COMMAND_BY_KEY.get(k) || null;
+        if (!cmd) {
+            setAuthError("Invalid key.");
+            return;
+        }
+        localStorage.setItem("bench_auth_key", k);
+        setCurrentCommand(cmd);
+        setAuthError("");
+    }
+
+    function logout() {
+        localStorage.removeItem("bench_auth_key");
+        setCurrentCommand(null);
+        setAuthKeyDraft("");
+        setAuthError("");
+    }
+
+    // Command filter (Codeforces-like tag chips). If none selected -> show all.
+    const [commandQuery, setCommandQuery] = useState("");
+    const [selectedCommands, setSelectedCommands] = useState(() => []);
+    const selectedCommandSet = useMemo(() => new Set(selectedCommands), [selectedCommands]);
+
+    function addSelectedCommand(name) {
+        setSelectedCommands((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    }
+
+    function removeSelectedCommand(name) {
+        setSelectedCommands((prev) => prev.filter((x) => x !== name));
+    }
+
     // Upload (we DO NOT store the file itself)
     const [benchFile, setBenchFile] = useState(null);
     const [uploadError, setUploadError] = useState(" ");
@@ -374,6 +458,23 @@ export default function App() {
         return Array.from(numeric).sort((a, b) => a - b);
     }, [points]);
 
+    // Commands shown in the "Users" picker:
+    // show ONLY senders that have at least one point in the currently selected benchmark.
+    // (If benchmark is "test" -> only test points; otherwise only that numeric benchmark.)
+    const availableCommandNames = useMemo(() => {
+        const set = new Set();
+        for (const p of points) {
+            if (benchmarkFilter === "test") {
+                if (p.benchmark === "test") set.add(p.sender);
+            } else {
+                if (String(p.benchmark) === String(benchmarkFilter)) set.add(p.sender);
+            }
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [points, benchmarkFilter]);
+
+
+
     // Visible points = benchmark filter + status filter (NOT dependent on view rectangle)
     const visiblePoints = useMemo(() => {
         return points.filter((p) => {
@@ -383,9 +484,10 @@ export default function App() {
                 if (String(p.benchmark) !== String(benchmarkFilter)) return false;
             }
             if (!statusFilter[p.status]) return false;
+            if (selectedCommands.length > 0 && !selectedCommandSet.has(p.sender)) return false;
             return true;
         });
-    }, [points, benchmarkFilter, statusFilter]);
+    }, [points, benchmarkFilter, statusFilter, selectedCommands, selectedCommandSet]);
 
     // Pareto computed ONLY from visible points (does NOT depend on view rectangle)
     const paretoBase = useMemo(() => {
@@ -532,10 +634,10 @@ export default function App() {
             }
 
             const cmdNum = randInt(1, COMMAND_COUNT);
-            const sender = `command${cmdNum}`;
+            const sender = `test_command${cmdNum}`;
             const status = randomChoice(STATUS_LIST);
             const description = `point${i}`;
-            const fileName = `test_${delay}_${area}_points${i}_command${cmdNum}.bench`;
+            const fileName = `test_${delay}_${area}_points${i}_test_command${cmdNum}.bench`;
 
             const id = uid();
             newestId = id;
@@ -636,6 +738,40 @@ export default function App() {
     const placeholdersCount = Math.max(0, DELETE_PREVIEW_LIMIT - deletePreview.length);
     const deleteHasMore = deleteMatches.length > deletePreview.length;
 
+
+    if (!currentCommand) {
+        return (
+            <div className="loginPage">
+                <div className="loginCard card">
+                    <div className="cardHeader">
+                        <div>
+                            <div className="cardTitle">Access key required</div>
+                            <div className="cardHint">Enter your team key to open the site.</div>
+                        </div>
+                    </div>
+
+                    <form className="form" onSubmit={tryLogin}>
+                        <label className="field">
+                            <span>Key</span>
+                            <input
+                                value={authKeyDraft}
+                                onChange={(e) => setAuthKeyDraft(e.target.value)}
+                                placeholder="key_XXXXXXXXXXXXXXXX"
+                                autoFocus
+                            />
+                        </label>
+
+                        {authError ? <div className="error">{authError}</div> : null}
+
+                        <button className="btn primary" type="submit">
+                            Enter
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
     const isTestBenchSelected = benchmarkFilter === "test";
 
     return (
@@ -644,6 +780,18 @@ export default function App() {
                 <div className="brand">
                     <div className="title">Bench points</div>
                     <div className="subtitle">Upload .bench files → points are created automatically</div>
+                </div>
+
+                <div className="topbarRight">
+                    <div className="hello">
+                        <span>Hello,</span>
+                        <b className="helloName">{currentCommand.name}</b>
+                        <span>!</span>
+                    </div>
+                    <span className="dot" style={{ background: currentCommand.color }} />
+                    <button className="btn ghost small" type="button" onClick={logout}>
+                        Log out
+                    </button>
                 </div>
             </header>
 
@@ -752,7 +900,7 @@ export default function App() {
                                         const { cx, cy, payload } = props;
 
                                         const baseFill =
-                                            colorMode === "user" ? userColor(payload.sender) : statusColor(payload.status);
+                                            colorMode === "users" ? commandColor(payload.sender) : statusColor(payload.status);
 
                                         const isLatest = payload.id === lastAddedId;
 
@@ -862,42 +1010,124 @@ export default function App() {
                                 <span>2) Color by</span>
                                 <select value={colorMode} onChange={(e) => setColorMode(e.target.value)}>
                                     <option value="status">Status</option>
-                                    <option value="user">User</option>
+                                    <option value="users">Users</option>
                                 </select>
                             </label>
 
                             <div className="field">
                                 <span>3) Show statuses</span>
-                                <div className="checks">
-                                    <label className="check">
-                                        <input
-                                            type="checkbox"
-                                            checked={statusFilter["non-verified"]}
-                                            onChange={() => toggleStatus("non-verified")}
-                                        />
-                                        <span className="dot" style={{ background: statusColor("non-verified") }} />
-                                        <span>non-verified</span>
-                                    </label>
 
-                                    <label className="check">
-                                        <input
-                                            type="checkbox"
-                                            checked={statusFilter.verified}
-                                            onChange={() => toggleStatus("verified")}
-                                        />
-                                        <span className="dot" style={{ background: statusColor("verified") }} />
-                                        <span>verified</span>
-                                    </label>
+                                <div className={colorMode === "users" ? "statusUsersRow" : undefined}>
+                                    {colorMode === "users" ? (
+                                        <div className="userPicker">
+                                            <div className="userPickerTitle">Commands</div>
 
-                                    <label className="check">
-                                        <input
-                                            type="checkbox"
-                                            checked={statusFilter.failed}
-                                            onChange={() => toggleStatus("failed")}
-                                        />
-                                        <span className="dot" style={{ background: statusColor("failed") }} />
-                                        <span>failed</span>
-                                    </label>
+                                            <input
+                                                value={commandQuery}
+                                                onChange={(e) => setCommandQuery(e.target.value)}
+                                                placeholder="Search by prefix…"
+                                            />
+
+                                            <div className="userList">
+                                                {availableCommandNames
+                                                    .filter((name) => {
+                                                        const q = commandQuery.trim().toLowerCase();
+                                                        if (!q) return true;
+                                                        return name.toLowerCase().startsWith(q);
+                                                    })
+                                                    .map((name) => {
+                                                        const col = commandColor(name);
+                                                        return (
+                                                            <button
+                                                                key={name}
+                                                                className="userItem"
+                                                                type="button"
+                                                                onClick={() => addSelectedCommand(name)}
+                                                                disabled={selectedCommandSet.has(name)}
+                                                                title={selectedCommandSet.has(name) ? "Already selected" : "Add"}
+                                                            >
+                                                                <span className="dot" style={{ background: col }} />
+                                                                <span className="userItemName">{name}</span>
+                                                            </button>
+                                                        );
+                                                    })}</div>
+
+                                            <div className="viewingBar">
+                                                <div className="viewingTitle">
+                                                    Viewing{" "}
+                                                    {selectedCommands.length > 0
+                                                        ? `${selectedCommands.length} command${selectedCommands.length === 1 ? "" : "s"}`
+                                                        : "all commands"}
+                                                </div>
+
+                                                <div className="chipsRow">
+                                                    {selectedCommands.length === 0 ? (
+                                                        <div className="mutedSmall">
+                                                            No commands selected — showing all.
+                                                        </div>
+                                                    ) : (
+                                                        selectedCommands.map((name) => {
+                                                            const c = COMMAND_BY_NAME.get(name);
+                                                            const col = c ? c.color : commandColor(name);
+                                                            return (
+                                                                <span key={name} className="tagChip">
+                                                                    <span className="dot" style={{ background: col }} />
+                                                                    <span className="tagChipText">{name}</span>
+                                                                    <button
+                                                                        className="tagChipX"
+                                                                        type="button"
+                                                                        onClick={() => removeSelectedCommand(name)}
+                                                                        aria-label={"Remove " + name}
+                                                                        title="Remove"
+                                                                    >
+                                                                        ×
+                                                                    </button>
+                                                                </span>
+                                                            );
+                                                        })
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : null}
+
+                                    <div className={colorMode === "users" ? "checks noDots" : "checks"}>
+                                        <label className="check">
+                                            <input
+                                                type="checkbox"
+                                                checked={statusFilter["non-verified"]}
+                                                onChange={() => toggleStatus("non-verified")}
+                                            />
+                                            {colorMode !== "users" ? (
+                                                <span className="dot" style={{ background: statusColor("non-verified") }} />
+                                            ) : null}
+                                            <span>non-verified</span>
+                                        </label>
+
+                                        <label className="check">
+                                            <input
+                                                type="checkbox"
+                                                checked={statusFilter.verified}
+                                                onChange={() => toggleStatus("verified")}
+                                            />
+                                            {colorMode !== "users" ? (
+                                                <span className="dot" style={{ background: statusColor("verified") }} />
+                                            ) : null}
+                                            <span>verified</span>
+                                        </label>
+
+                                        <label className="check">
+                                            <input
+                                                type="checkbox"
+                                                checked={statusFilter.failed}
+                                                onChange={() => toggleStatus("failed")}
+                                            />
+                                            {colorMode !== "users" ? (
+                                                <span className="dot" style={{ background: statusColor("failed") }} />
+                                            ) : null}
+                                            <span>failed</span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
