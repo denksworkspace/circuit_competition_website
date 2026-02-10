@@ -20,13 +20,14 @@ function normalizePoint(row) {
         sender: row.sender,
         fileName: row.file_name,
         status: row.status,
+        checkerVersion: row.checker_version ?? null,
     };
 }
 
 export default async function handler(req, res) {
     if (req.method === "GET") {
         const { rows } = await sql`
-      select id, benchmark, delay, area, description, sender, file_name, status
+      select id, benchmark, delay, area, description, sender, file_name, status, checker_version
       from points
       order by created_at desc
     `;
@@ -46,6 +47,7 @@ export default async function handler(req, res) {
             fileName,
             status,
             authKey,
+            checkerVersion,
         } = body || {};
 
         if (!authKey) {
@@ -86,9 +88,9 @@ export default async function handler(req, res) {
 
         try {
             const insert = await sql`
-        insert into points (id, benchmark, delay, area, description, sender, file_name, status, command_id)
-        values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${description}, ${sender}, ${fileName}, ${st}, ${command.id})
-        returning id, benchmark, delay, area, description, sender, file_name, status
+        insert into points (id, benchmark, delay, area, description, sender, file_name, status, checker_version, command_id)
+        values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${description}, ${sender}, ${fileName}, ${st}, ${checkerVersion ?? null}, ${command.id})
+        returning id, benchmark, delay, area, description, sender, file_name, status, checker_version
       `;
             res.status(201).json({ point: normalizePoint(insert.rows[0]) });
             return;

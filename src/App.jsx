@@ -526,6 +526,11 @@ export default function App() {
         return clamp(longest * 8 + 18, 52, 160);
     }, [areaMax, areaOverflowLane]);
 
+    const myPoints = useMemo(() => {
+        if (!currentCommand) return [];
+        return points.filter((p) => p.sender === currentCommand.name);
+    }, [points, currentCommand]);
+
     async function fetchPoints() {
         const res = await fetch("/api/points");
         if (!res.ok) {
@@ -611,6 +616,7 @@ export default function App() {
             sender: parsed.sender,
             fileName: parsed.fileName,
             status: "non-verified",
+            checkerVersion: null,
         };
 
         const res = await fetch("/api/points", {
@@ -737,18 +743,42 @@ export default function App() {
         setAreaMax(aMax);
     }
 
-    function resetView() {
-        if (benchmarkFilter === "test") {
-            setDelayMax(50);
-            setAreaMax(1000);
-            setDelayMaxDraft("50");
-            setAreaMaxDraft("1000");
-            return;
+    function downloadBenchmarksExcel() {
+        const rows = points.filter((p) => p.benchmark !== "test");
+        const header = ["Benchmark", "Delay", "Area", "Status", "CheckerVersion", "Sender"];
+        const lines = [header];
+        for (const p of rows) {
+            const checkerVersion = p.status === "non-verified" ? "null" : (p.checkerVersion || "");
+            lines.push([
+                String(p.benchmark),
+                String(p.delay),
+                String(p.area),
+                String(p.status),
+                checkerVersion,
+                String(p.sender),
+            ]);
         }
-        setDelayMax(10);
-        setAreaMax(10);
-        setDelayMaxDraft("10");
-        setAreaMaxDraft("10");
+        const csv = lines
+            .map((row) =>
+                row
+                    .map((cell) => {
+                        const s = String(cell ?? "");
+                        if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+                        return s;
+                    })
+                    .join(",")
+            )
+            .join("\n");
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "benchmarks.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
     }
 
     const delayViewValid =
@@ -881,8 +911,8 @@ export default function App() {
                                 </>
                             ) : null}
 
-                            <button className="btn ghost" onClick={resetView}>
-                                Reset view
+                            <button className="btn ghost" onClick={downloadBenchmarksExcel}>
+                                Export benchmarks (Excel)
                             </button>
                         </div>
                     </div>
@@ -1045,6 +1075,36 @@ export default function App() {
                             Apply
                         </button>
                     </form>
+
+                    <div className="list compactList">
+                        {myPoints.length === 0 ? (
+                            <div className="empty">No points from your command.</div>
+                        ) : (
+                            myPoints.map((p) => (
+                                <div className="row compactRow" key={p.id}>
+                                    <div className="compactMain">
+                                        <div className="compactTop">
+                                            <span className="pill subtle">id: {p.id}</span>
+                                            <span className="pill">benchmark: {p.benchmark}</span>
+                                            <span className="pill">
+                        <span className="dot" style={{ background: statusColor(p.status) }} />
+                                                {p.status}
+                      </span>
+                                        </div>
+
+                                        <div className="compactBottom">
+                      <span className="mono">
+                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
+                      </span>
+                                            <span className="mono">
+                        area=<b>{formatIntNoGrouping(p.area)}</b>
+                      </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </section>
 
                 <aside className="side">

@@ -17,6 +17,7 @@ create table if not exists points (
                                       sender text not null, -- parsed from filename (must match command.name)
                                       file_name text not null unique,
                                       status text not null check (status in ('non-verified','verified','failed')),
+                                      checker_version text null,
     command_id bigint not null references commands(id) on delete restrict,
     created_at timestamptz not null default now()
     );
