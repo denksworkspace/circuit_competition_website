@@ -526,6 +526,33 @@ export default function App() {
         return clamp(longest * 8 + 18, 52, 160);
     }, [areaMax, areaOverflowLane]);
 
+    async function fetchPoints() {
+        const res = await fetch("/api/points");
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            const msg = data?.error || "Failed to load points.";
+            throw new Error(msg);
+        }
+        const data = await res.json();
+        return Array.isArray(data.points) ? data.points : [];
+    }
+
+    useEffect(() => {
+        let alive = true;
+        fetchPoints()
+            .then((rows) => {
+                if (!alive) return;
+                setPoints(rows);
+            })
+            .catch((e) => {
+                if (!alive) return;
+                console.error(e);
+            });
+        return () => {
+            alive = false;
+        };
+    }, []);
+
     function clearFileInput() {
         setBenchFile(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -554,7 +581,7 @@ export default function App() {
         setUploadError(" ");
     }
 
-    function addPointFromFile(e) {
+    async function addPointFromFile(e) {
         e.preventDefault();
         if (!benchFile) return;
 
@@ -570,6 +597,11 @@ export default function App() {
             return;
         }
 
+        if (parsed.sender !== currentCommand.name) {
+            setUploadError("Sender in file name must match your command.");
+            return;
+        }
+
         const point = {
             id: uid(),
             benchmark: parsed.benchmark,
@@ -581,20 +613,50 @@ export default function App() {
             status: "non-verified",
         };
 
-        setPoints((prev) => [point, ...prev]);
-        setLastAddedId(point.id);
+        const res = await fetch("/api/points", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...point, authKey: authKeyDraft }),
+        });
 
-        // switch to that benchmark
-        setBenchmarkFilter(String(parsed.benchmark));
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            setUploadError(data?.error || "Failed to save point.");
+            return;
+        }
 
+        const data = await res.json();
+        const saved = data?.point || point;
+
+        setPoints((prev) => [saved, ...prev]);
+        setLastAddedId(saved.id);
+        setBenchmarkFilter(String(saved.benchmark));
         setUploadError(" ");
         clearFileInput();
     }
 
-    function deletePointById(id) {
+    async function deletePointById(id) {
         const p = points.find((x) => x.id === id);
         const label = p ? `${p.fileName}` : "this point";
         if (!window.confirm(`Delete ${label}?`)) return;
+
+        if (p?.benchmark === "test") {
+            setPoints((prev) => prev.filter((x) => x.id !== id));
+            if (lastAddedId === id) setLastAddedId(null);
+            return;
+        }
+
+        const res = await fetch("/api/points", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, authKey: authKeyDraft }),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            window.alert(data?.error || "Failed to delete point.");
+            return;
+        }
 
         setPoints((prev) => prev.filter((x) => x.id !== id));
         if (lastAddedId === id) setLastAddedId(null);
