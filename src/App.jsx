@@ -830,6 +830,17 @@ export default function App() {
     const placeholdersCount = Math.max(0, DELETE_PREVIEW_LIMIT - deletePreview.length);
     const deleteHasMore = deleteMatches.length > deletePreview.length;
 
+    const [sentPage, setSentPage] = useState(1);
+    const sentPageSize = 5;
+    const sentTotalPages = Math.max(1, Math.ceil(myPoints.length / sentPageSize));
+    const sentPageClamped = clamp(sentPage, 1, sentTotalPages);
+    const sentStart = (sentPageClamped - 1) * sentPageSize;
+    const sentPageItems = myPoints.slice(sentStart, sentStart + sentPageSize);
+
+    useEffect(() => {
+        setSentPage(1);
+    }, [myPoints.length]);
+
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
@@ -1080,6 +1091,65 @@ export default function App() {
                             Apply
                         </button>
                     </form>
+
+                    <div className="cardHeader tight">
+                        <div>
+                            <div className="cardTitle">Sended points</div>
+                        </div>
+                    </div>
+
+                    <div className="list compactList">
+                        {myPoints.length === 0 ? (
+                            <div className="empty">No points from your command.</div>
+                        ) : (
+                            sentPageItems.map((p) => (
+                                <div className="row compactRow" key={p.id}>
+                                    <div className="compactMain">
+                                        <div className="compactTop">
+                                            <span className="pill subtle">id: {p.id}</span>
+                                            <span className="pill">benchmark: {p.benchmark}</span>
+                                            <span className="pill">
+                        <span className="dot" style={{ background: statusColor(p.status) }} />
+                                                {p.status}
+                      </span>
+                                        </div>
+
+                                        <div className="compactBottom">
+                      <span className="mono">
+                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
+                      </span>
+                                            <span className="mono">
+                        area=<b>{formatIntNoGrouping(p.area)}</b>
+                      </span>
+                                        </div>
+                                    </div>
+
+                                    <button className="btn ghost small" onClick={() => focusPoint(p)}>
+                                        Find
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    {myPoints.length > 0 ? (
+                        <div className="chipsRow">
+                            {Array.from({ length: sentTotalPages }).map((_, i) => {
+                                const page = i + 1;
+                                const isActive = page === sentPageClamped;
+                                return (
+                                    <button
+                                        key={page}
+                                        className={isActive ? "tagChip" : "btn ghost small"}
+                                        type="button"
+                                        onClick={() => setSentPage(page)}
+                                    >
+                                        {page}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : null}
                 </section>
 
                 <aside className="side">
@@ -1322,7 +1392,7 @@ export default function App() {
 
                         <div className="list compactList deleteListFixed">
                             {deletePreview.map((p) => (
-                                <div className="row compactRow" key={p.id} onClick={() => focusPoint(p)}>
+                                <div className="row compactRow" key={p.id}>
                                     <div className="compactMain">
                                         <div className="compactTop">
                                             <span className="pill subtle">by {p.sender}</span>
@@ -1344,6 +1414,9 @@ export default function App() {
                                         </div>
                                     </div>
 
+                                    <button className="btn ghost small" onClick={() => focusPoint(p)}>
+                                        Find
+                                    </button>
                                     <button
                                         className="btn danger small"
                                         onClick={(e) => {
@@ -1370,44 +1443,6 @@ export default function App() {
                                 Showing {deletePreview.length} of {deleteMatches.length} matches.
                             </div>
                         ) : null}
-                    </section>
-
-                    <section className="card listCard">
-                        <div className="cardHeader tight">
-                            <div>
-                                <div className="cardTitle">Sended points</div>
-                            </div>
-                        </div>
-
-                        <div className="list compactList">
-                            {myPoints.length === 0 ? (
-                                <div className="empty">No points from your command.</div>
-                            ) : (
-                                myPoints.map((p) => (
-                                    <div className="row compactRow" key={p.id} onClick={() => focusPoint(p)}>
-                                        <div className="compactMain">
-                                            <div className="compactTop">
-                                                <span className="pill subtle">id: {p.id}</span>
-                                                <span className="pill">benchmark: {p.benchmark}</span>
-                                                <span className="pill">
-                        <span className="dot" style={{ background: statusColor(p.status) }} />
-                                                    {p.status}
-                      </span>
-                                            </div>
-
-                                            <div className="compactBottom">
-                      <span className="mono">
-                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
-                      </span>
-                                                <span className="mono">
-                        area=<b>{formatIntNoGrouping(p.area)}</b>
-                      </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
                     </section>
                 </aside>
             </main>
