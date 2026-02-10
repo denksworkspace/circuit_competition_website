@@ -148,6 +148,12 @@ svg *:focus {
     gap: 14px;
 }
 
+.leftCol {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
 .form {
     padding: 0 14px 14px;
     display: grid;
@@ -699,6 +705,48 @@ input.bad {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.sentPagerNumbers {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 4px 0 10px 14px;
+}
+
+.pagerNum {
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 12px;
+    padding: 2px 4px;
+    cursor: pointer;
+}
+
+.pagerNum.active {
+    color: #111827;
+    font-weight: 700;
+}
+
+.pagerEllipsis {
+    color: #9ca3af;
+    font-size: 12px;
+    padding: 2px 4px;
+}
+
+.sentActions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    min-width: 120px;
+}
+
+.sentSubmission {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 700;
 }
 
 .tagChip {
