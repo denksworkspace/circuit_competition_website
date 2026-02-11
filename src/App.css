@@ -785,3 +785,61 @@ input.bad {
     font-size: 12px;
     color: var(--muted);
 }
+
+.pointModalBackdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.32);
+    display: grid;
+    place-items: center;
+    z-index: 60;
+    padding: 16px;
+}
+
+.pointModal {
+    width: min(360px, 100%);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+}
+
+.pointModalTitle {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+
+.pointModalFile {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pointModalActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.navigateToast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 70;
+    max-width: min(540px, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+    box-shadow: var(--shadow);
+    color: var(--text);
+    font-size: 12px;
+}

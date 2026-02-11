@@ -1,5 +1,8 @@
 import { sql } from "@vercel/postgres";
 
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_DESCRIPTION_LEN = 200;
+
 function parseBody(req) {
     if (req.body && typeof req.body === "object") return req.body;
     if (!req.body) return {};
@@ -8,6 +11,27 @@ function parseBody(req) {
     } catch {
         return {};
     }
+}
+
+function normalizeCloudFrontDomain(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) return "";
+    return trimmed.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
+const CLOUDFRONT_DOMAIN = normalizeCloudFrontDomain(process.env.CLOUDFRONT_DOMAIN);
+
+function buildObjectKey(fileName) {
+    return `points/${fileName}`;
+}
+
+function buildDownloadUrl(fileName) {
+    if (!CLOUDFRONT_DOMAIN || !fileName) return null;
+    const encodedKey = buildObjectKey(fileName)
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+    return `https://${CLOUDFRONT_DOMAIN}/${encodedKey}`;
 }
 
 function normalizePoint(row) {
@@ -21,6 +45,8 @@ function normalizePoint(row) {
         fileName: row.file_name,
         status: row.status,
         checkerVersion: row.checker_version ?? null,
+        fileKey: buildObjectKey(row.file_name),
+        downloadUrl: buildDownloadUrl(row.file_name),
     };
 }
 
@@ -43,11 +69,11 @@ export default async function handler(req, res) {
             delay,
             area,
             description,
-            sender,
             fileName,
             status,
             authKey,
             checkerVersion,
+            fileSize,
         } = body || {};
 
         if (!authKey) {
@@ -62,10 +88,6 @@ export default async function handler(req, res) {
         }
 
         const command = cmdRes.rows[0];
-        if (sender !== command.name) {
-            res.status(403).json({ error: "Sender must match your command." });
-            return;
-        }
 
         if (
             !id ||
@@ -73,10 +95,29 @@ export default async function handler(req, res) {
             typeof delay !== "number" ||
             typeof area !== "number" ||
             !description ||
-            !sender ||
             !fileName
         ) {
             res.status(400).json({ error: "Invalid payload." });
+            return;
+        }
+
+        const descriptionTrimmed = String(description).trim();
+        if (!descriptionTrimmed) {
+            res.status(400).json({ error: "Description is required." });
+            return;
+        }
+        if (descriptionTrimmed.length > MAX_DESCRIPTION_LEN) {
+            res.status(400).json({ error: `Description is too long. Maximum length is ${MAX_DESCRIPTION_LEN}.` });
+            return;
+        }
+
+        if (typeof fileSize !== "number" || !Number.isFinite(fileSize) || fileSize < 0) {
+            res.status(400).json({ error: "Invalid file size." });
+            return;
+        }
+
+        if (fileSize > MAX_UPLOAD_BYTES) {
+            res.status(413).json({ error: "File is too large. Maximum size is 500 MB." });
             return;
         }
 
@@ -89,7 +130,7 @@ export default async function handler(req, res) {
         try {
             const insert = await sql`
         insert into points (id, benchmark, delay, area, description, sender, file_name, status, checker_version, command_id)
-        values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${description}, ${sender}, ${fileName}, ${st}, ${checkerVersion ?? null}, ${command.id})
+        values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${st}, ${checkerVersion ?? null}, ${command.id})
         returning id, benchmark, delay, area, description, sender, file_name, status, checker_version
       `;
             res.status(201).json({ point: normalizePoint(insert.rows[0]) });

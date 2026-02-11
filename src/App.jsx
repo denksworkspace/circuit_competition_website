@@ -13,16 +13,17 @@ import {
 
 const MAX_VALUE = 1_000_000_000; // 10^9
 const DIVISIONS = 10;
-const MAX_FILENAME_LEN = 80;
+const MAX_INPUT_FILENAME_LEN = 80;
+const MAX_DESCRIPTION_LEN = 200;
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
-// bench[200-299]_[delay]_[area]_[description]_[sender].bench
-const BENCH_NAME_RE =
-    /^bench(2\d\d)_(\d+)_(\d+)_([A-Za-z0-9-]+)_([A-Za-z0-9-]+)\.bench$/;
+// bench[200-299]_[delay]_[area][.bench]
+const BENCH_INPUT_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)(?:\.bench)?$/;
 
 const DELETE_PREVIEW_LIMIT = 3;
 
 const STATUS_LIST = ["non-verified", "verified", "failed"];
-const COMMAND_COUNT = 15;
+const DEFAULT_TEST_COMMAND_COUNT = 15;
 
 // Brighter, more separated palette
 const USER_PALETTE = [
@@ -37,30 +38,6 @@ const USER_PALETTE = [
     "#1de9b6",
     "#f50057",
 ];
-
-// Static teams (commands) with GitHub-token-like keys.
-// Key format: key_<16 alphanumeric chars>
-const COMMANDS = [
-    { name: "command1", color: "#ff1744", key: "key_iK2ZWeqhFWCEPyYn" },
-    { name: "command2", color: "#ff9100", key: "key_9382dffx1kVZQ2tq" },
-    { name: "command3", color: "#ffea00", key: "key_pLIix6MEOLeMa61E" },
-    { name: "command4", color: "#00e676", key: "key_ptgUzEjfebzJ6sZW" },
-    { name: "command5", color: "#00e5ff", key: "key_NqVwYS81VP7Hb1DX" },
-    { name: "command6", color: "#2979ff", key: "key_YK0fFWqcajQLE9WV" },
-    { name: "command7", color: "#651fff", key: "key_u8jzPde0IgxLd6Gn" },
-    { name: "command8", color: "#d500f9", key: "key_ox9yimTcfipZGnzP" },
-    { name: "command9", color: "#1de9b6", key: "key_DNxril3RavGD5Mfv" },
-    { name: "command10", color: "#f50057", key: "key_KcBEKanD0F0rPZkc" },
-    { name: "command11", color: "#22c55e", key: "key_C3J27XDCG2LmlZGE" },
-    { name: "command12", color: "#e11d48", key: "key_ErQHQwjyaxErPZDS" },
-    { name: "command13", color: "#0ea5e9", key: "key_qsR6RZ24lPoQj3oP" },
-    { name: "command14", color: "#a855f7", key: "key_gNSWPH8prVqsUeQC" },
-    { name: "command15", color: "#14b8a6", key: "key_9naHVck6pbd4ZRj2" },
-];
-
-const COMMAND_BY_KEY = new Map(COMMANDS.map((c) => [c.key, c]));
-const COMMAND_BY_NAME = new Map(COMMANDS.map((c) => [c.name, c]));
-
 
 function uid() {
     return Math.random().toString(16).slice(2) + Date.now().toString(16);
@@ -129,47 +106,56 @@ function userColor(sender) {
 }
 
 
-function commandColor(sender) {
+function commandColor(sender, commandByName) {
     // If this is a test sender like "test_command7", map it to "command7" colors.
     const s = String(sender || "");
     const testMatch = s.match(/^test_command(\d+)$/);
     if (testMatch) {
         const mapped = `command${testMatch[1]}`;
-        const mappedCmd = COMMAND_BY_NAME.get(mapped);
+        const mappedCmd = commandByName.get(mapped);
         if (mappedCmd) return mappedCmd.color;
         return userColor(mapped);
     }
 
-    const cmd = COMMAND_BY_NAME.get(s);
+    const cmd = commandByName.get(s);
     if (cmd) return cmd.color;
     return userColor(s);
 }
 
+function sanitizeFileToken(value) {
+    return String(value || "")
+        .trim()
+        .replace(/[^A-Za-z0-9-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "") || "x";
+}
+
+function buildStoredFileName({ benchmark, delay, area, pointId, sender }) {
+    return `bench${benchmark}_${delay}_${area}_${sanitizeFileToken(sender)}_${sanitizeFileToken(pointId)}.bench`;
+}
 
 function parseBenchFileName(fileNameRaw) {
     const fileName = (fileNameRaw || "").trim();
     if (!fileName) return { ok: false, error: "Empty file name." };
-    if (fileName.length > MAX_FILENAME_LEN) {
+    if (fileName.length > MAX_INPUT_FILENAME_LEN) {
         return {
             ok: false,
-            error: `File name is too long (max ${MAX_FILENAME_LEN}).`,
+            error: `File name is too long (max ${MAX_INPUT_FILENAME_LEN}).`,
         };
     }
 
-    const m = fileName.match(BENCH_NAME_RE);
+    const m = fileName.match(BENCH_INPUT_NAME_RE);
     if (!m) {
         return {
             ok: false,
             error:
-                "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>_<description>_<sender>.bench",
+                "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>[.bench]",
         };
     }
 
     const benchmark = Number(m[1]);
     const delay = Number(m[2]);
     const area = Number(m[3]);
-    const description = m[4];
-    const sender = m[5];
 
     if (!Number.isSafeInteger(benchmark) || benchmark < 200 || benchmark > 299) {
         return { ok: false, error: "Benchmark must be in [200..299]." };
@@ -186,9 +172,6 @@ function parseBenchFileName(fileNameRaw) {
         benchmark,
         delay,
         area,
-        description,
-        sender,
-        fileName,
     };
 }
 
@@ -214,6 +197,10 @@ function CustomTooltip({ active, payload }) {
             <div className="tooltipRow">
                 <span className="tooltipKey">status:</span>
                 <span className="tooltipVal">{p.status}</span>
+            </div>
+            <div className="tooltipRow">
+                <span className="tooltipKey">checker:</span>
+                <span className="tooltipVal">{p.checkerVersion || "null"}</span>
             </div>
 
             <div className="tooltipRow">
@@ -353,27 +340,57 @@ function chooseAreaSmartFromParetoFront(frontPoints, newDelay) {
 export default function App() {
     const [points, setPoints] = useState(() => []);
     const [lastAddedId, setLastAddedId] = useState(null);
+    const [commands, setCommands] = useState(() => []);
+    const commandByName = useMemo(() => new Map(commands.map((c) => [c.name, c])), [commands]);
 
-    // Simple access gate: user enters a command key before using the site.
-    // We keep the key in localStorage so the user does not need to re-enter it each time.
     const [authKeyDraft, setAuthKeyDraft] = useState(() => localStorage.getItem("bench_auth_key") || "");
-    const [currentCommand, setCurrentCommand] = useState(() => {
-        const saved = localStorage.getItem("bench_auth_key") || "";
-        return COMMAND_BY_KEY.get(saved) || null;
-    });
+    const [currentCommand, setCurrentCommand] = useState(null);
     const [authError, setAuthError] = useState("");
+    const [isAuthChecking, setIsAuthChecking] = useState(false);
+    const [isBootstrapping, setIsBootstrapping] = useState(true);
 
-    function tryLogin(e) {
+    async function fetchCommands() {
+        const res = await fetch("/api/commands");
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            throw new Error(data?.error || "Failed to load commands.");
+        }
+        return Array.isArray(data?.commands) ? data.commands : [];
+    }
+
+    async function fetchCommandByAuthKey(authKey) {
+        const res = await fetch("/api/auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ authKey }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            throw new Error(data?.error || "Invalid key.");
+        }
+        return data?.command || null;
+    }
+
+    async function tryLogin(e) {
         e.preventDefault();
         const k = authKeyDraft.trim();
-        const cmd = COMMAND_BY_KEY.get(k) || null;
-        if (!cmd) {
-            setAuthError("Invalid key.");
+        if (!k) {
+            setAuthError("Key is required.");
             return;
         }
-        localStorage.setItem("bench_auth_key", k);
-        setCurrentCommand(cmd);
-        setAuthError("");
+        setIsAuthChecking(true);
+        try {
+            const cmd = await fetchCommandByAuthKey(k);
+            if (!cmd) throw new Error("Invalid key.");
+            localStorage.setItem("bench_auth_key", k);
+            setCurrentCommand(cmd);
+            setAuthError("");
+        } catch (err) {
+            setAuthError(err?.message || "Invalid key.");
+            setCurrentCommand(null);
+        } finally {
+            setIsAuthChecking(false);
+        }
     }
 
     function logout() {
@@ -396,10 +413,14 @@ export default function App() {
         setSelectedCommands((prev) => prev.filter((x) => x !== name));
     }
 
-    // Upload (we DO NOT store the file itself)
+    // Upload
     const [benchFile, setBenchFile] = useState(null);
+    const [descriptionDraft, setDescriptionDraft] = useState("");
     const [uploadError, setUploadError] = useState(" ");
+    const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef(null);
+    const [navigateNotice, setNavigateNotice] = useState("");
+    const [actionPoint, setActionPoint] = useState(null);
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -544,14 +565,29 @@ export default function App() {
 
     useEffect(() => {
         let alive = true;
-        fetchPoints()
-            .then((rows) => {
+        const savedKey = (localStorage.getItem("bench_auth_key") || "").trim();
+        const authPromise = savedKey ? fetchCommandByAuthKey(savedKey).catch(() => null) : Promise.resolve(null);
+        Promise.all([fetchPoints(), fetchCommands(), authPromise])
+            .then(([rows, dbCommands, authedCommand]) => {
                 if (!alive) return;
                 setPoints(rows);
+                setCommands(dbCommands);
+                if (authedCommand) {
+                    setCurrentCommand(authedCommand);
+                    setAuthError("");
+                } else if (savedKey) {
+                    localStorage.removeItem("bench_auth_key");
+                    setAuthError("Saved key is no longer valid.");
+                }
             })
             .catch((e) => {
                 if (!alive) return;
                 console.error(e);
+                setAuthError(String(e?.message || "Failed to load initial data."));
+            })
+            .finally(() => {
+                if (!alive) return;
+                setIsBootstrapping(false);
             });
         return () => {
             alive = false;
@@ -578,12 +614,68 @@ export default function App() {
             return;
         }
 
-        if (points.some((p) => p.fileName === parsed.fileName)) {
-            setUploadError("A point with this file name already exists.");
+        if (file.size > MAX_UPLOAD_BYTES) {
+            setUploadError("File is too large. Maximum size is 500 MB.");
             return;
         }
 
         setUploadError(" ");
+    }
+
+    function getPointDownloadUrl(p) {
+        if (!p || !p.fileName || p.benchmark === "test") return null;
+        if (p.downloadUrl) return p.downloadUrl;
+        return null;
+    }
+
+    function canDeletePoint(p) {
+        if (!p) return false;
+        if (p.benchmark === "test") return true;
+        return Boolean(currentCommand && p.sender === currentCommand.name);
+    }
+
+    async function downloadCircuit(p) {
+        const url = getPointDownloadUrl(p);
+        if (!url) {
+            window.alert("File does not exist.");
+            return;
+        }
+
+        try {
+            const headRes = await fetch(url, { method: "HEAD" });
+            if (!headRes.ok) {
+                window.alert("File does not exist.");
+                return;
+            }
+        } catch {
+            window.alert("File does not exist.");
+            return;
+        }
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = p.fileName || "circuit.bench";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    async function requestUploadUrl(file, storedFileName) {
+        const res = await fetch("/api/points-upload-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                authKey: authKeyDraft,
+                fileName: storedFileName,
+                fileSize: file.size,
+            }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            throw new Error(data?.error || "Failed to get upload URL.");
+        }
+        return data;
     }
 
     async function addPointFromFile(e) {
@@ -596,60 +688,90 @@ export default function App() {
             return;
         }
 
-        if (points.some((p) => p.fileName === parsed.fileName)) {
-            setUploadError("A point with this file name already exists.");
+        const description = descriptionDraft.trim();
+        if (!description) {
+            setUploadError("Description is required.");
+            return;
+        }
+        if (description.length > MAX_DESCRIPTION_LEN) {
+            setUploadError(`Description is too long (max ${MAX_DESCRIPTION_LEN}).`);
+            return;
+        }
+
+        if (benchFile.size > MAX_UPLOAD_BYTES) {
+            setUploadError("File is too large. Maximum size is 500 MB.");
+            return;
+        }
+
+        setIsUploading(true);
+
+        try {
+            const pointId = uid();
+            const storedFileName = buildStoredFileName({
+                benchmark: parsed.benchmark,
+                delay: parsed.delay,
+                area: parsed.area,
+                pointId,
+                sender: currentCommand.name,
+            });
+
+            const uploadMeta = await requestUploadUrl(benchFile, storedFileName);
+            const putRes = await fetch(uploadMeta.uploadUrl, {
+                method: "PUT",
+                body: benchFile,
+            });
+            if (!putRes.ok) {
+                throw new Error("Failed to upload file to S3.");
+            }
+
+            const point = {
+                id: pointId,
+                benchmark: parsed.benchmark,
+                delay: parsed.delay,
+                area: parsed.area,
+                description,
+                sender: currentCommand.name,
+                fileName: storedFileName,
+                status: "non-verified",
+                checkerVersion: null,
+            };
+
+            const res = await fetch("/api/points", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...point, authKey: authKeyDraft, fileSize: benchFile.size }),
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                setUploadError(data?.error || "Failed to save point.");
+                return;
+            }
+
+            const data = await res.json();
+            const saved = data?.point || point;
+
+            setPoints((prev) => [saved, ...prev]);
+            setLastAddedId(saved.id);
+            setBenchmarkFilter(String(saved.benchmark));
+            setUploadError(" ");
+            setDescriptionDraft("");
             clearFileInput();
-            return;
+        } catch (err) {
+            setUploadError(err?.message || "Failed to upload point.");
+        } finally {
+            setIsUploading(false);
         }
-
-        if (parsed.sender !== currentCommand.name) {
-            setUploadError("Sender in file name must match your command.");
-            return;
-        }
-
-        const point = {
-            id: uid(),
-            benchmark: parsed.benchmark,
-            delay: parsed.delay,
-            area: parsed.area,
-            description: parsed.description,
-            sender: parsed.sender,
-            fileName: parsed.fileName,
-            status: "non-verified",
-            checkerVersion: null,
-        };
-
-        const res = await fetch("/api/points", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...point, authKey: authKeyDraft }),
-        });
-
-        if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            setUploadError(data?.error || "Failed to save point.");
-            return;
-        }
-
-        const data = await res.json();
-        const saved = data?.point || point;
-
-        setPoints((prev) => [saved, ...prev]);
-        setLastAddedId(saved.id);
-        setBenchmarkFilter(String(saved.benchmark));
-        setUploadError(" ");
-        clearFileInput();
     }
 
     async function deletePointById(id) {
         const p = points.find((x) => x.id === id);
-        const label = p ? `${p.fileName}` : "this point";
-        if (!window.confirm(`Delete ${label}?`)) return;
+        if (!p) return false;
 
         if (p?.benchmark === "test") {
             setPoints((prev) => prev.filter((x) => x.id !== id));
             if (lastAddedId === id) setLastAddedId(null);
-            return;
+            return true;
         }
 
         const res = await fetch("/api/points", {
@@ -661,11 +783,29 @@ export default function App() {
         if (!res.ok) {
             const data = await res.json().catch(() => null);
             window.alert(data?.error || "Failed to delete point.");
-            return;
+            return false;
         }
 
         setPoints((prev) => prev.filter((x) => x.id !== id));
         if (lastAddedId === id) setLastAddedId(null);
+        return true;
+    }
+
+    function openPointActionModal(pointId) {
+        const p = points.find((x) => x.id === pointId);
+        if (!p) return;
+        setActionPoint(p);
+    }
+
+    function closePointActionModal() {
+        setActionPoint(null);
+    }
+
+    async function confirmAndDeletePoint(pointId) {
+        const p = points.find((x) => x.id === pointId);
+        if (!p || !canDeletePoint(p)) return false;
+        if (!window.confirm(`Delete ${p.fileName}?`)) return false;
+        return await deletePointById(pointId);
     }
 
     function clearAllTestNoConfirm() {
@@ -701,7 +841,8 @@ export default function App() {
                 area = randInt(100, 1000);
             }
 
-            const cmdNum = randInt(1, COMMAND_COUNT);
+            const testCommandCount = Math.max(1, commands.length || DEFAULT_TEST_COMMAND_COUNT);
+            const cmdNum = randInt(1, testCommandCount);
             const sender = `test_command${cmdNum}`;
             const status = randomChoice(STATUS_LIST);
             const description = `point${i}`;
@@ -792,10 +933,14 @@ export default function App() {
 
     const canAdd =
         benchFile !== null &&
+        !isUploading &&
         (() => {
             const parsed = parseBenchFileName(benchFile.name);
             if (!parsed.ok) return false;
-            if (points.some((p) => p.fileName === parsed.fileName)) return false;
+            if (benchFile.size > MAX_UPLOAD_BYTES) return false;
+            const description = descriptionDraft.trim();
+            if (!description) return false;
+            if (description.length > MAX_DESCRIPTION_LEN) return false;
             return true;
         })();
 
@@ -846,10 +991,19 @@ export default function App() {
         setSentPage(1);
     }, [myPoints.length]);
 
+    useEffect(() => {
+        if (!navigateNotice) return;
+        const t = setTimeout(() => setNavigateNotice(""), 3200);
+        return () => clearTimeout(t);
+    }, [navigateNotice]);
+
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
         setLastAddedId(p.id);
+        setNavigateNotice(
+            "Navigation successful. If the point is not visible, make sure it matches current filters."
+        );
     }
 
     if (!currentCommand) {
@@ -859,7 +1013,9 @@ export default function App() {
                     <div className="cardHeader">
                         <div>
                             <div className="cardTitle">Access key required</div>
-                            <div className="cardHint">Enter your team key to open the site.</div>
+                            <div className="cardHint">
+                                {isBootstrapping ? "Checking saved key..." : "Enter your team key to open the site."}
+                            </div>
                         </div>
                     </div>
 
@@ -871,13 +1027,14 @@ export default function App() {
                                 onChange={(e) => setAuthKeyDraft(e.target.value)}
                                 placeholder="key_XXXXXXXXXXXXXXXX"
                                 autoFocus
+                                disabled={isBootstrapping || isAuthChecking}
                             />
                         </label>
 
                         {authError ? <div className="error">{authError}</div> : null}
 
-                        <button className="btn primary" type="submit">
-                            Enter
+                        <button className="btn primary" type="submit" disabled={isBootstrapping || isAuthChecking}>
+                            {isAuthChecking ? "Checking..." : "Enter"}
                         </button>
                     </form>
                 </div>
@@ -918,6 +1075,9 @@ export default function App() {
                                     Pareto frontier is computed from points visible by benchmark + status filters.
                                     Changing the view rectangle does not change the frontier — it only crops what part of
                                     it is visible.
+                                </div>
+                                <div className="cardHint">
+                                    Click any point on the chart to open actions: <b>Download</b> and <b>Delete</b>.
                                 </div>
                             </div>
 
@@ -1006,7 +1166,7 @@ export default function App() {
                                         style={{ pointerEvents: "none" }}
                                     />
 
-                                    {/* Main points: clickable delete */}
+                                    {/* Main points: click to open point actions modal */}
                                     <Scatter
                                         data={plottedPoints}
                                         isAnimationActive={false}
@@ -1014,7 +1174,9 @@ export default function App() {
                                             const { cx, cy, payload } = props;
 
                                             const baseFill =
-                                                colorMode === "users" ? commandColor(payload.sender) : statusColor(payload.status);
+                                                colorMode === "users"
+                                                    ? commandColor(payload.sender, commandByName)
+                                                    : statusColor(payload.status);
 
                                             const isLatest = payload.id === lastAddedId;
 
@@ -1026,7 +1188,7 @@ export default function App() {
                                                     ? "rgba(17,24,39,0.55)"
                                                     : baseFill;
 
-                                            const onClick = () => deletePointById(payload.id);
+                                            const onClick = () => openPointActionModal(payload.id);
 
                                             if (isLatest) {
                                                 return (
@@ -1139,6 +1301,13 @@ export default function App() {
                                                 <button className="btn ghost small" onClick={() => focusPoint(p)}>
                                                     Find
                                                 </button>
+                                                <button
+                                                    className="btn ghost small"
+                                                    onClick={() => downloadCircuit(p)}
+                                                    disabled={!getPointDownloadUrl(p)}
+                                                >
+                                                    Download circuit
+                                                </button>
                                             </div>
                                         </div>
                                     );
@@ -1217,7 +1386,7 @@ export default function App() {
                                                         return name.toLowerCase().startsWith(q);
                                                     })
                                                     .map((name) => {
-                                                        const col = commandColor(name);
+                                                        const col = commandColor(name, commandByName);
                                                         return (
                                                             <button
                                                                 key={name}
@@ -1248,8 +1417,8 @@ export default function App() {
                                                         </div>
                                                     ) : (
                                                         selectedCommands.map((name) => {
-                                                            const c = COMMAND_BY_NAME.get(name);
-                                                            const col = c ? c.color : commandColor(name);
+                                                            const c = commandByName.get(name);
+                                                            const col = c ? c.color : commandColor(name, commandByName);
                                                             return (
                                                                 <span key={name} className="tagChip">
                                                                     <span className="dot" style={{ background: col }} />
@@ -1325,7 +1494,7 @@ export default function App() {
 
                                 <div className="cardHint">
                   <span className="mono">
-                    bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}_{`{DESCRIPTION}`}_{`{SENDER}`}.bench
+                    bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`} or bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}.bench
                   </span>
                                 </div>
 
@@ -1341,16 +1510,20 @@ export default function App() {
                                             <span className="mono">{`{AREA}`}</span> are integers (0..10^9)
                                         </li>
                                         <li>
-                                            <span className="mono">{`{DESCRIPTION}`}</span> and{" "}
-                                            <span className="mono">{`{SENDER}`}</span> contain only letters/digits/hyphen
-                                            (<span className="mono">A-Z a-z 0-9 -</span>)
+                                            <span className="mono">description</span> is entered below (up to{" "}
+                                            <b>{MAX_DESCRIPTION_LEN}</b> chars)
                                         </li>
-                                        <li>total file name length ≤ {MAX_FILENAME_LEN}</li>
+                                        <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
                                     </ul>
                                 </div>
 
                                 <div className="cardHint">
-                                    Example: <span className="mono">bench256_123_10000_test_command1.bench</span>
+                                    Example input: <span className="mono">bench254_15_40</span>
+                                </div>
+
+                                <div className="cardHint">
+                                    Stored file name is generated automatically:
+                                    <span className="mono"> bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}_{`{COMMAND}`}_{`{POINT_ID}`}.bench</span>
                                 </div>
 
                                 <div className="cardHint">
@@ -1358,27 +1531,38 @@ export default function App() {
                                 </div>
 
                                 <div className="cardHint">
-                                    The file is not saved anywhere — only the file name is parsed.
+                                    File is uploaded to S3. Maximum upload size is 500 MB.
                                 </div>
                             </div>
                         </div>
 
                         <form className="form" onSubmit={addPointFromFile}>
                             <label className="field">
-                                <span>file (.bench)</span>
+                                <span>file</span>
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".bench"
                                     onChange={onFileChange}
                                     className={benchFile && !canAdd ? "bad" : ""}
+                                />
+                            </label>
+
+                            <label className="field">
+                                <span>description (max {MAX_DESCRIPTION_LEN})</span>
+                                <input
+                                    value={descriptionDraft}
+                                    onChange={(e) => {
+                                        setDescriptionDraft(e.target.value.slice(0, MAX_DESCRIPTION_LEN));
+                                        setUploadError(" ");
+                                    }}
+                                    placeholder="Short description"
                                 />
                             </label>
 
                             {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
 
                             <button className="btn primary" type="submit" disabled={!canAdd}>
-                                Upload & create point
+                                {isUploading ? "Uploading..." : "Upload & create point"}
                             </button>
                         </form>
                     </section>
@@ -1386,7 +1570,7 @@ export default function App() {
                     <section className="card listCard">
                         <div className="cardHeader tight">
                             <div>
-                                <div className="cardTitle">Delete points</div>
+                                <div className="cardTitle">Find points</div>
                                 <div className="cardHint">
                                     Search by <b>file name prefix</b>. Shows exactly {DELETE_PREVIEW_LIMIT} slots.
                                 </div>
@@ -1432,14 +1616,23 @@ export default function App() {
                                         Find
                                     </button>
                                     <button
-                                        className="btn danger small"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            deletePointById(p.id);
-                                        }}
+                                        className="btn ghost small"
+                                        onClick={() => downloadCircuit(p)}
+                                        disabled={!getPointDownloadUrl(p)}
                                     >
-                                        Delete
+                                        Download circuit
                                     </button>
+                                    {canDeletePoint(p) ? (
+                                        <button
+                                            className="btn danger small"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                confirmAndDeletePoint(p.id);
+                                            }}
+                                        >
+                                            Delete
+                                        </button>
+                                    ) : null}
                                 </div>
                             ))}
 
@@ -1461,6 +1654,44 @@ export default function App() {
 
                 </aside>
             </main>
+
+            {actionPoint ? (
+                <div className="pointModalBackdrop" onClick={closePointActionModal}>
+                    <div className="pointModal" onClick={(e) => e.stopPropagation()}>
+                        <div className="pointModalTitle">Point actions</div>
+                        <div className="pointModalFile mono">{actionPoint.fileName}</div>
+                        <div className="pointModalActions">
+                            <button
+                                className="btn ghost small"
+                                onClick={() => downloadCircuit(actionPoint)}
+                                disabled={!getPointDownloadUrl(actionPoint)}
+                            >
+                                Download
+                            </button>
+                            {canDeletePoint(actionPoint) ? (
+                                <button
+                                    className="btn danger small"
+                                    onClick={async () => {
+                                        const deleted = await confirmAndDeletePoint(actionPoint.id);
+                                        if (deleted) closePointActionModal();
+                                    }}
+                                >
+                                    Delete
+                                </button>
+                            ) : null}
+                            <button className="btn small" onClick={closePointActionModal}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {navigateNotice ? (
+                <div className="navigateToast" role="status" aria-live="polite">
+                    {navigateNotice}
+                </div>
+            ) : null}
 
             <footer className="footer" />
         </div>
