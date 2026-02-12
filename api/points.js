@@ -134,6 +134,22 @@ export default async function handler(req, res) {
             return;
         }
 
+        const duplicate = await sql`
+          select id
+          from points
+          where command_id = ${command.id}
+            and benchmark = ${String(benchmark)}
+            and delay = ${delay}
+            and area = ${area}
+          limit 1
+        `;
+        if (duplicate.rows.length > 0) {
+            res.status(409).json({
+                error: "Point with the same benchmark, delay, and area already exists for this user.",
+            });
+            return;
+        }
+
         try {
             const insert = await sql`
         insert into points (id, benchmark, delay, area, description, sender, file_name, status, checker_version, command_id)

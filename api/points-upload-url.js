@@ -64,6 +64,9 @@ function parseBenchFileName(fileNameRaw) {
     return {
         ok: true,
         fileName,
+        benchmark: String(Number(m[1])),
+        delay: Number(m[2]),
+        area: Number(m[3]),
     };
 }
 
@@ -158,12 +161,13 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
-    const cmdRes = await sql`select name, role from commands where auth_key = ${authKey}`;
+    const cmdRes = await sql`select id, name, role from commands where auth_key = ${authKey}`;
     if (cmdRes.rows.length === 0) {
         res.status(401).json({ error: "Invalid auth key." });
         return;
     }
-    const role = normalizeRole(cmdRes.rows[0].role);
+    const command = cmdRes.rows[0];
+    const role = normalizeRole(command.role);
     const maxBytes = role === ROLE_ADMIN ? MAX_ADMIN_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
 
     if (fileSize > maxBytes) {
@@ -172,6 +176,22 @@ export default async function handler(req, res) {
             return;
         }
         res.status(413).json({ error: "File is too large. Maximum size is 500 MB." });
+        return;
+    }
+
+    const duplicate = await sql`
+      select id
+      from points
+      where command_id = ${command.id}
+        and benchmark = ${parsed.benchmark}
+        and delay = ${parsed.delay}
+        and area = ${parsed.area}
+      limit 1
+    `;
+    if (duplicate.rows.length > 0) {
+        res.status(409).json({
+            error: "Point with the same benchmark, delay, and area already exists for this user.",
+        });
         return;
     }
 
