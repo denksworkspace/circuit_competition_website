@@ -436,6 +436,8 @@ export default function App() {
     const [commandQuery, setCommandQuery] = useState("");
     const [selectedCommands, setSelectedCommands] = useState(() => []);
     const selectedCommandSet = useMemo(() => new Set(selectedCommands), [selectedCommands]);
+    const [benchmarkMenuOpen, setBenchmarkMenuOpen] = useState(false);
+    const benchmarkMenuRef = useRef(null);
 
     function addSelectedCommand(name) {
         setSelectedCommands((prev) => (prev.includes(name) ? prev : [...prev, name]));
@@ -559,6 +561,20 @@ export default function App() {
                 )
             ),
         [visiblePoints, delayMax, areaMax, delayAxis.step, areaAxis.step, delayOverflowLane, areaOverflowLane]
+    );
+    const pointsRenderKey = useMemo(
+        () =>
+            [
+                delayMax,
+                areaMax,
+                colorMode,
+                benchmarkFilter,
+                statusFilter["non-verified"] ? 1 : 0,
+                statusFilter.verified ? 1 : 0,
+                statusFilter.failed ? 1 : 0,
+                selectedCommands.join("|"),
+            ].join(":"),
+        [delayMax, areaMax, colorMode, benchmarkFilter, statusFilter, selectedCommands]
     );
 
     const areaAxisWidth = useMemo(() => {
@@ -1114,6 +1130,18 @@ export default function App() {
         return () => clearTimeout(t);
     }, [navigateNotice]);
 
+    useEffect(() => {
+        if (!benchmarkMenuOpen) return;
+        function onDocMouseDown(e) {
+            if (!benchmarkMenuRef.current) return;
+            if (!benchmarkMenuRef.current.contains(e.target)) {
+                setBenchmarkMenuOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", onDocMouseDown);
+        return () => document.removeEventListener("mousedown", onDocMouseDown);
+    }, [benchmarkMenuOpen]);
+
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
@@ -1161,6 +1189,7 @@ export default function App() {
 
     const isTestBenchSelected = benchmarkFilter === "test";
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
+    const benchmarkLabel = benchmarkFilter === "test" ? "test" : String(benchmarkFilter);
 
     return (
         <div className="page">
@@ -1287,6 +1316,7 @@ export default function App() {
 
                                     {/* Main points: click to open point actions modal */}
                                     <Scatter
+                                        key={pointsRenderKey}
                                         data={plottedPoints}
                                         isAnimationActive={false}
                                         shape={(props) => {
@@ -1302,7 +1332,7 @@ export default function App() {
                                             const r0 = payload.radius;
                                             const r = isLatest ? r0 * 1.5 : r0; // +50% size for latest diamond
 
-                                            const fill = payload.isClipped ? "rgba(17,24,39,0.55)" : baseFill;
+                                            const fill = baseFill;
 
                                             const onClick = () => openPointActionModal(payload.id);
 
@@ -1462,19 +1492,45 @@ export default function App() {
                         <div className="form">
                             <label className="field">
                                 <span>1) Benchmark</span>
-                                <select
-                                    value={benchmarkFilter}
-                                    onChange={(e) => setBenchmarkFilter(e.target.value)}
-                                    size={availableBenchmarks.length > 12 ? 8 : undefined}
-                                    className={availableBenchmarks.length > 12 ? "benchmarkSelectScrollable" : ""}
-                                >
-                                    <option value="test">test</option>
-                                    {availableBenchmarks.map((b) => (
-                                        <option key={b} value={String(b)}>
-                                            {b}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="benchmarkDropdown" ref={benchmarkMenuRef}>
+                                    <button
+                                        className="benchmarkTrigger"
+                                        type="button"
+                                        onClick={() => setBenchmarkMenuOpen((v) => !v)}
+                                        aria-expanded={benchmarkMenuOpen ? "true" : "false"}
+                                    >
+                                        <span>{benchmarkLabel}</span>
+                                        <span className="benchmarkCaret">{benchmarkMenuOpen ? "▲" : "▼"}</span>
+                                    </button>
+
+                                    {benchmarkMenuOpen ? (
+                                        <div className="benchmarkMenu" role="listbox">
+                                            <button
+                                                className="benchmarkOption"
+                                                type="button"
+                                                onClick={() => {
+                                                    setBenchmarkFilter("test");
+                                                    setBenchmarkMenuOpen(false);
+                                                }}
+                                            >
+                                                test
+                                            </button>
+                                            {availableBenchmarks.map((b) => (
+                                                <button
+                                                    key={b}
+                                                    className="benchmarkOption"
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setBenchmarkFilter(String(b));
+                                                        setBenchmarkMenuOpen(false);
+                                                    }}
+                                                >
+                                                    {b}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
                             </label>
 
                             <label className="field">
