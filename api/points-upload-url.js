@@ -1,7 +1,10 @@
+/* global process */
 import crypto from "node:crypto";
 import { sql } from "@vercel/postgres";
+import { normalizeRole, ROLE_ADMIN, ensureCommandRolesSchema } from "./_roles.js";
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_ADMIN_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024;
 const BENCH_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)_([A-Za-z0-9-]+)_([A-Za-z0-9-]+)\.bench$/;
 
 function parseBody(req) {
@@ -154,14 +157,21 @@ export default async function handler(req, res) {
         return;
     }
 
-    if (fileSize > MAX_UPLOAD_BYTES) {
-        res.status(413).json({ error: "File is too large. Maximum size is 500 MB." });
-        return;
-    }
-
-    const cmdRes = await sql`select name from commands where auth_key = ${authKey}`;
+    await ensureCommandRolesSchema();
+    const cmdRes = await sql`select name, role from commands where auth_key = ${authKey}`;
     if (cmdRes.rows.length === 0) {
         res.status(401).json({ error: "Invalid auth key." });
+        return;
+    }
+    const role = normalizeRole(cmdRes.rows[0].role);
+    const maxBytes = role === ROLE_ADMIN ? MAX_ADMIN_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
+
+    if (fileSize > maxBytes) {
+        if (role === ROLE_ADMIN) {
+            res.status(413).json({ error: "File is too large. Maximum size is 50 GB for admin." });
+            return;
+        }
+        res.status(413).json({ error: "File is too large. Maximum size is 500 MB." });
         return;
     }
 
@@ -191,6 +201,6 @@ export default async function handler(req, res) {
         uploadUrl,
         fileKey: objectKey,
         method: "PUT",
-        maxBytes: MAX_UPLOAD_BYTES,
+        maxBytes,
     });
 }

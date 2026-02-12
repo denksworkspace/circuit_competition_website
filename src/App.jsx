@@ -16,6 +16,10 @@ const DIVISIONS = 10;
 const MAX_INPUT_FILENAME_LEN = 80;
 const MAX_DESCRIPTION_LEN = 200;
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_ADMIN_BATCH_BYTES = 50 * 1024 * 1024 * 1024;
+const ROLE_ADMIN = "admin";
+const ROLE_LEADER = "leader";
+const ROLE_PARTICIPANT = "participant";
 
 // bench[200-299]_[delay]_[area][.bench]
 const BENCH_INPUT_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)(?:\.bench)?$/;
@@ -67,6 +71,28 @@ function buildAxis(maxValue, divisions, hardCap) {
     if (ticks[ticks.length - 1] !== overflow) ticks.push(overflow);
 
     return { max, step, overflow, ticks };
+}
+
+function computePlottedPoint(point, delayMax, areaMax, delayStep, areaStep, delayOverflowLane, areaOverflowLane) {
+    const outsideDelay = Math.max(0, point.delay - delayMax);
+    const outsideArea = Math.max(0, point.area - areaMax);
+    const isClipped = outsideDelay > 0 || outsideArea > 0;
+
+    const BASE_R = 4;
+    const MIN_R = 2.8;
+    // Normalize by axis tick size so +10 delay does not look "very far" when axis step is large.
+    const delayNorm = outsideDelay / Math.max(1, delayStep * 3);
+    const areaNorm = outsideArea / Math.max(1, areaStep * 3);
+    const normalizedDistance = Math.hypot(delayNorm, areaNorm);
+    const radius = isClipped ? clamp(BASE_R - normalizedDistance * 0.55, MIN_R, BASE_R) : BASE_R;
+
+    return {
+        ...point,
+        delayDisp: point.delay > delayMax ? delayOverflowLane : point.delay,
+        areaDisp: point.area > areaMax ? areaOverflowLane : point.area,
+        isClipped,
+        radius,
+    };
 }
 
 function TenPowNine() {
@@ -132,6 +158,12 @@ function sanitizeFileToken(value) {
 
 function buildStoredFileName({ benchmark, delay, area, pointId, sender }) {
     return `bench${benchmark}_${delay}_${area}_${sanitizeFileToken(sender)}_${sanitizeFileToken(pointId)}.bench`;
+}
+
+function getRoleLabel(role) {
+    if (role === ROLE_ADMIN) return "admin";
+    if (role === ROLE_LEADER) return "leader";
+    return "participant";
 }
 
 function parseBenchFileName(fileNameRaw) {
@@ -414,13 +446,17 @@ export default function App() {
     }
 
     // Upload
-    const [benchFile, setBenchFile] = useState(null);
+    const [benchFiles, setBenchFiles] = useState(() => []);
     const [descriptionDraft, setDescriptionDraft] = useState("");
     const [uploadError, setUploadError] = useState(" ");
     const [isUploading, setIsUploading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(null);
     const fileInputRef = useRef(null);
+    const [uploadLogText, setUploadLogText] = useState("");
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
+    const maxSingleUploadBytes =
+        currentCommand?.role === ROLE_ADMIN ? MAX_ADMIN_BATCH_BYTES : MAX_UPLOAD_BYTES;
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -453,24 +489,6 @@ export default function App() {
     const areaAxis = useMemo(() => buildAxis(areaMax, DIVISIONS, MAX_VALUE), [areaMax]);
     const delayOverflowLane = delayAxis.overflow;
     const areaOverflowLane = areaAxis.overflow;
-    // point sizes
-    const BASE_R = 4;
-    const MIN_R = 2.8;
-    const DIST_SCALE = 0.02;
-
-    function computeRadius(p) {
-        // no clipping shrinking here; we keep your existing logic
-        // (it only shrinks when clipped, but still ok)
-        const outsideDelay = Math.max(0, p.delay - delayMax);
-        const outsideArea = Math.max(0, p.area - areaMax);
-        const isClipped = outsideDelay > 0 || outsideArea > 0;
-
-        if (!isClipped) return BASE_R;
-        const dist = Math.hypot(outsideDelay, outsideArea);
-        const rr = BASE_R / (1 + dist * DIST_SCALE);
-        return clamp(rr, MIN_R, BASE_R);
-    }
-
     const availableBenchmarks = useMemo(() => {
         const numeric = new Set();
         for (const p of points) {
@@ -527,18 +545,21 @@ export default function App() {
     }, [paretoBase, delayMax, areaMax]);
 
     // Display mapping for all visible points (includes overflow lane mapping)
-    const plottedPoints = useMemo(() => {
-        return visiblePoints.map((p) => {
-            const displayDelay = p.delay > delayMax ? delayOverflowLane : p.delay;
-            const displayArea = p.area > areaMax ? areaOverflowLane : p.area;
-
-            return {
-                ...p,
-                delayDisp: displayDelay,
-                areaDisp: displayArea,
-            };
-        });
-    }, [visiblePoints, delayMax, areaMax, delayOverflowLane, areaOverflowLane]);
+    const plottedPoints = useMemo(
+        () =>
+            visiblePoints.map((p) =>
+                computePlottedPoint(
+                    p,
+                    delayMax,
+                    areaMax,
+                    delayAxis.step,
+                    areaAxis.step,
+                    delayOverflowLane,
+                    areaOverflowLane
+                )
+            ),
+        [visiblePoints, delayMax, areaMax, delayAxis.step, areaAxis.step, delayOverflowLane, areaOverflowLane]
+    );
 
     const areaAxisWidth = useMemo(() => {
         const labelA = `>${formatIntNoGrouping(areaMax)}`;
@@ -595,31 +616,44 @@ export default function App() {
     }, []);
 
     function clearFileInput() {
-        setBenchFile(null);
+        setBenchFiles([]);
         if (fileInputRef.current) fileInputRef.current.value = "";
     }
 
     function onFileChange(e) {
-        const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-        setBenchFile(file);
+        const files = Array.from(e.target.files || []);
+        setBenchFiles(files);
+        setUploadLogText("");
 
-        if (!file) {
+        if (files.length === 0) {
             setUploadError(" ");
             return;
         }
 
-        const parsed = parseBenchFileName(file.name);
-        if (!parsed.ok) {
-            setUploadError(parsed.error);
-            return;
-        }
+        for (const file of files) {
+            const parsed = parseBenchFileName(file.name);
+            if (!parsed.ok) {
+                setUploadError(parsed.error);
+                return;
+            }
 
-        if (file.size > MAX_UPLOAD_BYTES) {
-            setUploadError("File is too large. Maximum size is 500 MB.");
-            return;
+            if (file.size > maxSingleUploadBytes) {
+                setUploadError(
+                    currentCommand?.role === ROLE_ADMIN
+                        ? "File is too large. Maximum size is 50 GB for admin."
+                        : "File is too large. Maximum size is 500 MB."
+                );
+                return;
+            }
         }
 
         setUploadError(" ");
+    }
+
+    function normalizeDescriptionForSubmit() {
+        const description = descriptionDraft.trim();
+        if (!description) return "schema";
+        return description;
     }
 
     function getPointDownloadUrl(p) {
@@ -678,89 +712,158 @@ export default function App() {
         return data;
     }
 
+    async function createPointFromUploadedFile(sourceFile, parsed, description) {
+        const pointId = uid();
+        const storedFileName = buildStoredFileName({
+            benchmark: parsed.benchmark,
+            delay: parsed.delay,
+            area: parsed.area,
+            pointId,
+            sender: currentCommand.name,
+        });
+
+        const uploadMeta = await requestUploadUrl(sourceFile, storedFileName);
+        const putRes = await fetch(uploadMeta.uploadUrl, {
+            method: "PUT",
+            body: sourceFile,
+        });
+        if (!putRes.ok) {
+            throw new Error("Failed to upload file to S3.");
+        }
+
+        const point = {
+            id: pointId,
+            benchmark: parsed.benchmark,
+            delay: parsed.delay,
+            area: parsed.area,
+            description,
+            sender: currentCommand.name,
+            fileName: storedFileName,
+            status: "non-verified",
+            checkerVersion: null,
+        };
+
+        const res = await fetch("/api/points", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...point, authKey: authKeyDraft, fileSize: sourceFile.size }),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.error || "Failed to save point.");
+        }
+
+        const data = await res.json();
+        return data?.point || point;
+    }
+
     async function addPointFromFile(e) {
         e.preventDefault();
-        if (!benchFile) return;
+        if (benchFiles.length === 0) return;
 
-        const parsed = parseBenchFileName(benchFile.name);
-        if (!parsed.ok) {
-            setUploadError(parsed.error);
-            return;
-        }
-
-        const description = descriptionDraft.trim();
-        if (!description) {
-            setUploadError("Description is required.");
-            return;
-        }
+        const description = normalizeDescriptionForSubmit();
         if (description.length > MAX_DESCRIPTION_LEN) {
             setUploadError(`Description is too long (max ${MAX_DESCRIPTION_LEN}).`);
             return;
         }
 
-        if (benchFile.size > MAX_UPLOAD_BYTES) {
-            setUploadError("File is too large. Maximum size is 500 MB.");
-            return;
-        }
-
         setIsUploading(true);
+        setUploadProgress({ done: 0, total: benchFiles.length });
+        setUploadLogText("");
 
         try {
-            const pointId = uid();
-            const storedFileName = buildStoredFileName({
-                benchmark: parsed.benchmark,
-                delay: parsed.delay,
-                area: parsed.area,
-                pointId,
-                sender: currentCommand.name,
-            });
+            const savedPoints = [];
+            const logRows = [];
 
-            const uploadMeta = await requestUploadUrl(benchFile, storedFileName);
-            const putRes = await fetch(uploadMeta.uploadUrl, {
-                method: "PUT",
-                body: benchFile,
-            });
-            if (!putRes.ok) {
-                throw new Error("Failed to upload file to S3.");
+            for (const file of benchFiles) {
+                const parsed = parseBenchFileName(file.name);
+                if (!parsed.ok) {
+                    logRows.push({
+                        fileName: file.name,
+                        success: false,
+                        reason: parsed.error,
+                    });
+                    setUploadProgress((prev) => {
+                        if (!prev) return prev;
+                        return { ...prev, done: prev.done + 1 };
+                    });
+                    continue;
+                }
+
+                if (file.size > maxSingleUploadBytes) {
+                    logRows.push({
+                        fileName: file.name,
+                        success: false,
+                        reason:
+                            currentCommand?.role === ROLE_ADMIN
+                                ? "File is too large. Maximum size is 50 GB for admin."
+                                : "File is too large. Maximum size is 500 MB.",
+                    });
+                    setUploadProgress((prev) => {
+                        if (!prev) return prev;
+                        return { ...prev, done: prev.done + 1 };
+                    });
+                    continue;
+                }
+
+                try {
+                    const saved = await createPointFromUploadedFile(file, parsed, description);
+                    savedPoints.push(saved);
+                    logRows.push({
+                        fileName: file.name,
+                        success: true,
+                        reason: "Uploaded successfully.",
+                    });
+                } catch (err) {
+                    logRows.push({
+                        fileName: file.name,
+                        success: false,
+                        reason: err?.message || "Failed to upload point.",
+                    });
+                }
+                setUploadProgress((prev) => {
+                    if (!prev) return prev;
+                    return { ...prev, done: prev.done + 1 };
+                });
             }
 
-            const point = {
-                id: pointId,
-                benchmark: parsed.benchmark,
-                delay: parsed.delay,
-                area: parsed.area,
-                description,
-                sender: currentCommand.name,
-                fileName: storedFileName,
-                status: "non-verified",
-                checkerVersion: null,
-            };
-
-            const res = await fetch("/api/points", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ...point, authKey: authKeyDraft, fileSize: benchFile.size }),
-            });
-
-            if (!res.ok) {
-                const data = await res.json().catch(() => null);
-                setUploadError(data?.error || "Failed to save point.");
-                return;
+            if (savedPoints.length > 0) {
+                setPoints((prev) => [...savedPoints.reverse(), ...prev]);
+                const latestSaved = savedPoints[savedPoints.length - 1];
+                setLastAddedId(latestSaved.id);
+                setBenchmarkFilter(String(latestSaved.benchmark));
             }
 
-            const data = await res.json();
-            const saved = data?.point || point;
+            if (benchFiles.length >= 2) {
+                const lines = logRows.map(
+                    (row) =>
+                        `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
+                );
+                setUploadLogText(lines.join("\n"));
+            }
 
-            setPoints((prev) => [saved, ...prev]);
-            setLastAddedId(saved.id);
-            setBenchmarkFilter(String(saved.benchmark));
-            setUploadError(" ");
+            const failedCount = logRows.filter((row) => !row.success).length;
+            if (failedCount > 0) {
+                if (benchFiles.length >= 2) {
+                    setUploadError(
+                        `Uploaded ${logRows.length - failedCount}/${logRows.length} files. Download log for details.`
+                    );
+                } else {
+                    const firstFail = logRows.find((row) => !row.success);
+                    setUploadError(firstFail?.reason || "Failed to upload point.");
+                }
+            } else {
+                setUploadError(" ");
+            }
+
             setDescriptionDraft("");
             clearFileInput();
         } catch (err) {
             setUploadError(err?.message || "Failed to upload point.");
         } finally {
             setIsUploading(false);
+            setUploadProgress(null);
         }
     }
 
@@ -932,17 +1035,31 @@ export default function App() {
         parsePosIntCapped(areaMaxDraft, MAX_VALUE) !== null;
 
     const canAdd =
-        benchFile !== null &&
+        benchFiles.length > 0 &&
         !isUploading &&
         (() => {
-            const parsed = parseBenchFileName(benchFile.name);
-            if (!parsed.ok) return false;
-            if (benchFile.size > MAX_UPLOAD_BYTES) return false;
-            const description = descriptionDraft.trim();
-            if (!description) return false;
+            for (const file of benchFiles) {
+                const parsed = parseBenchFileName(file.name);
+                if (!parsed.ok) return false;
+                if (file.size > maxSingleUploadBytes) return false;
+            }
+            const description = normalizeDescriptionForSubmit();
             if (description.length > MAX_DESCRIPTION_LEN) return false;
             return true;
         })();
+
+    function downloadUploadLog() {
+        if (!uploadLogText) return;
+        const blob = new Blob([uploadLogText], { type: "text/plain;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
 
     function formatDelayTick(value) {
         const v = Number(value);
@@ -1043,6 +1160,7 @@ export default function App() {
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";
+    const isAdmin = currentCommand?.role === ROLE_ADMIN;
 
     return (
         <div className="page">
@@ -1058,6 +1176,7 @@ export default function App() {
                         <b className="helloName">{currentCommand.name}</b>
                         <span>!</span>
                     </div>
+                    <div className="pill subtle">role: {getRoleLabel(currentCommand?.role)}</div>
                     <span className="dot" style={{ background: currentCommand.color }} />
                     <button className="btn ghost small" type="button" onClick={logout}>
                         Log out
@@ -1180,13 +1299,10 @@ export default function App() {
 
                                             const isLatest = payload.id === lastAddedId;
 
-                                            const r0 = computeRadius(payload);
+                                            const r0 = payload.radius;
                                             const r = isLatest ? r0 * 1.5 : r0; // +50% size for latest diamond
 
-                                            const fill =
-                                                payload.delay > delayMax || payload.area > areaMax
-                                                    ? "rgba(17,24,39,0.55)"
-                                                    : baseFill;
+                                            const fill = payload.isClipped ? "rgba(17,24,39,0.55)" : baseFill;
 
                                             const onClick = () => openPointActionModal(payload.id);
 
@@ -1346,7 +1462,12 @@ export default function App() {
                         <div className="form">
                             <label className="field">
                                 <span>1) Benchmark</span>
-                                <select value={benchmarkFilter} onChange={(e) => setBenchmarkFilter(e.target.value)}>
+                                <select
+                                    value={benchmarkFilter}
+                                    onChange={(e) => setBenchmarkFilter(e.target.value)}
+                                    size={availableBenchmarks.length > 12 ? 8 : undefined}
+                                    className={availableBenchmarks.length > 12 ? "benchmarkSelectScrollable" : ""}
+                                >
                                     <option value="test">test</option>
                                     {availableBenchmarks.map((b) => (
                                         <option key={b} value={String(b)}>
@@ -1510,8 +1631,8 @@ export default function App() {
                                             <span className="mono">{`{AREA}`}</span> are integers (0..10^9)
                                         </li>
                                         <li>
-                                            <span className="mono">description</span> is entered below (up to{" "}
-                                            <b>{MAX_DESCRIPTION_LEN}</b> chars)
+                                            <span className="mono">description</span> is optional (up to{" "}
+                                            <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
                                         </li>
                                         <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
                                     </ul>
@@ -1530,9 +1651,12 @@ export default function App() {
                                     The latest added point is shown as a <b>diamond</b> on the chart.
                                 </div>
 
-                                <div className="cardHint">
-                                    File is uploaded to S3. Maximum upload size is 500 MB.
-                                </div>
+                                <div className="cardHint">File is uploaded to S3. Limit: 500 MB per file (admin: 50 GB).</div>
+                                {isAdmin ? (
+                                    <div className="cardHint">
+                                        Admin can select multiple files in this form. The same description is applied to every point.
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
 
@@ -1542,8 +1666,10 @@ export default function App() {
                                 <input
                                     ref={fileInputRef}
                                     type="file"
+                                    accept=".bench"
+                                    multiple={isAdmin}
                                     onChange={onFileChange}
-                                    className={benchFile && !canAdd ? "bad" : ""}
+                                    className={benchFiles.length > 0 && !canAdd ? "bad" : ""}
                                 />
                             </label>
 
@@ -1555,7 +1681,7 @@ export default function App() {
                                         setDescriptionDraft(e.target.value.slice(0, MAX_DESCRIPTION_LEN));
                                         setUploadError(" ");
                                     }}
-                                    placeholder="Short description"
+                                    placeholder="Short description (default: schema)"
                                 />
                             </label>
 
@@ -1564,6 +1690,18 @@ export default function App() {
                             <button className="btn primary" type="submit" disabled={!canAdd}>
                                 {isUploading ? "Uploading..." : "Upload & create point"}
                             </button>
+
+                            {isUploading && uploadProgress && uploadProgress.total > 1 ? (
+                                <div className="cardHint">
+                                    Processed {uploadProgress.done} / {uploadProgress.total} files
+                                </div>
+                            ) : null}
+
+                            {uploadLogText ? (
+                                <button className="btn ghost" type="button" onClick={downloadUploadLog}>
+                                    Download upload log
+                                </button>
+                            ) : null}
                         </form>
                     </section>
 

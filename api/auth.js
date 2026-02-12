@@ -1,4 +1,5 @@
 import { sql } from "@vercel/postgres";
+import { ensureCommandRolesSchema, normalizeRole } from "./_roles.js";
 
 function parseBody(req) {
     if (req.body && typeof req.body === "object") return req.body;
@@ -24,8 +25,10 @@ export default async function handler(req, res) {
         return;
     }
 
+    await ensureCommandRolesSchema();
+
     const result = await sql`
-      select id, name, color
+      select id, name, color, role
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -42,7 +45,7 @@ export default async function handler(req, res) {
             id: Number(row.id),
             name: row.name,
             color: row.color,
+            role: normalizeRole(row.role),
         },
     });
 }
-

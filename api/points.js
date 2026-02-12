@@ -1,6 +1,9 @@
+/* global process */
 import { sql } from "@vercel/postgres";
+import { ensureCommandRolesSchema, normalizeRole, ROLE_ADMIN } from "./_roles.js";
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_ADMIN_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024;
 const MAX_DESCRIPTION_LEN = 200;
 
 function parseBody(req) {
@@ -62,6 +65,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
+        await ensureCommandRolesSchema();
+
         const body = parseBody(req);
         const {
             id,
@@ -81,7 +86,7 @@ export default async function handler(req, res) {
             return;
         }
 
-        const cmdRes = await sql`select id, name from commands where auth_key = ${authKey}`;
+        const cmdRes = await sql`select id, name, role from commands where auth_key = ${authKey}`;
         if (cmdRes.rows.length === 0) {
             res.status(401).json({ error: "Invalid auth key." });
             return;
@@ -94,18 +99,13 @@ export default async function handler(req, res) {
             !benchmark ||
             typeof delay !== "number" ||
             typeof area !== "number" ||
-            !description ||
             !fileName
         ) {
             res.status(400).json({ error: "Invalid payload." });
             return;
         }
 
-        const descriptionTrimmed = String(description).trim();
-        if (!descriptionTrimmed) {
-            res.status(400).json({ error: "Description is required." });
-            return;
-        }
+        const descriptionTrimmed = String(description || "").trim() || "schema";
         if (descriptionTrimmed.length > MAX_DESCRIPTION_LEN) {
             res.status(400).json({ error: `Description is too long. Maximum length is ${MAX_DESCRIPTION_LEN}.` });
             return;
@@ -116,7 +116,14 @@ export default async function handler(req, res) {
             return;
         }
 
-        if (fileSize > MAX_UPLOAD_BYTES) {
+        const role = normalizeRole(command.role);
+        const maxBytes = role === ROLE_ADMIN ? MAX_ADMIN_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
+
+        if (fileSize > maxBytes) {
+            if (role === ROLE_ADMIN) {
+                res.status(413).json({ error: "File is too large. Maximum size is 50 GB for admin." });
+                return;
+            }
             res.status(413).json({ error: "File is too large. Maximum size is 500 MB." });
             return;
         }
