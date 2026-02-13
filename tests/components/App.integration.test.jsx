@@ -52,6 +52,17 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
     };
 }
 
+function withDefaultQuota(command) {
+    if (!command) return command;
+    return {
+        maxSingleUploadBytes: 500 * 1024 * 1024,
+        totalUploadQuotaBytes: 50 * 1024 * 1024 * 1024,
+        uploadedBytesTotal: 0,
+        remainingUploadBytes: 50 * 1024 * 1024 * 1024,
+        ...command,
+    };
+}
+
 describe("App integration", () => {
     beforeEach(() => {
         vi.restoreAllMocks();
@@ -63,7 +74,7 @@ describe("App integration", () => {
     it("logs in successfully with valid key", async () => {
         const routes = bootstrapRoutes({
             commands: [{ id: 1, name: "team1", color: "#111", role: "leader" }],
-            authBody: { command: { id: 1, name: "team1", color: "#111", role: "leader" } },
+            authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "leader" }) },
         });
         installFetchRouter(routes);
 
@@ -117,7 +128,7 @@ describe("App integration", () => {
 
     it("validates uploaded file name pattern", async () => {
         const routes = bootstrapRoutes({
-            authBody: { command: { id: 1, name: "team1", color: "#111", role: "participant" } },
+            authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" }) },
         });
         installFetchRouter(routes);
 
@@ -139,7 +150,7 @@ describe("App integration", () => {
     });
 
     it("uploads valid file and creates point", async () => {
-        const command = { id: 1, name: "team1", color: "#111", role: "participant" };
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
 
         installFetchRouter({

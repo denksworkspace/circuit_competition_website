@@ -14,10 +14,8 @@ import {
     DEFAULT_TEST_COMMAND_COUNT,
     DELETE_PREVIEW_LIMIT,
     DIVISIONS,
-    MAX_ADMIN_BATCH_BYTES,
     MAX_DESCRIPTION_LEN,
     MAX_INPUT_FILENAME_LEN,
-    MAX_UPLOAD_BYTES,
     MAX_VALUE,
     ROLE_ADMIN,
     STATUS_LIST,
@@ -40,14 +38,26 @@ import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUti
 import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/testPointUtils.js";
 import {
     deletePoint,
+    fetchAdminUserById,
     fetchCommandByAuthKey,
     fetchCommands,
     fetchPoints,
     requestUploadUrl,
     savePoint,
+    updateAdminUserUploadSettings,
 } from "./services/apiClient.js";
 
 export default function App() {
+    function bytesToGb(bytes) {
+        const value = Number(bytes);
+        if (!Number.isFinite(value) || value < 0) return 0;
+        return value / (1024 ** 3);
+    }
+
+    function formatGb(bytes) {
+        return bytesToGb(bytes).toFixed(2);
+    }
+
     const [points, setPoints] = useState(() => []);
     const [lastAddedId, setLastAddedId] = useState(null);
     const [commands, setCommands] = useState(() => []);
@@ -113,8 +123,19 @@ export default function App() {
     const [uploadLogText, setUploadLogText] = useState("");
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
-    const maxSingleUploadBytes =
-        currentCommand?.role === ROLE_ADMIN ? MAX_ADMIN_BATCH_BYTES : MAX_UPLOAD_BYTES;
+    const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
+    const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
+    const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
+    const remainingUploadBytes = Math.max(0, totalUploadQuotaBytes - uploadedBytesTotal);
+
+    const [adminUserIdDraft, setAdminUserIdDraft] = useState("");
+    const [adminPanelError, setAdminPanelError] = useState("");
+    const [adminUser, setAdminUser] = useState(null);
+    const [adminLogs, setAdminLogs] = useState(() => []);
+    const [adminSingleGbDraft, setAdminSingleGbDraft] = useState("");
+    const [adminTotalGbDraft, setAdminTotalGbDraft] = useState("");
+    const [isAdminLoading, setIsAdminLoading] = useState(false);
+    const [isAdminSaving, setIsAdminSaving] = useState(false);
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -299,10 +320,16 @@ export default function App() {
             }
 
             if (file.size > maxSingleUploadBytes) {
+                setUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
+                return;
+            }
+        }
+
+        if (files.length > 1) {
+            const batchBytes = files.reduce((sum, file) => sum + file.size, 0);
+            if (batchBytes > remainingUploadBytes) {
                 setUploadError(
-                    currentCommand?.role === ROLE_ADMIN
-                        ? "File is too large. Maximum size is 50 GB for admin."
-                        : "File is too large. Maximum size is 500 MB."
+                    `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`
                 );
                 return;
             }
@@ -370,6 +397,7 @@ export default function App() {
             authKey: authKeyDraft,
             fileName: storedFileName,
             fileSize: sourceFile.size,
+            batchSize: benchFiles.length,
         });
         const putRes = await fetch(uploadMeta.uploadUrl, {
             method: "PUT",
@@ -391,8 +419,18 @@ export default function App() {
             checkerVersion: null,
         };
 
-        const savedPoint = await savePoint({ ...point, authKey: authKeyDraft, fileSize: sourceFile.size });
-        return savedPoint || point;
+        const savedPayload = await savePoint({
+            ...point,
+            authKey: authKeyDraft,
+            fileSize: sourceFile.size,
+            batchSize: benchFiles.length,
+        });
+
+        if (savedPayload?.quota) {
+            setCurrentCommand((prev) => (prev ? { ...prev, ...savedPayload.quota } : prev));
+        }
+
+        return savedPayload?.point || point;
     }
 
     async function addPointFromFile(e) {
@@ -432,10 +470,7 @@ export default function App() {
                     logRows.push({
                         fileName: file.name,
                         success: false,
-                        reason:
-                            currentCommand?.role === ROLE_ADMIN
-                                ? "File is too large. Maximum size is 50 GB for admin."
-                                : "File is too large. Maximum size is 500 MB.",
+                        reason: `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`,
                     });
                     setUploadProgress((prev) => {
                         if (!prev) return prev;
@@ -463,6 +498,16 @@ export default function App() {
                     if (!prev) return prev;
                     return { ...prev, done: prev.done + 1 };
                 });
+            }
+
+            if (benchFiles.length > 1) {
+                const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
+                if (batchBytes > remainingUploadBytes) {
+                    setUploadError(
+                        `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`
+                    );
+                    return;
+                }
             }
 
             if (savedPoints.length > 0) {
@@ -675,10 +720,62 @@ export default function App() {
                 if (!parsed.ok) return false;
                 if (file.size > maxSingleUploadBytes) return false;
             }
+            if (benchFiles.length > 1) {
+                const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
+                if (batchBytes > remainingUploadBytes) return false;
+            }
             const description = normalizeDescriptionForSubmit();
             if (description.length > MAX_DESCRIPTION_LEN) return false;
             return true;
         })();
+
+    async function loadAdminUser() {
+        if (!currentCommand || currentCommand.role !== ROLE_ADMIN) return;
+
+        const userId = Number(adminUserIdDraft);
+        if (!Number.isInteger(userId) || userId < 1) {
+            setAdminPanelError("Enter a valid numeric user id.");
+            return;
+        }
+
+        setIsAdminLoading(true);
+        setAdminPanelError("");
+        try {
+            const payload = await fetchAdminUserById({ authKey: authKeyDraft, userId });
+            setAdminUser(payload.user);
+            setAdminLogs(payload.actionLogs);
+            setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
+            setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
+        } catch (error) {
+            setAdminUser(null);
+            setAdminLogs([]);
+            setAdminPanelError(error?.message || "Failed to load user.");
+        } finally {
+            setIsAdminLoading(false);
+        }
+    }
+
+    async function saveAdminUserSettings() {
+        if (!adminUser) return;
+        setIsAdminSaving(true);
+        setAdminPanelError("");
+        try {
+            const payload = await updateAdminUserUploadSettings({
+                authKey: authKeyDraft,
+                userId: adminUser.id,
+                maxSingleUploadGb: adminSingleGbDraft,
+                totalUploadQuotaGb: adminTotalGbDraft,
+            });
+            setAdminUser(payload.user);
+            setAdminLogs(payload.actionLogs);
+            setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
+            setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to save settings.");
+        } finally {
+            setIsAdminSaving(false);
+        }
+    }
 
     function downloadUploadLog() {
         if (!uploadLogText) return;
@@ -823,6 +920,9 @@ export default function App() {
                     </div>
                     <div className="pill subtle">role: {getRoleLabel(currentCommand?.role)}</div>
                     <span className="dot" style={{ background: currentCommand.color }} />
+                    <div className="pill subtle">
+                        Multi-file quota: {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
+                    </div>
                     <button className="btn ghost small" type="button" onClick={logout}>
                         Log out
                     </button>
@@ -1323,12 +1423,16 @@ export default function App() {
                                     The latest added point is shown as a <b>diamond</b> on the chart.
                                 </div>
 
-                                <div className="cardHint">File is uploaded to S3. Limit: 500 MB per file (admin: 50 GB).</div>
-                                {isAdmin ? (
-                                    <div className="cardHint">
-                                        Admin can select multiple files in this form. The same description is applied to every point.
-                                    </div>
-                                ) : null}
+                                <div className="cardHint">
+                                    File is uploaded to S3. Per-file limit: {formatGb(maxSingleUploadBytes)} GB.
+                                </div>
+                                <div className="cardHint">
+                                    You can upload {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
+                                    for multi-file uploads.
+                                </div>
+                                <div className="cardHint">
+                                    If you upload only one file, it does not consume multi-file quota.
+                                </div>
                             </div>
                         </div>
 
@@ -1339,7 +1443,7 @@ export default function App() {
                                     ref={fileInputRef}
                                     type="file"
                                     accept=".bench"
-                                    multiple={isAdmin}
+                                    multiple
                                     onChange={onFileChange}
                                     className={benchFiles.length > 0 && !canAdd ? "bad" : ""}
                                 />
@@ -1376,6 +1480,95 @@ export default function App() {
                             ) : null}
                         </form>
                     </section>
+
+                    {isAdmin ? (
+                        <section className="card">
+                            <div className="cardHeader tight">
+                                <div>
+                                    <div className="cardTitle">Admin: User settings</div>
+                                    <div className="cardHint">Search by user id and edit upload quotas.</div>
+                                </div>
+                            </div>
+
+                            <div className="form">
+                                <label className="field">
+                                    <span>User id</span>
+                                    <input
+                                        value={adminUserIdDraft}
+                                        onChange={(e) => setAdminUserIdDraft(e.target.value)}
+                                        inputMode="numeric"
+                                        placeholder="e.g. 7"
+                                    />
+                                </label>
+
+                                <button className="btn ghost" type="button" onClick={loadAdminUser} disabled={isAdminLoading}>
+                                    {isAdminLoading ? "Loading..." : "Load user"}
+                                </button>
+
+                                {adminPanelError ? <div className="error">{adminPanelError}</div> : null}
+
+                                {adminUser ? (
+                                    <>
+                                        <div className="cardHint">
+                                            User: <b>{adminUser.name}</b> (id: {adminUser.id}, role: {adminUser.role})
+                                        </div>
+                                        <div className="cardHint">
+                                            Used quota: {formatGb(adminUser.uploadedBytesTotal)} GB (deleting points does not refund).
+                                        </div>
+
+                                        <label className="field">
+                                            <span>Max single file (GB)</span>
+                                            <input
+                                                value={adminSingleGbDraft}
+                                                onChange={(e) => setAdminSingleGbDraft(e.target.value)}
+                                                inputMode="decimal"
+                                            />
+                                        </label>
+
+                                        <label className="field">
+                                            <span>Total quota (GB)</span>
+                                            <input
+                                                value={adminTotalGbDraft}
+                                                onChange={(e) => setAdminTotalGbDraft(e.target.value)}
+                                                inputMode="decimal"
+                                            />
+                                        </label>
+
+                                        <button
+                                            className="btn primary"
+                                            type="button"
+                                            onClick={saveAdminUserSettings}
+                                            disabled={isAdminSaving}
+                                        >
+                                            {isAdminSaving ? "Saving..." : "Save settings"}
+                                        </button>
+
+                                        <div className="cardHint">Latest action logs:</div>
+                                        <div className="list compactList">
+                                            {adminLogs.length === 0 ? (
+                                                <div className="empty">No logs.</div>
+                                            ) : (
+                                                adminLogs.slice(0, 20).map((log) => (
+                                                    <div className="row compactRow" key={log.id}>
+                                                        <div className="compactMain">
+                                                            <div className="compactTop">
+                                                                <span className="pill subtle">{new Date(log.createdAt).toLocaleString()}</span>
+                                                                <span className="pill">{log.action}</span>
+                                                                <span className="pill">actor: {log.actorName || "system"}</span>
+                                                            </div>
+                                                            <div className="compactBottom">
+                                                                <span className="mono mutedMono">{JSON.stringify(log.details || {})}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </>
+                                ) : null}
+                            </div>
+                        </section>
+                    ) : null}
 
                     <section className="card listCard">
                         <div className="cardHeader tight">

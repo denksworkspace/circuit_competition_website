@@ -9,6 +9,19 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
         ensureCommandRolesSchema: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
+    ensureCommandUploadSettingsSchema: vi.fn(),
+    normalizeCommandUploadSettings: vi.fn((row) => ({
+        maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 500 * 1024 * 1024),
+        totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024),
+        uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
+        remainingUploadBytes:
+            Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024) - Number(row?.uploaded_bytes_total || 0),
+    })),
+}));
+vi.mock("../../api/_lib/actionLogs.js", () => ({
+    addActionLog: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "../../api/_roles.js";
@@ -63,13 +76,17 @@ describe("api/points handler", () => {
     });
 
     it("POST validates payload and status", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "participant" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         let req = createMockReq({ method: "POST", body: { authKey: "k" } });
         let res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(400);
 
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "participant" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         req = createMockReq({
             method: "POST",
             body: {
@@ -80,6 +97,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: 1,
+                batchSize: 1,
                 status: "wrong",
             },
         });
@@ -89,7 +107,9 @@ describe("api/points handler", () => {
     });
 
     it("POST rejects too long description and bad fileSize", async () => {
-        sql.mockResolvedValue({ rows: [{ id: 1, name: "team", role: "participant" }] });
+        sql.mockResolvedValue({
+            rows: [{ id: 1, name: "team", role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
 
         let req = createMockReq({
             method: "POST",
@@ -102,6 +122,7 @@ describe("api/points handler", () => {
                 fileName: "file.bench",
                 description: "x".repeat(201),
                 fileSize: 1,
+                batchSize: 1,
             },
         });
         let res = createMockRes();
@@ -118,6 +139,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: -1,
+                batchSize: 1,
             },
         });
         res = createMockRes();
@@ -126,7 +148,9 @@ describe("api/points handler", () => {
     });
 
     it("POST rejects file too large", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "participant" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
 
         const req = createMockReq({
             method: "POST",
@@ -138,6 +162,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: 500 * 1024 * 1024 + 1,
+                batchSize: 1,
             },
         });
         const res = createMockRes();
@@ -146,7 +171,9 @@ describe("api/points handler", () => {
     });
 
     it("POST returns 409 for duplicate benchmark/delay/area", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "leader" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [{ id: "exists" }] });
 
         const req = createMockReq({
@@ -159,6 +186,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: 10,
+                batchSize: 1,
             },
         });
         const res = createMockRes();
@@ -167,7 +195,9 @@ describe("api/points handler", () => {
     });
 
     it("POST handles duplicate insert errors", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "leader" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [] });
         sql.mockRejectedValueOnce(new Error("duplicate key value violates unique constraint"));
 
@@ -181,6 +211,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: 10,
+                batchSize: 1,
             },
         });
         const res = createMockRes();
@@ -189,8 +220,11 @@ describe("api/points handler", () => {
     });
 
     it("POST creates point for valid payload", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, name: "team", role: "leader" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [] });
+        sql.mockResolvedValueOnce({ rows: [{ uploaded_bytes_total: 0, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, max_single_upload_bytes: 500 * 1024 * 1024, role: "leader" }] });
         sql.mockResolvedValueOnce({
             rows: [
                 {
@@ -217,6 +251,7 @@ describe("api/points handler", () => {
                 area: 2,
                 fileName: "file.bench",
                 fileSize: 10,
+                batchSize: 2,
             },
         });
         const res = createMockRes();

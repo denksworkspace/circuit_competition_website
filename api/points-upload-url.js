@@ -1,16 +1,19 @@
 /* global process */
 import { sql } from "@vercel/postgres";
-import { normalizeRole, ensureCommandRolesSchema } from "./_roles.js";
+import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { parseStoredBenchFileName, buildObjectKey } from "./_lib/points.js";
 import { buildPresignedPutUrl } from "./_lib/s3Presign.js";
-import { maxUploadBytesByRole, uploadSizeErrorByRole } from "./_lib/uploadLimits.js";
+import {
+    ensureCommandUploadSettingsSchema,
+    normalizeCommandUploadSettings,
+} from "./_lib/commandUploadSettings.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
 
     const body = parseBody(req);
-    const { authKey, fileName, fileSize } = body || {};
+    const { authKey, fileName, fileSize, batchSize } = body || {};
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -28,19 +31,41 @@ export default async function handler(req, res) {
         return;
     }
 
+    const normalizedBatchSize = Number(batchSize);
+    if (!Number.isInteger(normalizedBatchSize) || normalizedBatchSize < 1) {
+        res.status(400).json({ error: "Invalid batch size." });
+        return;
+    }
+
     await ensureCommandRolesSchema();
-    const cmdRes = await sql`select id, role from commands where auth_key = ${authKey}`;
+    await ensureCommandUploadSettingsSchema();
+    const cmdRes = await sql`
+      select id, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+      from commands
+      where auth_key = ${authKey}
+    `;
     if (cmdRes.rows.length === 0) {
         res.status(401).json({ error: "Invalid auth key." });
         return;
     }
 
     const command = cmdRes.rows[0];
-    const role = normalizeRole(command.role);
-    const maxBytes = maxUploadBytesByRole(role);
+    const uploadSettings = normalizeCommandUploadSettings(command);
+    const maxBytes = uploadSettings.maxSingleUploadBytes;
+    const isMultiFileBatch = normalizedBatchSize > 1;
+    const chargeBytes = isMultiFileBatch ? fileSize : 0;
 
     if (fileSize > maxBytes) {
-        res.status(413).json({ error: uploadSizeErrorByRole(role) });
+        res.status(413).json({
+            error: `File is too large. Maximum size is ${(maxBytes / (1024 ** 3)).toFixed(2)} GB.`,
+        });
+        return;
+    }
+
+    if (chargeBytes > uploadSettings.remainingUploadBytes) {
+        res.status(413).json({
+            error: `Multi-file quota exceeded. Remaining: ${(uploadSettings.remainingUploadBytes / (1024 ** 3)).toFixed(2)} GB.`,
+        });
         return;
     }
 
@@ -88,5 +113,10 @@ export default async function handler(req, res) {
         fileKey: objectKey,
         method: "PUT",
         maxBytes,
+        quota: {
+            ...uploadSettings,
+            chargedBytes: chargeBytes,
+            isMultiFileBatch,
+        },
     });
 }

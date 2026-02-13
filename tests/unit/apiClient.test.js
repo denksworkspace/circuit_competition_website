@@ -55,7 +55,7 @@ describe("apiClient", () => {
 
     it("savePoint returns null when point missing in response", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ body: {} }));
-        await expect(savePoint({ id: "1" })).resolves.toBeNull();
+        await expect(savePoint({ id: "1" })).resolves.toEqual({ point: null, quota: null });
     });
 
     it("deletePoint throws fallback message", async () => {

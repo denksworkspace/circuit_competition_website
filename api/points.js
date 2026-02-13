@@ -1,8 +1,12 @@
 import { sql } from "@vercel/postgres";
-import { ensureCommandRolesSchema, normalizeRole } from "./_roles.js";
+import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { normalizePointRow } from "./_lib/points.js";
-import { maxUploadBytesByRole, uploadSizeErrorByRole } from "./_lib/uploadLimits.js";
+import {
+    ensureCommandUploadSettingsSchema,
+    normalizeCommandUploadSettings,
+} from "./_lib/commandUploadSettings.js";
+import { addActionLog } from "./_lib/actionLogs.js";
 
 const MAX_DESCRIPTION_LEN = 200;
 
@@ -24,6 +28,7 @@ export default async function handler(req, res) {
 
     if (req.method === "POST") {
         await ensureCommandRolesSchema();
+        await ensureCommandUploadSettingsSchema();
 
         const body = parseBody(req);
         const {
@@ -37,6 +42,7 @@ export default async function handler(req, res) {
             authKey,
             checkerVersion,
             fileSize,
+            batchSize,
         } = body || {};
 
         if (!authKey) {
@@ -44,7 +50,11 @@ export default async function handler(req, res) {
             return;
         }
 
-        const cmdRes = await sql`select id, name, role from commands where auth_key = ${authKey}`;
+        const cmdRes = await sql`
+          select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+          from commands
+          where auth_key = ${authKey}
+        `;
         if (cmdRes.rows.length === 0) {
             res.status(401).json({ error: "Invalid auth key." });
             return;
@@ -68,11 +78,28 @@ export default async function handler(req, res) {
             return;
         }
 
-        const role = normalizeRole(command.role);
-        const maxBytes = maxUploadBytesByRole(role);
+        const normalizedBatchSize = Number(batchSize);
+        if (!Number.isInteger(normalizedBatchSize) || normalizedBatchSize < 1) {
+            res.status(400).json({ error: "Invalid batch size." });
+            return;
+        }
+        const isMultiFileBatch = normalizedBatchSize > 1;
+        const chargeBytes = isMultiFileBatch ? fileSize : 0;
+
+        const uploadSettings = normalizeCommandUploadSettings(command);
+        const maxBytes = uploadSettings.maxSingleUploadBytes;
 
         if (fileSize > maxBytes) {
-            res.status(413).json({ error: uploadSizeErrorByRole(role) });
+            res.status(413).json({
+                error: `File is too large. Maximum size is ${(maxBytes / (1024 ** 3)).toFixed(2)} GB.`,
+            });
+            return;
+        }
+
+        if (chargeBytes > uploadSettings.remainingUploadBytes) {
+            res.status(413).json({
+                error: `Multi-file quota exceeded. Remaining: ${(uploadSettings.remainingUploadBytes / (1024 ** 3)).toFixed(2)} GB.`,
+            });
             return;
         }
 
@@ -99,15 +126,64 @@ export default async function handler(req, res) {
             return;
         }
 
+        let quotaRow = null;
+
         try {
+            if (chargeBytes > 0) {
+                const quotaUpdate = await sql`
+                  update commands
+                  set uploaded_bytes_total = uploaded_bytes_total + ${chargeBytes}
+                  where id = ${command.id}
+                    and uploaded_bytes_total + ${chargeBytes} <= total_upload_quota_bytes
+                  returning uploaded_bytes_total, total_upload_quota_bytes, max_single_upload_bytes, role
+                `;
+                if (quotaUpdate.rows.length === 0) {
+                    res.status(413).json({
+                        error: `Multi-file quota exceeded. Remaining: ${(uploadSettings.remainingUploadBytes / (1024 ** 3)).toFixed(2)} GB.`,
+                    });
+                    return;
+                }
+                quotaRow = quotaUpdate.rows[0];
+            }
+
             const insert = await sql`
         insert into points (id, benchmark, delay, area, description, sender, file_name, status, checker_version, command_id)
         values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus}, ${checkerVersion ?? null}, ${command.id})
         returning id, benchmark, delay, area, description, sender, file_name, status, checker_version
       `;
-            res.status(201).json({ point: normalizePointRow(insert.rows[0]) });
+            const nextQuota = quotaRow
+                ? normalizeCommandUploadSettings(quotaRow)
+                : normalizeCommandUploadSettings(command);
+
+            await addActionLog({
+                commandId: command.id,
+                actorCommandId: command.id,
+                action: "point_created",
+                details: {
+                    pointId: id,
+                    benchmark: String(benchmark),
+                    delay,
+                    area,
+                    fileName,
+                    fileSize,
+                    isMultiFileBatch,
+                    chargedBytes: chargeBytes,
+                },
+            });
+
+            res.status(201).json({
+                point: normalizePointRow(insert.rows[0]),
+                quota: nextQuota,
+            });
             return;
         } catch (error) {
+            if (chargeBytes > 0) {
+                await sql`
+                  update commands
+                  set uploaded_bytes_total = greatest(0, uploaded_bytes_total - ${chargeBytes})
+                  where id = ${command.id}
+                `;
+            }
             const message = String(error?.message || "").toLowerCase();
             if (message.includes("unique") || message.includes("duplicate")) {
                 res.status(409).json({ error: "Point with this file name already exists." });
@@ -146,6 +222,12 @@ export default async function handler(req, res) {
         }
 
         await sql`delete from points where id = ${id}`;
+        await addActionLog({
+            commandId,
+            actorCommandId: commandId,
+            action: "point_deleted",
+            details: { pointId: id, note: "Quota is not refunded for deleted points." },
+        });
         res.status(200).json({ ok: true });
         return;
     }

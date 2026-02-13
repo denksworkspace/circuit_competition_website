@@ -9,6 +9,16 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
         ensureCommandRolesSchema: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
+    ensureCommandUploadSettingsSchema: vi.fn(),
+    normalizeCommandUploadSettings: vi.fn((row) => ({
+        maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 500 * 1024 * 1024),
+        totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024),
+        uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
+        remainingUploadBytes:
+            Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024) - Number(row?.uploaded_bytes_total || 0),
+    })),
+}));
 vi.mock("../../api/_lib/s3Presign.js", () => ({
     buildPresignedPutUrl: vi.fn(() => "https://signed.example/upload"),
 }));
@@ -38,21 +48,21 @@ describe("api/points-upload-url handler", () => {
     });
 
     it("returns 401 when auth key missing", async () => {
-        const req = createMockReq({ method: "POST", body: { fileName: benchName, fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(401);
     });
 
     it("returns 400 for invalid file name", async () => {
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: "bad", fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: "bad", fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(400);
     });
 
     it("returns 400 for invalid file size", async () => {
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: -1 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: -1, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(400);
@@ -60,7 +70,7 @@ describe("api/points-upload-url handler", () => {
 
     it("returns 401 when command not found", async () => {
         sql.mockResolvedValueOnce({ rows: [] });
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(ensureCommandRolesSchema).toHaveBeenCalledTimes(1);
@@ -68,10 +78,12 @@ describe("api/points-upload-url handler", () => {
     });
 
     it("returns 413 when size exceeds role limit", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 1_000, uploaded_bytes_total: 0 }],
+        });
         const req = createMockReq({
             method: "POST",
-            body: { authKey: "k", fileName: benchName, fileSize: 500 * 1024 * 1024 + 1 },
+            body: { authKey: "k", fileName: benchName, fileSize: 500 * 1024 * 1024 + 1, batchSize: 1 },
         });
         const res = createMockRes();
         await handler(req, res);
@@ -79,10 +91,12 @@ describe("api/points-upload-url handler", () => {
     });
 
     it("returns 409 on duplicate point", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "leader" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [{ id: "dup" }] });
 
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(409);
@@ -90,20 +104,24 @@ describe("api/points-upload-url handler", () => {
 
     it("returns 500 when s3 env incomplete", async () => {
         process.env.S3_BUCKET = "";
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "leader" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [] });
 
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(500);
     });
 
     it("returns signed upload url for valid payload", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "admin", max_single_upload_bytes: 50 * 1024 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
         sql.mockResolvedValueOnce({ rows: [] });
 
-        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
 

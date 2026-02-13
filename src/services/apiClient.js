@@ -61,7 +61,10 @@ export async function savePoint(pointPayload) {
         throw new Error(data?.error || "Failed to save point.");
     }
 
-    return data?.point || null;
+    return {
+        point: data?.point || null,
+        quota: data?.quota || null,
+    };
 }
 
 export async function deletePoint({ id, authKey }) {
@@ -77,4 +80,50 @@ export async function deletePoint({ id, authKey }) {
     }
 
     return data;
+}
+
+export async function fetchAdminUserById({ authKey, userId }) {
+    const query = new URLSearchParams({
+        authKey: String(authKey || ""),
+        userId: String(userId || ""),
+    });
+
+    const response = await fetch(`/api/admin-users?${query.toString()}`);
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load user.");
+    }
+
+    return {
+        user: data?.user || null,
+        actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
+    };
+}
+
+export async function updateAdminUserUploadSettings({
+    authKey,
+    userId,
+    maxSingleUploadGb,
+    totalUploadQuotaGb,
+}) {
+    const response = await fetch("/api/admin-users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            authKey,
+            userId,
+            maxSingleUploadGb,
+            totalUploadQuotaGb,
+        }),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to update user settings.");
+    }
+
+    return {
+        user: data?.user || null,
+        actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
+    };
 }

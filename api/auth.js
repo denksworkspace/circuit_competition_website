@@ -1,6 +1,10 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, normalizeRole } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
+import {
+    ensureCommandUploadSettingsSchema,
+    normalizeCommandUploadSettings,
+} from "./_lib/commandUploadSettings.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -13,9 +17,10 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
 
     const result = await sql`
-      select id, name, color, role
+      select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -27,12 +32,14 @@ export default async function handler(req, res) {
     }
 
     const row = result.rows[0];
+    const uploadSettings = normalizeCommandUploadSettings(row);
     res.status(200).json({
         command: {
             id: Number(row.id),
             name: row.name,
             color: row.color,
             role: normalizeRole(row.role),
+            ...uploadSettings,
         },
     });
 }
