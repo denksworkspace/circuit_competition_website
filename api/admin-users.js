@@ -117,8 +117,8 @@ export default async function handler(req, res) {
     const update = await sql`
       update commands
       set
-        max_single_upload_bytes = ${maxSingleBytes},
-        total_upload_quota_bytes = ${totalQuotaBytes}
+        max_single_upload_bytes = ${maxSingleBytes}::bigint,
+        total_upload_quota_bytes = ${totalQuotaBytes}::bigint
       where id = ${userIdInt}
       returning id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
     `;

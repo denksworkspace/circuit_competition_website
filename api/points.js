@@ -132,9 +132,9 @@ export default async function handler(req, res) {
             if (chargeBytes > 0) {
                 const quotaUpdate = await sql`
                   update commands
-                  set uploaded_bytes_total = uploaded_bytes_total + ${chargeBytes}
+                  set uploaded_bytes_total = uploaded_bytes_total + ${chargeBytes}::bigint
                   where id = ${command.id}
-                    and uploaded_bytes_total + ${chargeBytes} <= total_upload_quota_bytes
+                    and uploaded_bytes_total + ${chargeBytes}::bigint <= total_upload_quota_bytes
                   returning uploaded_bytes_total, total_upload_quota_bytes, max_single_upload_bytes, role
                 `;
                 if (quotaUpdate.rows.length === 0) {
@@ -180,7 +180,7 @@ export default async function handler(req, res) {
             if (chargeBytes > 0) {
                 await sql`
                   update commands
-                  set uploaded_bytes_total = greatest(0, uploaded_bytes_total - ${chargeBytes})
+                  set uploaded_bytes_total = greatest(0::bigint, uploaded_bytes_total - ${chargeBytes}::bigint)
                   where id = ${command.id}
                 `;
             }
