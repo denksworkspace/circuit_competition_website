@@ -20,11 +20,13 @@ describe("api/_lib/commandUploadSettings", () => {
             role: "leader",
             max_single_upload_bytes: 1024,
             total_upload_quota_bytes: 4096,
+            max_multi_file_batch_count: 17,
             uploaded_bytes_total: 1000,
         });
 
         expect(out.maxSingleUploadBytes).toBe(1024);
         expect(out.totalUploadQuotaBytes).toBe(4096);
+        expect(out.maxMultiFileBatchCount).toBe(17);
         expect(out.uploadedBytesTotal).toBe(1000);
         expect(out.remainingUploadBytes).toBe(3096);
     });
@@ -44,6 +46,6 @@ describe("api/_lib/commandUploadSettings", () => {
         await mod.ensureCommandUploadSettingsSchema();
         await mod.ensureCommandUploadSettingsSchema();
 
-        expect(sql).toHaveBeenCalledTimes(9);
+        expect(sql).toHaveBeenCalledTimes(12);
     });
 });

@@ -5,6 +5,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { parseStoredBenchFileName, buildObjectKey } from "./_lib/points.js";
 import { buildPresignedPutUrl } from "./_lib/s3Presign.js";
 import {
+    DEFAULT_MAX_MULTI_FILE_BATCH_COUNT,
     ensureCommandUploadSettingsSchema,
     normalizeCommandUploadSettings,
 } from "./_lib/commandUploadSettings.js";
@@ -40,7 +41,7 @@ export default async function handler(req, res) {
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
     const cmdRes = await sql`
-      select id, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+      select id, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
       from commands
       where auth_key = ${authKey}
     `;
@@ -51,6 +52,11 @@ export default async function handler(req, res) {
 
     const command = cmdRes.rows[0];
     const uploadSettings = normalizeCommandUploadSettings(command);
+    const maxBatchCount = Math.max(1, Number(uploadSettings.maxMultiFileBatchCount || DEFAULT_MAX_MULTI_FILE_BATCH_COUNT));
+    if (normalizedBatchSize > maxBatchCount) {
+        res.status(400).json({ error: `Too many files in batch. Maximum is ${maxBatchCount}.` });
+        return;
+    }
     const maxBytes = uploadSettings.maxSingleUploadBytes;
     const isMultiFileBatch = normalizedBatchSize > 1;
     const chargeBytes = isMultiFileBatch ? fileSize : 0;

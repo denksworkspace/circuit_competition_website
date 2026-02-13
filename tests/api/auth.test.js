@@ -16,6 +16,7 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
         totalUploadQuotaBytes: 50 * 1024 * 1024 * 1024,
         uploadedBytesTotal: 0,
         remainingUploadBytes: 50 * 1024 * 1024 * 1024,
+        maxMultiFileBatchCount: 100,
     })),
 }));
 

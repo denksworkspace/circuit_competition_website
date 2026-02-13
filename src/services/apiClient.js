@@ -105,6 +105,7 @@ export async function updateAdminUserUploadSettings({
     userId,
     maxSingleUploadGb,
     totalUploadQuotaGb,
+    maxMultiFileBatchCount,
 }) {
     const response = await fetch("/api/admin-users", {
         method: "PATCH",
@@ -114,6 +115,7 @@ export async function updateAdminUserUploadSettings({
             userId,
             maxSingleUploadGb,
             totalUploadQuotaGb,
+            maxMultiFileBatchCount,
         }),
     });
 

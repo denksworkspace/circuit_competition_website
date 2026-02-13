@@ -14,6 +14,7 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     normalizeCommandUploadSettings: vi.fn((row) => ({
         maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 1),
         totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 1),
+        maxMultiFileBatchCount: Number(row?.max_multi_file_batch_count || 100),
         uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
         remainingUploadBytes:
             Number(row?.total_upload_quota_bytes || 1) - Number(row?.uploaded_bytes_total || 0),
@@ -50,7 +51,7 @@ describe("api/admin-users handler", () => {
     it("GET returns user and logs", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 99, role: "admin" }] });
         sql.mockResolvedValueOnce({
-            rows: [{ id: 1, name: "u", color: "#111", role: "leader", max_single_upload_bytes: 100, total_upload_quota_bytes: 200, uploaded_bytes_total: 50 }],
+            rows: [{ id: 1, name: "u", color: "#111", role: "leader", max_single_upload_bytes: 100, total_upload_quota_bytes: 200, max_multi_file_batch_count: 100, uploaded_bytes_total: 50 }],
         });
 
         const req = { method: "GET", query: { authKey: "k", userId: "1" } };
@@ -65,7 +66,7 @@ describe("api/admin-users handler", () => {
     it("PATCH updates settings", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 99, role: "admin" }] });
         sql.mockResolvedValueOnce({
-            rows: [{ id: 1, name: "u", color: "#111", role: "leader", max_single_upload_bytes: 100, total_upload_quota_bytes: 200, uploaded_bytes_total: 50 }],
+            rows: [{ id: 1, name: "u", color: "#111", role: "leader", max_single_upload_bytes: 100, total_upload_quota_bytes: 200, max_multi_file_batch_count: 20, uploaded_bytes_total: 50 }],
         });
 
         const req = createMockReq({
@@ -75,6 +76,7 @@ describe("api/admin-users handler", () => {
                 userId: 1,
                 maxSingleUploadGb: 1,
                 totalUploadQuotaGb: 2,
+                maxMultiFileBatchCount: 20,
             },
         });
         const res = createMockRes();

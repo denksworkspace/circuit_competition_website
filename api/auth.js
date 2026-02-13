@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     await ensureCommandUploadSettingsSchema();
 
     const result = await sql`
-      select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+      select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
       from commands
       where auth_key = ${authKey}
       limit 1

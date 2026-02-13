@@ -14,6 +14,7 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     normalizeCommandUploadSettings: vi.fn((row) => ({
         maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 500 * 1024 * 1024),
         totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024),
+        maxMultiFileBatchCount: Number(row?.max_multi_file_batch_count || 100),
         uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
         remainingUploadBytes:
             Number(row?.total_upload_quota_bytes || 50 * 1024 * 1024 * 1024) - Number(row?.uploaded_bytes_total || 0),
@@ -104,6 +105,30 @@ describe("api/points handler", () => {
         res = createMockRes();
         await handler(req, res);
         expect(res.statusCode).toBe(400);
+    });
+
+    it("POST rejects batch size over user limit", async () => {
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "participant", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, max_multi_file_batch_count: 20, uploaded_bytes_total: 0 }],
+        });
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                id: "p1",
+                benchmark: "254",
+                delay: 1,
+                area: 2,
+                fileName: "file.bench",
+                fileSize: 1,
+                batchSize: 21,
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error).toContain("Maximum is 20");
     });
 
     it("POST rejects too long description and bad fileSize", async () => {

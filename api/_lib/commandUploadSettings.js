@@ -4,6 +4,7 @@ import { ROLE_ADMIN } from "../_roles.js";
 export const DEFAULT_MULTI_UPLOAD_QUOTA_BYTES = 50 * 1024 * 1024 * 1024;
 export const DEFAULT_SINGLE_UPLOAD_BYTES = 500 * 1024 * 1024;
 export const DEFAULT_ADMIN_SINGLE_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024;
+export const DEFAULT_MAX_MULTI_FILE_BATCH_COUNT = 100;
 
 let uploadSettingsReadyPromise = null;
 
@@ -21,12 +22,17 @@ export function normalizeCommandUploadSettings(commandRow) {
     const totalUploadQuotaBytes = normalizeByteValue(commandRow?.total_upload_quota_bytes, DEFAULT_MULTI_UPLOAD_QUOTA_BYTES);
     const uploadedBytesTotal = Math.max(0, Math.floor(Number(commandRow?.uploaded_bytes_total) || 0));
     const remainingUploadBytes = Math.max(0, totalUploadQuotaBytes - uploadedBytesTotal);
+    const maxMultiFileBatchCount = Math.max(
+        1,
+        Math.floor(Number(commandRow?.max_multi_file_batch_count) || DEFAULT_MAX_MULTI_FILE_BATCH_COUNT)
+    );
 
     return {
         maxSingleUploadBytes,
         totalUploadQuotaBytes,
         uploadedBytesTotal,
         remainingUploadBytes,
+        maxMultiFileBatchCount,
     };
 }
 
@@ -36,6 +42,7 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`alter table commands add column if not exists max_single_upload_bytes bigint`;
             await sql`alter table commands add column if not exists total_upload_quota_bytes bigint`;
             await sql`alter table commands add column if not exists uploaded_bytes_total bigint`;
+            await sql`alter table commands add column if not exists max_multi_file_batch_count integer`;
 
             await sql`
               update commands
@@ -61,9 +68,17 @@ export async function ensureCommandUploadSettingsSchema() {
                  or uploaded_bytes_total < 0
             `;
 
+            await sql`
+              update commands
+              set max_multi_file_batch_count = 100
+              where max_multi_file_batch_count is null
+                 or max_multi_file_batch_count < 1
+            `;
+
             await sql`alter table commands alter column max_single_upload_bytes set default 524288000`;
             await sql`alter table commands alter column total_upload_quota_bytes set default 53687091200`;
             await sql`alter table commands alter column uploaded_bytes_total set default 0`;
+            await sql`alter table commands alter column max_multi_file_batch_count set default 100`;
         })().catch((error) => {
             uploadSettingsReadyPromise = null;
             throw error;

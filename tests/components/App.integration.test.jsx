@@ -59,6 +59,7 @@ function withDefaultQuota(command) {
         totalUploadQuotaBytes: 50 * 1024 * 1024 * 1024,
         uploadedBytesTotal: 0,
         remainingUploadBytes: 50 * 1024 * 1024 * 1024,
+        maxMultiFileBatchCount: 100,
         ...command,
     };
 }
@@ -147,6 +148,31 @@ describe("App integration", () => {
         fireEvent.change(fileInput, { target: { files: [invalidFile] } });
 
         expect(await screen.findByText(/Invalid file name pattern/)).toBeInTheDocument();
+    });
+
+    it("validates multi-file count limit", async () => {
+        const routes = bootstrapRoutes({
+            authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" }) },
+        });
+        installFetchRouter(routes);
+
+        render(<App />);
+        expect(await screen.findByText("Access key required")).toBeInTheDocument();
+
+        fireEvent.change(screen.getByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Add a point");
+
+        const fileInput = screen.getByLabelText("file");
+        const files = Array.from({ length: 101 }, (_, i) => {
+            const delay = i + 1;
+            return new File(["bench data"], `bench254_${delay}_40.bench`, { type: "text/plain" });
+        });
+        fireEvent.change(fileInput, { target: { files } });
+
+        expect(await screen.findByText(/Too many files selected\. Maximum is 100\./)).toBeInTheDocument();
     });
 
     it("uploads valid file and creates point", async () => {

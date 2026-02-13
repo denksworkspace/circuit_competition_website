@@ -4,6 +4,7 @@ export const MAX_INPUT_FILENAME_LEN = 80;
 export const MAX_DESCRIPTION_LEN = 200;
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 export const MAX_ADMIN_BATCH_BYTES = 50 * 1024 * 1024 * 1024;
+export const MAX_MULTI_FILE_BATCH_COUNT = 100;
 
 export const ROLE_ADMIN = "admin";
 export const ROLE_LEADER = "leader";

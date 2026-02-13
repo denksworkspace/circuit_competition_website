@@ -2,6 +2,7 @@ import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, normalizeRole, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import {
+    DEFAULT_MAX_MULTI_FILE_BATCH_COUNT,
     ensureCommandUploadSettingsSchema,
     normalizeCommandUploadSettings,
 } from "./_lib/commandUploadSettings.js";
@@ -11,6 +12,12 @@ function parsePositiveGb(raw) {
     const value = Number(raw);
     if (!Number.isFinite(value) || value <= 0) return null;
     return Math.floor(value * 1024 * 1024 * 1024);
+}
+
+function parsePositiveInt(raw) {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) return null;
+    return value;
 }
 
 function normalizeUserRow(row) {
@@ -63,7 +70,7 @@ export default async function handler(req, res) {
         }
 
         const userRes = await sql`
-          select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+          select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
           from commands
           where id = ${userId}
           limit 1
@@ -87,6 +94,7 @@ export default async function handler(req, res) {
         userId,
         maxSingleUploadGb,
         totalUploadQuotaGb,
+        maxMultiFileBatchCount,
     } = body || {};
 
     const admin = await authenticateAdmin(authKey);
@@ -103,9 +111,12 @@ export default async function handler(req, res) {
 
     const maxSingleBytes = parsePositiveGb(maxSingleUploadGb);
     const totalQuotaBytes = parsePositiveGb(totalUploadQuotaGb);
+    const maxBatchCount = parsePositiveInt(maxMultiFileBatchCount);
 
-    if (!maxSingleBytes || !totalQuotaBytes) {
-        res.status(400).json({ error: "Quota values must be positive GB numbers." });
+    if (!maxSingleBytes || !totalQuotaBytes || !maxBatchCount) {
+        res.status(400).json({
+            error: `Quota values must be positive numbers. Multi-file batch count must be an integer >= 1 (default ${DEFAULT_MAX_MULTI_FILE_BATCH_COUNT}).`,
+        });
         return;
     }
 
@@ -118,9 +129,10 @@ export default async function handler(req, res) {
       update commands
       set
         max_single_upload_bytes = ${maxSingleBytes}::bigint,
-        total_upload_quota_bytes = ${totalQuotaBytes}::bigint
+        total_upload_quota_bytes = ${totalQuotaBytes}::bigint,
+        max_multi_file_batch_count = ${maxBatchCount}
       where id = ${userIdInt}
-      returning id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total
+      returning id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
     `;
 
     if (update.rows.length === 0) {
@@ -135,6 +147,7 @@ export default async function handler(req, res) {
         details: {
             maxSingleUploadGb: Number(maxSingleUploadGb),
             totalUploadQuotaGb: Number(totalUploadQuotaGb),
+            maxMultiFileBatchCount: Number(maxMultiFileBatchCount),
         },
     });
 

@@ -16,6 +16,7 @@ import {
     DIVISIONS,
     MAX_DESCRIPTION_LEN,
     MAX_INPUT_FILENAME_LEN,
+    MAX_MULTI_FILE_BATCH_COUNT,
     MAX_VALUE,
     ROLE_ADMIN,
     STATUS_LIST,
@@ -127,6 +128,7 @@ export default function App() {
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
     const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
     const remainingUploadBytes = Math.max(0, totalUploadQuotaBytes - uploadedBytesTotal);
+    const maxMultiFileBatchCount = Math.max(1, Number(currentCommand?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
 
     const [adminUserIdDraft, setAdminUserIdDraft] = useState("");
     const [adminPanelError, setAdminPanelError] = useState("");
@@ -134,6 +136,7 @@ export default function App() {
     const [adminLogs, setAdminLogs] = useState(() => []);
     const [adminSingleGbDraft, setAdminSingleGbDraft] = useState("");
     const [adminTotalGbDraft, setAdminTotalGbDraft] = useState("");
+    const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
 
@@ -312,6 +315,11 @@ export default function App() {
             return;
         }
 
+        if (files.length > maxMultiFileBatchCount) {
+            setUploadError(`Too many files selected. Maximum is ${maxMultiFileBatchCount}.`);
+            return;
+        }
+
         for (const file of files) {
             const parsed = parseBenchFileName(file.name);
             if (!parsed.ok) {
@@ -436,6 +444,10 @@ export default function App() {
     async function addPointFromFile(e) {
         e.preventDefault();
         if (benchFiles.length === 0) return;
+        if (benchFiles.length > maxMultiFileBatchCount) {
+            setUploadError(`Too many files selected. Maximum is ${maxMultiFileBatchCount}.`);
+            return;
+        }
 
         const description = normalizeDescriptionForSubmit();
         if (description.length > MAX_DESCRIPTION_LEN) {
@@ -715,6 +727,7 @@ export default function App() {
         benchFiles.length > 0 &&
         !isUploading &&
         (() => {
+            if (benchFiles.length > maxMultiFileBatchCount) return false;
             for (const file of benchFiles) {
                 const parsed = parseBenchFileName(file.name);
                 if (!parsed.ok) return false;
@@ -746,6 +759,7 @@ export default function App() {
             setAdminLogs(payload.actionLogs);
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
+            setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
         } catch (error) {
             setAdminUser(null);
             setAdminLogs([]);
@@ -765,11 +779,13 @@ export default function App() {
                 userId: adminUser.id,
                 maxSingleUploadGb: adminSingleGbDraft,
                 totalUploadQuotaGb: adminTotalGbDraft,
+                maxMultiFileBatchCount: adminBatchCountDraft,
             });
             setAdminUser(payload.user);
             setAdminLogs(payload.actionLogs);
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
+            setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to save settings.");
         } finally {
@@ -1433,6 +1449,9 @@ export default function App() {
                                 <div className="cardHint">
                                     If you upload only one file, it does not consume multi-file quota.
                                 </div>
+                                <div className="cardHint">
+                                    Multi-file upload limit: {maxMultiFileBatchCount} files per batch.
+                                </div>
                             </div>
                         </div>
 
@@ -1531,6 +1550,15 @@ export default function App() {
                                                 value={adminTotalGbDraft}
                                                 onChange={(e) => setAdminTotalGbDraft(e.target.value)}
                                                 inputMode="decimal"
+                                            />
+                                        </label>
+
+                                        <label className="field">
+                                            <span>Max files per multi-file batch</span>
+                                            <input
+                                                value={adminBatchCountDraft}
+                                                onChange={(e) => setAdminBatchCountDraft(e.target.value)}
+                                                inputMode="numeric"
                                             />
                                         </label>
 
