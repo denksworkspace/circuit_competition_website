@@ -40,8 +40,8 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`
               update commands
               set max_single_upload_bytes = case
-                when lower(role) = 'admin' then ${DEFAULT_ADMIN_SINGLE_UPLOAD_BYTES}::bigint
-                else ${DEFAULT_SINGLE_UPLOAD_BYTES}::bigint
+                when lower(role) = 'admin' then 53687091200
+                else 524288000
               end
               where max_single_upload_bytes is null
                  or max_single_upload_bytes <= 0
@@ -49,7 +49,7 @@ export async function ensureCommandUploadSettingsSchema() {
 
             await sql`
               update commands
-              set total_upload_quota_bytes = ${DEFAULT_MULTI_UPLOAD_QUOTA_BYTES}::bigint
+              set total_upload_quota_bytes = 53687091200
               where total_upload_quota_bytes is null
                  or total_upload_quota_bytes <= 0
             `;
@@ -61,8 +61,8 @@ export async function ensureCommandUploadSettingsSchema() {
                  or uploaded_bytes_total < 0
             `;
 
-            await sql`alter table commands alter column max_single_upload_bytes set default ${DEFAULT_SINGLE_UPLOAD_BYTES}::bigint`;
-            await sql`alter table commands alter column total_upload_quota_bytes set default ${DEFAULT_MULTI_UPLOAD_QUOTA_BYTES}::bigint`;
+            await sql`alter table commands alter column max_single_upload_bytes set default 524288000`;
+            await sql`alter table commands alter column total_upload_quota_bytes set default 53687091200`;
             await sql`alter table commands alter column uploaded_bytes_total set default 0`;
         })().catch((error) => {
             uploadSettingsReadyPromise = null;
