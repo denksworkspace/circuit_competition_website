@@ -1,22 +1,9 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, normalizeRole } from "./_roles.js";
-
-function parseBody(req) {
-    if (req.body && typeof req.body === "object") return req.body;
-    if (!req.body) return {};
-    try {
-        return JSON.parse(req.body);
-    } catch {
-        return {};
-    }
-}
+import { parseBody, rejectMethod } from "./_lib/http.js";
 
 export default async function handler(req, res) {
-    if (req.method !== "POST") {
-        res.setHeader("Allow", "POST");
-        res.status(405).end();
-        return;
-    }
+    if (rejectMethod(req, res, ["POST"])) return;
 
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();

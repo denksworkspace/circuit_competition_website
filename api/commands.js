@@ -1,12 +1,9 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, normalizeRole } from "./_roles.js";
+import { rejectMethod } from "./_lib/http.js";
 
 export default async function handler(req, res) {
-    if (req.method !== "GET") {
-        res.setHeader("Allow", "GET");
-        res.status(405).end();
-        return;
-    }
+    if (rejectMethod(req, res, ["GET"])) return;
 
     await ensureCommandRolesSchema();
 

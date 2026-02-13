@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import "./App.css";
 import {
     ResponsiveContainer,
     ScatterChart,
@@ -10,364 +9,43 @@ import {
     Tooltip,
     ReferenceLine,
 } from "recharts";
-
-const MAX_VALUE = 1_000_000_000; // 10^9
-const DIVISIONS = 10;
-const MAX_INPUT_FILENAME_LEN = 80;
-const MAX_DESCRIPTION_LEN = 200;
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-const MAX_ADMIN_BATCH_BYTES = 50 * 1024 * 1024 * 1024;
-const ROLE_ADMIN = "admin";
-const ROLE_LEADER = "leader";
-const ROLE_PARTICIPANT = "participant";
-
-// bench[200-299]_[delay]_[area][.bench]
-const BENCH_INPUT_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)(?:\.bench)?$/;
-
-const DELETE_PREVIEW_LIMIT = 3;
-
-const STATUS_LIST = ["non-verified", "verified", "failed"];
-const DEFAULT_TEST_COMMAND_COUNT = 15;
-
-// Brighter, more separated palette
-const USER_PALETTE = [
-    "#ff1744",
-    "#ff9100",
-    "#ffea00",
-    "#00e676",
-    "#00e5ff",
-    "#2979ff",
-    "#651fff",
-    "#d500f9",
-    "#1de9b6",
-    "#f50057",
-];
-
-function uid() {
-    return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
-function clamp(value, lo, hi) {
-    return Math.min(hi, Math.max(lo, value));
-}
-
-function formatIntNoGrouping(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "";
-    return Math.trunc(n).toLocaleString("en-US", { useGrouping: false });
-}
-
-function buildAxis(maxValue, divisions, hardCap) {
-    const max = clamp(Math.floor(maxValue), 1, hardCap);
-    const div = Math.max(1, Math.floor(divisions));
-    const step = Math.max(1, Math.ceil(max / div));
-
-    let overflow = max + step;
-    overflow = Math.min(overflow, hardCap);
-
-    const ticks = [0];
-    for (let v = step; v < max; v += step) ticks.push(v);
-    if (ticks[ticks.length - 1] !== max) ticks.push(max);
-    if (ticks[ticks.length - 1] !== overflow) ticks.push(overflow);
-
-    return { max, step, overflow, ticks };
-}
-
-function computePlottedPoint(point, delayMax, areaMax, delayStep, areaStep, delayOverflowLane, areaOverflowLane) {
-    const outsideDelay = Math.max(0, point.delay - delayMax);
-    const outsideArea = Math.max(0, point.area - areaMax);
-    const isClipped = outsideDelay > 0 || outsideArea > 0;
-
-    const BASE_R = 4;
-    const MIN_R = 2.8;
-    // Normalize by axis tick size so +10 delay does not look "very far" when axis step is large.
-    const delayNorm = outsideDelay / Math.max(1, delayStep * 3);
-    const areaNorm = outsideArea / Math.max(1, areaStep * 3);
-    const normalizedDistance = Math.hypot(delayNorm, areaNorm);
-    const radius = isClipped ? clamp(BASE_R - normalizedDistance * 0.55, MIN_R, BASE_R) : BASE_R;
-
-    return {
-        ...point,
-        delayDisp: point.delay > delayMax ? delayOverflowLane : point.delay,
-        areaDisp: point.area > areaMax ? areaOverflowLane : point.area,
-        isClipped,
-        radius,
-    };
-}
-
-function TenPowNine() {
-    return (
-        <span>
-      10<sup>9</sup>
-    </span>
-    );
-}
-
-function parsePosIntCapped(str, maxValue) {
-    if (str === "") return null;
-    if (!/^\d+$/.test(str)) return null;
-    const n = Number(str);
-    if (!Number.isSafeInteger(n) || n < 1 || n > maxValue) return null;
-    return n;
-}
-
-function statusColor(status) {
-    if (status === "verified") return "#16a34a"; // green
-    if (status === "failed") return "#dc2626"; // red
-    return "#2563eb"; // non-verified -> blue
-}
-
-function hashString(str) {
-    let h = 2166136261;
-    for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-    }
-    return h >>> 0;
-}
-
-function userColor(sender) {
-    const idx = hashString(sender || "unknown") % USER_PALETTE.length;
-    return USER_PALETTE[idx];
-}
-
-
-function commandColor(sender, commandByName) {
-    // If this is a test sender like "test_command7", map it to "command7" colors.
-    const s = String(sender || "");
-    const testMatch = s.match(/^test_command(\d+)$/);
-    if (testMatch) {
-        const mapped = `command${testMatch[1]}`;
-        const mappedCmd = commandByName.get(mapped);
-        if (mappedCmd) return mappedCmd.color;
-        return userColor(mapped);
-    }
-
-    const cmd = commandByName.get(s);
-    if (cmd) return cmd.color;
-    return userColor(s);
-}
-
-function sanitizeFileToken(value) {
-    return String(value || "")
-        .trim()
-        .replace(/[^A-Za-z0-9-]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "") || "x";
-}
-
-function buildStoredFileName({ benchmark, delay, area, pointId, sender }) {
-    return `bench${benchmark}_${delay}_${area}_${sanitizeFileToken(sender)}_${sanitizeFileToken(pointId)}.bench`;
-}
-
-function getRoleLabel(role) {
-    if (role === ROLE_ADMIN) return "admin";
-    if (role === ROLE_LEADER) return "leader";
-    return "participant";
-}
-
-function parseBenchFileName(fileNameRaw) {
-    const fileName = (fileNameRaw || "").trim();
-    if (!fileName) return { ok: false, error: "Empty file name." };
-    if (fileName.length > MAX_INPUT_FILENAME_LEN) {
-        return {
-            ok: false,
-            error: `File name is too long (max ${MAX_INPUT_FILENAME_LEN}).`,
-        };
-    }
-
-    const m = fileName.match(BENCH_INPUT_NAME_RE);
-    if (!m) {
-        return {
-            ok: false,
-            error:
-                "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>[.bench]",
-        };
-    }
-
-    const benchmark = Number(m[1]);
-    const delay = Number(m[2]);
-    const area = Number(m[3]);
-
-    if (!Number.isSafeInteger(benchmark) || benchmark < 200 || benchmark > 299) {
-        return { ok: false, error: "Benchmark must be in [200..299]." };
-    }
-    if (!Number.isSafeInteger(delay) || delay < 0 || delay > MAX_VALUE) {
-        return { ok: false, error: "Delay must be an integer in [0..10^9]." };
-    }
-    if (!Number.isSafeInteger(area) || area < 0 || area > MAX_VALUE) {
-        return { ok: false, error: "Area must be an integer in [0..10^9]." };
-    }
-
-    return {
-        ok: true,
-        benchmark,
-        delay,
-        area,
-    };
-}
-
-function CustomTooltip({ active, payload }) {
-    if (!active || !payload || payload.length === 0) return null;
-    const p = payload[0]?.payload;
-    if (!p) return null;
-
-    return (
-        <div className="tooltip">
-            <div className="tooltipTitle">Point</div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">benchmark:</span>
-                <span className="tooltipVal">{p.benchmark}</span>
-            </div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">sender:</span>
-                <span className="tooltipVal">{p.sender}</span>
-            </div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">status:</span>
-                <span className="tooltipVal">{p.status}</span>
-            </div>
-            <div className="tooltipRow">
-                <span className="tooltipKey">checker:</span>
-                <span className="tooltipVal">{p.checkerVersion || "null"}</span>
-            </div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">name:</span>
-                <span className="tooltipVal">{p.description}</span>
-            </div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">delay:</span>
-                <span className="tooltipVal">{formatIntNoGrouping(p.delay)}</span>
-            </div>
-
-            <div className="tooltipRow">
-                <span className="tooltipKey">area:</span>
-                <span className="tooltipVal">{formatIntNoGrouping(p.area)}</span>
-            </div>
-
-            {p.fileName ? (
-                <div className="tooltipRow">
-                    <span className="tooltipKey">file:</span>
-                    <span className="tooltipVal">{p.fileName}</span>
-                </div>
-            ) : null}
-        </div>
-    );
-}
-
-function randInt(lo, hiInclusive) {
-    return lo + Math.floor(Math.random() * (hiInclusive - lo + 1));
-}
-
-function randomChoice(arr) {
-    return arr[randInt(0, arr.length - 1)];
-}
-
-// Diamond for latest point
-function Diamond({ cx, cy, r, fill, stroke, strokeWidth, onClick }) {
-    const d = r * 1.35;
-    const points = `${cx},${cy - d} ${cx + d},${cy} ${cx},${cy + d} ${cx - d},${cy}`;
-    return (
-        <polygon
-            points={points}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={strokeWidth}
-            onClick={onClick}
-            tabIndex={-1}
-            focusable="false"
-            onMouseDown={(e) => e.preventDefault()}
-            style={{ cursor: "pointer" }}
-        />
-    );
-}
-
-function computeParetoFrontOriginal(points) {
-    const sorted = [...points].sort((a, b) => {
-        if (a.delay !== b.delay) return a.delay - b.delay;
-        return a.area - b.area;
-    });
-
-    const front = [];
-    let bestArea = Infinity;
-
-    for (const p of sorted) {
-        if (p.area < bestArea) {
-            front.push(p);
-            bestArea = p.area;
-        }
-    }
-    return front;
-}
-
-function pickInt(lo, hi) {
-    const a = Math.ceil(Math.min(lo, hi));
-    const b = Math.floor(Math.max(lo, hi));
-    if (a > b) return a;
-    return a + Math.floor(Math.random() * (b - a + 1));
-}
-
-function pickAbove(minExclusive, maxInclusive) {
-    const lo = Math.min(maxInclusive, minExclusive + 1);
-    const hi = maxInclusive;
-    if (lo > hi) return hi;
-    return pickInt(lo, hi);
-}
-
-/**
- * Choose area for a delay that DOES NOT exist yet.
- * We look at current Pareto-front points and find the nearest front point on the left and right by delay.
- *
- * If left has area1 and right has area2:
- * 50% -> uniform in [min(area1, area2), max(area1, area2)]
- * 50% -> uniform in (max(area1, area2), 1000]
- *
- * If only one side exists with areaS:
- * 50% -> uniform in [100, areaS]
- * 50% -> uniform in (areaS, 1000]
- *
- * If no front points exist yet: uniform [100..1000]
- */
-function chooseAreaSmartFromParetoFront(frontPoints, newDelay) {
-    const sortedFront = [...frontPoints].sort((a, b) => a.delay - b.delay);
-
-    let left = null;
-    for (let i = sortedFront.length - 1; i >= 0; i--) {
-        if (sortedFront[i].delay < newDelay) {
-            left = sortedFront[i];
-            break;
-        }
-    }
-
-    let right = null;
-    for (let i = 0; i < sortedFront.length; i++) {
-        if (sortedFront[i].delay > newDelay) {
-            right = sortedFront[i];
-            break;
-        }
-    }
-
-    if (!left && !right) return pickInt(100, 1000);
-
-    if (left && right) {
-        const lo = Math.min(left.area, right.area);
-        const hi = Math.max(left.area, right.area);
-
-        if (Math.random() < 0.5) return pickInt(lo, hi);
-        return pickAbove(hi, 1000);
-    }
-
-    const areaS = (left ? left.area : right.area);
-    const capped = clamp(areaS, 100, 1000);
-
-    if (Math.random() < 0.5) return pickInt(100, capped);
-    return pickAbove(capped, 1000);
-}
+import "./App.css";
+import {
+    DEFAULT_TEST_COMMAND_COUNT,
+    DELETE_PREVIEW_LIMIT,
+    DIVISIONS,
+    MAX_ADMIN_BATCH_BYTES,
+    MAX_DESCRIPTION_LEN,
+    MAX_INPUT_FILENAME_LEN,
+    MAX_UPLOAD_BYTES,
+    MAX_VALUE,
+    ROLE_ADMIN,
+    STATUS_LIST,
+} from "./constants/appConstants.js";
+import { CustomTooltip } from "./components/CustomTooltip.jsx";
+import { Diamond } from "./components/Diamond.jsx";
+import { TenPowNine } from "./components/TenPowNine.jsx";
+import {
+    buildAxis,
+    buildStoredFileName,
+    commandColor,
+    computeParetoFrontOriginal,
+    computePlottedPoint,
+    getRoleLabel,
+    parseBenchFileName,
+    statusColor,
+    uid,
+} from "./utils/pointUtils.js";
+import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUtils.js";
+import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/testPointUtils.js";
+import {
+    deletePoint,
+    fetchCommandByAuthKey,
+    fetchCommands,
+    fetchPoints,
+    requestUploadUrl,
+    savePoint,
+} from "./services/apiClient.js";
 
 export default function App() {
     const [points, setPoints] = useState(() => []);
@@ -380,28 +58,6 @@ export default function App() {
     const [authError, setAuthError] = useState("");
     const [isAuthChecking, setIsAuthChecking] = useState(false);
     const [isBootstrapping, setIsBootstrapping] = useState(true);
-
-    async function fetchCommands() {
-        const res = await fetch("/api/commands");
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-            throw new Error(data?.error || "Failed to load commands.");
-        }
-        return Array.isArray(data?.commands) ? data.commands : [];
-    }
-
-    async function fetchCommandByAuthKey(authKey) {
-        const res = await fetch("/api/auth", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ authKey }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-            throw new Error(data?.error || "Invalid key.");
-        }
-        return data?.command || null;
-    }
 
     async function tryLogin(e) {
         e.preventDefault();
@@ -589,17 +245,6 @@ export default function App() {
         return points.filter((p) => p.sender === currentCommand.name);
     }, [points, currentCommand]);
 
-    async function fetchPoints() {
-        const res = await fetch("/api/points");
-        if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            const msg = data?.error || "Failed to load points.";
-            throw new Error(msg);
-        }
-        const data = await res.json();
-        return Array.isArray(data.points) ? data.points : [];
-    }
-
     useEffect(() => {
         let alive = true;
         const savedKey = (localStorage.getItem("bench_auth_key") || "").trim();
@@ -711,23 +356,6 @@ export default function App() {
         a.remove();
     }
 
-    async function requestUploadUrl(file, storedFileName) {
-        const res = await fetch("/api/points-upload-url", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                authKey: authKeyDraft,
-                fileName: storedFileName,
-                fileSize: file.size,
-            }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-            throw new Error(data?.error || "Failed to get upload URL.");
-        }
-        return data;
-    }
-
     async function createPointFromUploadedFile(sourceFile, parsed, description) {
         const pointId = uid();
         const storedFileName = buildStoredFileName({
@@ -738,7 +366,11 @@ export default function App() {
             sender: currentCommand.name,
         });
 
-        const uploadMeta = await requestUploadUrl(sourceFile, storedFileName);
+        const uploadMeta = await requestUploadUrl({
+            authKey: authKeyDraft,
+            fileName: storedFileName,
+            fileSize: sourceFile.size,
+        });
         const putRes = await fetch(uploadMeta.uploadUrl, {
             method: "PUT",
             body: sourceFile,
@@ -759,19 +391,8 @@ export default function App() {
             checkerVersion: null,
         };
 
-        const res = await fetch("/api/points", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...point, authKey: authKeyDraft, fileSize: sourceFile.size }),
-        });
-
-        if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            throw new Error(data?.error || "Failed to save point.");
-        }
-
-        const data = await res.json();
-        return data?.point || point;
+        const savedPoint = await savePoint({ ...point, authKey: authKeyDraft, fileSize: sourceFile.size });
+        return savedPoint || point;
     }
 
     async function addPointFromFile(e) {
@@ -893,15 +514,10 @@ export default function App() {
             return true;
         }
 
-        const res = await fetch("/api/points", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id, authKey: authKeyDraft }),
-        });
-
-        if (!res.ok) {
-            const data = await res.json().catch(() => null);
-            window.alert(data?.error || "Failed to delete point.");
+        try {
+            await deletePoint({ id, authKey: authKeyDraft });
+        } catch (error) {
+            window.alert(error?.message || "Failed to delete point.");
             return false;
         }
 
