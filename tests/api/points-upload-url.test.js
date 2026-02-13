@@ -68,6 +68,20 @@ describe("api/points-upload-url handler", () => {
         expect(res.statusCode).toBe(400);
     });
 
+    it("defaults missing batchSize to single-file upload", async () => {
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
+        sql.mockResolvedValueOnce({ rows: [] });
+
+        const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
+        const res = createMockRes();
+        await handler(req, res);
+        expect(res.statusCode).toBe(200);
+        expect(res.body.quota.isMultiFileBatch).toBe(false);
+        expect(res.body.quota.chargedBytes).toBe(0);
+    });
+
     it("returns 401 when command not found", async () => {
         sql.mockResolvedValueOnce({ rows: [] });
         const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });

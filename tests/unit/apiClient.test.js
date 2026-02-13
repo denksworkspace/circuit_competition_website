@@ -53,6 +53,15 @@ describe("apiClient", () => {
         await expect(requestUploadUrl({ authKey: "k", fileName: "f", fileSize: 1 })).rejects.toThrow("too large");
     });
 
+    it("requestUploadUrl sends default batchSize=1", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({ body: { uploadUrl: "https://u" } }));
+        await requestUploadUrl({ authKey: "k", fileName: "f", fileSize: 1 });
+
+        const [, init] = fetch.mock.calls[0];
+        const body = JSON.parse(init.body);
+        expect(body.batchSize).toBe(1);
+    });
+
     it("savePoint returns null when point missing in response", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ body: {} }));
         await expect(savePoint({ id: "1" })).resolves.toEqual({ point: null, quota: null });

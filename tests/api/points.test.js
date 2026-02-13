@@ -261,6 +261,46 @@ describe("api/points handler", () => {
         expect(res.body.point.id).toBe("p1");
     });
 
+    it("POST defaults missing batchSize to single-file mode", async () => {
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
+        });
+        sql.mockResolvedValueOnce({ rows: [] });
+        sql.mockResolvedValueOnce({
+            rows: [
+                {
+                    id: "p1",
+                    benchmark: "254",
+                    delay: "1",
+                    area: "2",
+                    description: "schema",
+                    sender: "team",
+                    file_name: "file.bench",
+                    status: "non-verified",
+                    checker_version: null,
+                },
+            ],
+        });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                id: "p1",
+                benchmark: "254",
+                delay: 1,
+                area: 2,
+                fileName: "file.bench",
+                fileSize: 10,
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(201);
+        expect(res.body.point.id).toBe("p1");
+    });
+
     it("DELETE validates auth and ownership", async () => {
         let req = createMockReq({ method: "DELETE", body: { id: "p", authKey: "" } });
         let res = createMockRes();

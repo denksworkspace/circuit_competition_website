@@ -31,7 +31,7 @@ export default async function handler(req, res) {
         return;
     }
 
-    const normalizedBatchSize = Number(batchSize);
+    const normalizedBatchSize = Number(batchSize ?? 1);
     if (!Number.isInteger(normalizedBatchSize) || normalizedBatchSize < 1) {
         res.status(400).json({ error: "Invalid batch size." });
         return;

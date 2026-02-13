@@ -35,11 +35,11 @@ export async function fetchPoints() {
     return Array.isArray(data?.points) ? data.points : [];
 }
 
-export async function requestUploadUrl({ authKey, fileName, fileSize }) {
+export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize = 1 }) {
     const response = await fetch("/api/points-upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, fileName, fileSize }),
+        body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
     });
 
     const data = await parseJsonSafe(response);
