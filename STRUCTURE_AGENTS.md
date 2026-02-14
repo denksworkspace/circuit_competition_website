@@ -27,3 +27,13 @@ This repository is a Vite + React app with serverless API handlers.
   - then `AGENTS.md check`
   - if issues remain, run `AGENTS.md fix`
 - Do not output a separate report for each internal remediation command. Output only for the command explicitly requested by the developer.
+
+## Evidence Commands
+- `find src api tests -maxdepth 4 -type d | sort`
+- `rg --files src api tests`
+- `AGENTS.md tree-dependency`
+- `npm run lint`
+
+## Pass Criteria
+- `PASS` only if structure paths exist as expected and no structural violations are reported by dependency tree/lint checks.
+- If evidence commands are not run or outputs contradict structure rules, verdict must not be `PASS`.

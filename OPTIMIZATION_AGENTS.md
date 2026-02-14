@@ -47,3 +47,16 @@
 - Validate optimizations with evidence: benchmark numbers, profiling snapshots, or before/after timings.
 - Re-run lint/tests after optimization changes.
 - Document meaningful tradeoffs (readability vs speed, memory vs CPU, latency vs throughput).
+
+## Evidence Commands
+- `AGENTS.md [<files>] asymptotics`
+- `npm run lint`
+- `npm run test:run`
+- `npm run build`
+- Optional metric capture (when applicable):
+  - `time npm run test:run`
+  - `time npm run build`
+
+## Pass Criteria
+- `PASS` only if optimization claims are backed by concrete evidence (asymptotic analysis and/or measurable before-after metrics) and quality gates pass.
+- If evidence commands are not run, metrics are missing for performance claims, or quality gates fail, verdict must not be `PASS`.

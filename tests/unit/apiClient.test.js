@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     deletePoint,

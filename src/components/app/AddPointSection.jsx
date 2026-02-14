@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { MAX_DESCRIPTION_LEN, MAX_INPUT_FILENAME_LEN } from "../../constants/appConstants.js";
 
 export function AddPointSection({

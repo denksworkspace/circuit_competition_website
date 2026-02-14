@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import crypto from "node:crypto";
 
 function hmac(key, data, encoding) {

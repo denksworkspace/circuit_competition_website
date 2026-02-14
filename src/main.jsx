@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";

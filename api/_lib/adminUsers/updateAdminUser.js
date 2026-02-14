@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
 import { DEFAULT_MAX_MULTI_FILE_BATCH_COUNT } from "../commandUploadSettings.js";
 import { addActionLog, getActionLogsForCommand } from "../actionLogs.js";

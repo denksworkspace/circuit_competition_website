@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
 import { normalizeRole, ROLE_ADMIN } from "../../_roles.js";
 import { normalizeCommandUploadSettings } from "../commandUploadSettings.js";

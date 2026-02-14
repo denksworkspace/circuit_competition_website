@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { describe, expect, it } from "vitest";
 import {
     maxUploadBytesByRole,

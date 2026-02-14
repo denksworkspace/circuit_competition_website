@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { rejectMethod } from "./_lib/http.js";
 import { handleGetPoints } from "./_lib/pointsHandlers/getPoints.js";
 import { handlePostPoint } from "./_lib/pointsHandlers/postPoint.js";

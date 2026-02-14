@@ -55,6 +55,10 @@ Use this command format:
 - If user input starts with `AGENTS.md` but has invalid syntax or unknown command, respond:
   - `No such command, but perhaps you meant: ...`
   - Include one or more closest valid command suggestions.
+- Safety gate for mutation requests:
+  - If user asks to change/modify code, config, docs, or project state without starting the request with `AGENTS.md`, refuse execution.
+  - Response must say changes cannot be applied due to safety constraints.
+  - Response must recommend: `AGENTS.md help` to continue safely with the project protocol.
 - After each valid `AGENTS.md` command, output an execution tree that shows:
   - which commands/subcommands were run,
   - in what order,
@@ -62,6 +66,9 @@ Use this command format:
 - After each valid `AGENTS.md` command, output explicit verdicts:
   - one verdict per executed AGENTS subcommand (e.g. `PASS`/`FAIL`/`SKIPPED` with short reason),
   - and one final overall verdict for the user command.
+- Evidence gate for verdicts:
+  - `PASS` is allowed only if required evidence commands for that subcommand were executed and matched expected results.
+  - If evidence is missing or results do not match expectations, verdict must not be `PASS` (`FAIL` or `SKIPPED` with reason).
 - Execution discipline rule:
   - Do not skip protocol-required AGENTS subcommands even if skipping seems faster or more optimal.
   - If a protocol says to run multiple AGENTS commands, execute each of them in order unless blocked by a hard error.
@@ -247,6 +254,16 @@ This repository is a Vite + React app with serverless API handlers.
   - if issues remain, run `AGENTS.md fix`
 - Do not output a separate report for each internal remediation command. Output only for the command explicitly requested by the developer.
 
+## Evidence Commands
+- `find src api tests -maxdepth 4 -type d | sort`
+- `rg --files src api tests`
+- `AGENTS.md tree-dependency`
+- `npm run lint`
+
+## Pass Criteria
+- `PASS` only if structure paths exist as expected and no structural violations are reported by dependency tree/lint checks.
+- If evidence commands are not run or outputs contradict structure rules, verdict must not be `PASS`.
+
 ---
 
 ## DESIGN_AGENTS.md
@@ -266,6 +283,15 @@ This repository is a Vite + React app with serverless API handlers.
 ## UI Review Notes
 - Include screenshots for UI changes in PRs.
 
+## Evidence Commands
+- `npm run lint`
+- `git ls-files | xargs rg -nP "\\p{Cyrillic}" -S || true`
+- `rg --files src/components src/utils src/services tests | sort`
+
+## Pass Criteria
+- `PASS` only if lint succeeds, non-English code/comment scan has no hits, and naming/path conventions are not violated.
+- If evidence commands are not run or outputs show violations, verdict must not be `PASS`.
+
 ---
 
 ## SECURITY_AGENTS.md
@@ -281,6 +307,15 @@ This repository is a Vite + React app with serverless API handlers.
 - Add/update tests for security-related behavior.
 - Prefer targeted security checks while developing, e.g.:
   - `npm test -- tests/security/secret-leak-scan.test.js`
+
+## Evidence Commands
+- `git ls-files '.env*'`
+- `npm test -- tests/security/secret-leak-scan.test.js`
+- `git ls-files | xargs rg -n "(AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z-_]{35}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----)" -S || true`
+
+## Pass Criteria
+- `PASS` only if tracked `.env*` policy is satisfied and secret-scan checks show no credential leaks.
+- If evidence commands are not run or outputs indicate leaks/policy violations, verdict must not be `PASS`.
 
 ---
 
@@ -304,6 +339,15 @@ This repository is a Vite + React app with serverless API handlers.
   - `npm test -- tests/api/points-upload-url.test.js`
   - `npm test -- tests/security/secret-leak-scan.test.js`
 
+## Evidence Commands
+- `npm run lint`
+- `npm run test:run`
+- `npm run build`
+
+## Pass Criteria
+- `PASS` only if required debug commands complete successfully (exit code 0) for the requested scope.
+- If evidence commands are not run or any required command fails, verdict must not be `PASS`.
+
 ---
 
 ## PUSH_AGENTS.md
@@ -319,6 +363,16 @@ This repository is a Vite + React app with serverless API handlers.
   - affected paths/endpoints,
   - test evidence (what was run),
   - screenshots for UI changes.
+
+## Evidence Commands
+- `git status --short`
+- `git branch --show-current`
+- `git remote -v`
+- `git log --oneline -n 5`
+
+## Pass Criteria
+- `PASS` only if commit/push prerequisites are satisfied (valid branch/remote, clean or intentionally staged state, and traceable commit context).
+- If evidence commands are not run or outputs show push-readiness issues, verdict must not be `PASS`.
 
 ---
 
@@ -373,3 +427,16 @@ This repository is a Vite + React app with serverless API handlers.
 - Validate optimizations with evidence: benchmark numbers, profiling snapshots, or before/after timings.
 - Re-run lint/tests after optimization changes.
 - Document meaningful tradeoffs (readability vs speed, memory vs CPU, latency vs throughput).
+
+## Evidence Commands
+- `AGENTS.md [<files>] asymptotics`
+- `npm run lint`
+- `npm run test:run`
+- `npm run build`
+- Optional metric capture (when applicable):
+  - `time npm run test:run`
+  - `time npm run build`
+
+## Pass Criteria
+- `PASS` only if optimization claims are backed by concrete evidence (asymptotic analysis and/or measurable before-after metrics) and quality gates pass.
+- If evidence commands are not run, metrics are missing for performance claims, or quality gates fail, verdict must not be `PASS`.

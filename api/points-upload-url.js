@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 /* global process */
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "./_roles.js";

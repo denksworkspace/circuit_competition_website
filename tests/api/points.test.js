@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockReq, createMockRes } from "../helpers/mockHttp.js";
 

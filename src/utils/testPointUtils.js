@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { clamp } from "./numberUtils.js";
 
 export function randInt(lo, hiInclusive) {

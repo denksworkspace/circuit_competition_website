@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { formatIntNoGrouping } from "../utils/numberUtils.js";
 
 export function CustomTooltip({ active, payload }) {

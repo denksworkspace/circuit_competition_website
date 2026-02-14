@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 

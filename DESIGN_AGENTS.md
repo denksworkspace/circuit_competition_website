@@ -12,3 +12,12 @@
 
 ## UI Review Notes
 - Include screenshots for UI changes in PRs.
+
+## Evidence Commands
+- `npm run lint`
+- `git ls-files | xargs rg -nP "\\p{Cyrillic}" -S || true`
+- `rg --files src/components src/utils src/services tests | sort`
+
+## Pass Criteria
+- `PASS` only if lint succeeds, non-English code/comment scan has no hits, and naming/path conventions are not violated.
+- If evidence commands are not run or outputs show violations, verdict must not be `PASS`.

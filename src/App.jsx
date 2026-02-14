@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {

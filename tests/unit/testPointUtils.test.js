@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { describe, expect, it, vi } from "vitest";
 import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "../../src/utils/testPointUtils.js";
 

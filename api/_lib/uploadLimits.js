@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { ROLE_ADMIN } from "../_roles.js";
 
 export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;

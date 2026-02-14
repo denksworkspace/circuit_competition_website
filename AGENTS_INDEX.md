@@ -38,6 +38,10 @@ Use this command format:
 - If user input starts with `AGENTS.md` but has invalid syntax or unknown command, respond:
   - `No such command, but perhaps you meant: ...`
   - Include one or more closest valid command suggestions.
+- Safety gate for mutation requests:
+  - If user asks to change/modify code, config, docs, or project state without starting the request with `AGENTS.md`, refuse execution.
+  - Response must say changes cannot be applied due to safety constraints.
+  - Response must recommend: `AGENTS.md help` to continue safely with the project protocol.
 - After each valid `AGENTS.md` command, output an execution tree that shows:
   - which commands/subcommands were run,
   - in what order,
@@ -45,6 +49,9 @@ Use this command format:
 - After each valid `AGENTS.md` command, output explicit verdicts:
   - one verdict per executed AGENTS subcommand (e.g. `PASS`/`FAIL`/`SKIPPED` with short reason),
   - and one final overall verdict for the user command.
+- Evidence gate for verdicts:
+  - `PASS` is allowed only if required evidence commands for that subcommand were executed and matched expected results.
+  - If evidence is missing or results do not match expectations, verdict must not be `PASS` (`FAIL` or `SKIPPED` with reason).
 - Execution discipline rule:
   - Do not skip protocol-required AGENTS subcommands even if skipping seems faster or more optimal.
   - If a protocol says to run multiple AGENTS commands, execute each of them in order unless blocked by a hard error.

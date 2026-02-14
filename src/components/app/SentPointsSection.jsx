@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { statusColor } from "../../utils/pointUtils.js";
 import { formatIntNoGrouping } from "../../utils/numberUtils.js";
 

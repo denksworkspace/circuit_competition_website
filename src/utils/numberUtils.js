@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 export function clamp(value, lo, hi) {
     return Math.min(hi, Math.max(lo, value));
 }

@@ -1,3 +1,4 @@
+// FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 export function Diamond({ cx, cy, r, fill, stroke, strokeWidth, onClick }) {
     const distance = r * 1.35;
     const points = `${cx},${cy - distance} ${cx + distance},${cy} ${cx},${cy + distance} ${cx - distance},${cy}`;
