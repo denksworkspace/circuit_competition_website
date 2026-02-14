@@ -1,38 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-    ResponsiveContainer,
-    ScatterChart,
-    Scatter,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ReferenceLine,
-} from "recharts";
 import "./App.css";
 import {
     DEFAULT_TEST_COMMAND_COUNT,
     DELETE_PREVIEW_LIMIT,
     DIVISIONS,
     MAX_DESCRIPTION_LEN,
-    MAX_INPUT_FILENAME_LEN,
     MAX_MULTI_FILE_BATCH_COUNT,
     MAX_VALUE,
     ROLE_ADMIN,
     STATUS_LIST,
 } from "./constants/appConstants.js";
-import { CustomTooltip } from "./components/CustomTooltip.jsx";
-import { Diamond } from "./components/Diamond.jsx";
-import { TenPowNine } from "./components/TenPowNine.jsx";
+import { LoginPage } from "./components/app/LoginPage.jsx";
+import { ChartSection } from "./components/app/ChartSection.jsx";
+import { SentPointsSection } from "./components/app/SentPointsSection.jsx";
+import { FiltersSection } from "./components/app/FiltersSection.jsx";
+import { AddPointSection } from "./components/app/AddPointSection.jsx";
+import { AdminSettingsSection } from "./components/app/AdminSettingsSection.jsx";
+import { FindPointsSection } from "./components/app/FindPointsSection.jsx";
+import { PointActionModal } from "./components/app/PointActionModal.jsx";
 import {
     buildAxis,
     buildStoredFileName,
-    commandColor,
     computeParetoFrontOriginal,
     computePlottedPoint,
     getRoleLabel,
     parseBenchFileName,
-    statusColor,
     uid,
 } from "./utils/pointUtils.js";
 import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUtils.js";
@@ -882,37 +874,14 @@ export default function App() {
 
     if (!currentCommand) {
         return (
-            <div className="loginPage">
-                <div className="loginCard card">
-                    <div className="cardHeader">
-                        <div>
-                            <div className="cardTitle">Access key required</div>
-                            <div className="cardHint">
-                                {isBootstrapping ? "Checking saved key..." : "Enter your team key to open the site."}
-                            </div>
-                        </div>
-                    </div>
-
-                    <form className="form" onSubmit={tryLogin}>
-                        <label className="field">
-                            <span>Key</span>
-                            <input
-                                value={authKeyDraft}
-                                onChange={(e) => setAuthKeyDraft(e.target.value)}
-                                placeholder="key_XXXXXXXXXXXXXXXX"
-                                autoFocus
-                                disabled={isBootstrapping || isAuthChecking}
-                            />
-                        </label>
-
-                        {authError ? <div className="error">{authError}</div> : null}
-
-                        <button className="btn primary" type="submit" disabled={isBootstrapping || isAuthChecking}>
-                            {isAuthChecking ? "Checking..." : "Enter"}
-                        </button>
-                    </form>
-                </div>
-            </div>
+            <LoginPage
+                isBootstrapping={isBootstrapping}
+                isAuthChecking={isAuthChecking}
+                authKeyDraft={authKeyDraft}
+                authError={authError}
+                onAuthKeyDraftChange={setAuthKeyDraft}
+                onLogin={tryLogin}
+            />
         );
     }
 
@@ -947,776 +916,142 @@ export default function App() {
 
             <main className="layout">
                 <div className="leftCol">
-                    <section className="card chartCard">
-                        <div className="cardHeader">
-                            <div>
-                                <div className="cardTitle">Pareto curve</div>
-                                <div className="cardHint">
-                                    Pareto frontier is computed from points visible by benchmark + status filters.
-                                    Changing the view rectangle does not change the frontier — it only crops what part of
-                                    it is visible.
-                                </div>
-                                <div className="cardHint">
-                                    Click any point on the chart to open actions: <b>Download</b> and <b>Delete</b>.
-                                </div>
-                            </div>
+                    <ChartSection
+                        isTestBenchSelected={isTestBenchSelected}
+                        onGenerateRandomTestPoints={generateRandomTestPoints}
+                        onClearAllTestNoConfirm={clearAllTestNoConfirm}
+                        onDownloadBenchmarksExcel={downloadBenchmarksExcel}
+                        delayOverflowLane={delayOverflowLane}
+                        areaOverflowLane={areaOverflowLane}
+                        delayAxis={delayAxis}
+                        areaAxis={areaAxis}
+                        formatDelayTick={formatDelayTick}
+                        formatAreaTick={formatAreaTick}
+                        areaAxisWidth={areaAxisWidth}
+                        paretoDisplay={paretoDisplay}
+                        pointsRenderKey={pointsRenderKey}
+                        plottedPoints={plottedPoints}
+                        colorMode={colorMode}
+                        commandByName={commandByName}
+                        lastAddedId={lastAddedId}
+                        onOpenPointActionModal={openPointActionModal}
+                        applyView={applyView}
+                        delayMaxDraft={delayMaxDraft}
+                        onDelayMaxDraftChange={setDelayMaxDraft}
+                        areaMaxDraft={areaMaxDraft}
+                        onAreaMaxDraftChange={setAreaMaxDraft}
+                        delayViewValid={delayViewValid}
+                        areaViewValid={areaViewValid}
+                        canApplyView={canApplyView}
+                    />
 
-                            <div className="toolbar">
-                                {isTestBenchSelected ? (
-                                    <>
-                                        <button className="btn ghost" onClick={generateRandomTestPoints}>
-                                            Generate random points
-                                        </button>
-                                        <button className="btn danger" onClick={clearAllTestNoConfirm}>
-                                            Clear all (test)
-                                        </button>
-                                    </>
-                                ) : null}
-
-                                <button className="btn ghost" onClick={downloadBenchmarksExcel}>
-                                    Export benchmarks (Excel)
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="chartWrap" tabIndex={-1} onMouseDown={(e) => e.preventDefault()}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <ScatterChart margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
-                                    <CartesianGrid strokeDasharray="2 2" />
-                                    <ReferenceLine x={0} strokeOpacity={0.15} />
-                                    <ReferenceLine y={0} strokeOpacity={0.15} />
-                                    <ReferenceLine x={delayOverflowLane} strokeOpacity={0.1} />
-                                    <ReferenceLine y={areaOverflowLane} strokeOpacity={0.1} />
-
-                                    <XAxis
-                                        type="number"
-                                        dataKey="delayDisp"
-                                        tickLine={false}
-                                        axisLine={false}
-                                        domain={[0, delayOverflowLane]}
-                                        allowDecimals={false}
-                                        ticks={delayAxis.ticks}
-                                        tickFormatter={formatDelayTick}
-                                    />
-                                    <YAxis
-                                        type="number"
-                                        dataKey="areaDisp"
-                                        tickLine={false}
-                                        axisLine={false}
-                                        domain={[0, areaOverflowLane]}
-                                        allowDecimals={false}
-                                        ticks={areaAxis.ticks}
-                                        tickFormatter={formatAreaTick}
-                                        width={areaAxisWidth}
-                                    />
-
-                                    <Tooltip content={<CustomTooltip />} />
-
-                                    {/* Pareto curve (cropped to rectangle): strong double-stroke line */}
-                                    <Scatter
-                                        data={paretoDisplay.map((p) => ({ ...p, delayDisp: p.delay, areaDisp: p.area }))}
-                                        line={{ stroke: "rgba(255,255,255,0.98)", strokeWidth: 4 }}
-                                        isAnimationActive={false}
-                                        shape={null}
-                                        fill="none"
-                                        style={{ pointerEvents: "none" }}
-                                    />
-
-                                    <Scatter
-                                        data={paretoDisplay.map((p) => ({ ...p, delayDisp: p.delay, areaDisp: p.area }))}
-                                        line={{ stroke: "rgba(17,24,39,0.98)", strokeWidth: 2 }}
-                                        isAnimationActive={false}
-                                        shape={(props) => {
-                                            const { cx, cy } = props;
-                                            return (
-                                                <circle
-                                                    cx={cx}
-                                                    cy={cy}
-                                                    r={3.2}
-                                                    fill="rgba(17,24,39,0.98)"
-                                                    stroke="#ffffff"
-                                                    strokeWidth={1}
-                                                    tabIndex={-1}
-                                                    focusable="false"
-                                                    style={{ pointerEvents: "none" }}
-                                                />
-                                            );
-                                        }}
-                                        fill="none"
-                                        style={{ pointerEvents: "none" }}
-                                    />
-
-                                    {/* Main points: click to open point actions modal */}
-                                    <Scatter
-                                        key={pointsRenderKey}
-                                        data={plottedPoints}
-                                        isAnimationActive={false}
-                                        shape={(props) => {
-                                            const { cx, cy, payload } = props;
-
-                                            const baseFill =
-                                                colorMode === "users"
-                                                    ? commandColor(payload.sender, commandByName)
-                                                    : statusColor(payload.status);
-
-                                            const isLatest = payload.id === lastAddedId;
-
-                                            const r0 = payload.radius;
-                                            const r = isLatest ? r0 * 1.5 : r0; // +50% size for latest diamond
-
-                                            const fill = baseFill;
-
-                                            const onClick = () => openPointActionModal(payload.id);
-
-                                            if (isLatest) {
-                                                return (
-                                                    <Diamond
-                                                        cx={cx}
-                                                        cy={cy}
-                                                        r={r}
-                                                        fill={fill}
-                                                        stroke="#ffffff"
-                                                        strokeWidth={1}
-                                                        onClick={onClick}
-                                                    />
-                                                );
-                                            }
-
-                                            return (
-                                                <circle
-                                                    cx={cx}
-                                                    cy={cy}
-                                                    r={r}
-                                                    fill={fill}
-                                                    stroke="#ffffff"
-                                                    strokeWidth={1}
-                                                    onClick={onClick}
-                                                    tabIndex={-1}
-                                                    focusable="false"
-                                                    onMouseDown={(e) => e.preventDefault()}
-                                                    style={{ cursor: "pointer" }}
-                                                />
-                                            );
-                                        }}
-                                    />
-                                </ScatterChart>
-                            </ResponsiveContainer>
-                        </div>
-
-                        {/* View rectangle */}
-                        <form className="viewControls" onSubmit={applyView}>
-                            <div className="viewTitle">View rectangle</div>
-
-                            <label className="field compact">
-                  <span>
-                    delay max (≤ <TenPowNine />)
-                  </span>
-                                <input
-                                    value={delayMaxDraft}
-                                    onChange={(e) => setDelayMaxDraft(e.target.value)}
-                                    placeholder="positive integer"
-                                    inputMode="numeric"
-                                    className={!delayViewValid ? "bad" : ""}
-                                />
-                            </label>
-
-                            <label className="field compact">
-                  <span>
-                    area max (≤ <TenPowNine />)
-                  </span>
-                                <input
-                                    value={areaMaxDraft}
-                                    onChange={(e) => setAreaMaxDraft(e.target.value)}
-                                    placeholder="positive integer"
-                                    inputMode="numeric"
-                                    className={!areaViewValid ? "bad" : ""}
-                                />
-                            </label>
-
-                            <button className="btn primary" type="submit" disabled={!canApplyView}>
-                                Apply
-                            </button>
-                        </form>
-                    </section>
-
-                    <section className="card listCard sentCard">
-                        <div className="cardHeader tight">
-                            <div>
-                                <div className="cardTitle">Sended points</div>
-                            </div>
-                        </div>
-
-                        <div className="list compactList">
-                            {myPoints.length === 0 ? (
-                                <div className="empty">No points from your command.</div>
-                            ) : (
-                                sentPageItems.map((p, i) => {
-                                    const globalIndex = sentTotal - (sentStart + i);
-                                    return (
-                                        <div className="row compactRow" key={p.id}>
-                                            <div className="compactMain">
-                                                <div className="compactTop">
-                                                    <span className="pill subtle">id: {p.id}</span>
-                                                    <span className="pill">benchmark: {p.benchmark}</span>
-                                                    <span className="pill">
-                        <span className="dot" style={{ background: statusColor(p.status) }} />
-                                                        {p.status}
-                      </span>
-                                                </div>
-
-                                                <div className="compactBottom">
-                      <span className="mono">
-                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
-                      </span>
-                                                    <span className="mono">
-                        area=<b>{formatIntNoGrouping(p.area)}</b>
-                      </span>
-                                                </div>
-                                            </div>
-
-                                            <div className="sentActions">
-                                                <div className="sentSubmission">submission: {globalIndex}</div>
-                                                <button className="btn ghost small" onClick={() => focusPoint(p)}>
-                                                    Find
-                                                </button>
-                                                <button
-                                                    className="btn ghost small"
-                                                    onClick={() => downloadCircuit(p)}
-                                                    disabled={!getPointDownloadUrl(p)}
-                                                >
-                                                    Download circuit
-                                                </button>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
-
-                        {myPoints.length > 0 ? (
-                            <div className="sentPagerNumbers">
-                                {sentPages.map((page) => {
-                                    const isActive = page === sentPageClamped;
-                                    return (
-                                        <button
-                                            key={page}
-                                            className={isActive ? "pagerNum active" : "pagerNum"}
-                                            type="button"
-                                            onClick={() => setSentPage(page)}
-                                        >
-                                            {page}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        ) : null}
-                    </section>
+                    <SentPointsSection
+                        myPoints={myPoints}
+                        sentPageItems={sentPageItems}
+                        sentTotal={sentTotal}
+                        sentStart={sentStart}
+                        sentPages={sentPages}
+                        sentPageClamped={sentPageClamped}
+                        onSentPageChange={setSentPage}
+                        onFocusPoint={focusPoint}
+                        onDownloadCircuit={downloadCircuit}
+                        getPointDownloadUrl={getPointDownloadUrl}
+                    />
                 </div>
 
                 <aside className="side">
-                    <section className="card">
-                        <div className="cardHeader tight">
-                            <div>
-                                <div className="cardTitle">Filters</div>
-                            </div>
-                        </div>
+                    <FiltersSection
+                        benchmarkMenuRef={benchmarkMenuRef}
+                        benchmarkMenuOpen={benchmarkMenuOpen}
+                        benchmarkLabel={benchmarkLabel}
+                        onBenchmarkMenuToggle={() => setBenchmarkMenuOpen((v) => !v)}
+                        onSelectBenchmark={(benchmark) => {
+                            setBenchmarkFilter(benchmark);
+                            setBenchmarkMenuOpen(false);
+                        }}
+                        availableBenchmarks={availableBenchmarks}
+                        colorMode={colorMode}
+                        onColorModeChange={setColorMode}
+                        commandQuery={commandQuery}
+                        onCommandQueryChange={setCommandQuery}
+                        availableCommandNames={availableCommandNames}
+                        addSelectedCommand={addSelectedCommand}
+                        selectedCommandSet={selectedCommandSet}
+                        selectedCommands={selectedCommands}
+                        commandByName={commandByName}
+                        removeSelectedCommand={removeSelectedCommand}
+                        statusFilter={statusFilter}
+                        toggleStatus={toggleStatus}
+                    />
 
-                        <div className="form">
-                            <label className="field">
-                                <span>1) Benchmark</span>
-                                <div className="benchmarkDropdown" ref={benchmarkMenuRef}>
-                                    <button
-                                        className="benchmarkTrigger"
-                                        type="button"
-                                        onClick={() => setBenchmarkMenuOpen((v) => !v)}
-                                        aria-expanded={benchmarkMenuOpen ? "true" : "false"}
-                                    >
-                                        <span>{benchmarkLabel}</span>
-                                        <span className="benchmarkCaret">{benchmarkMenuOpen ? "▲" : "▼"}</span>
-                                    </button>
-
-                                    {benchmarkMenuOpen ? (
-                                        <div className="benchmarkMenu" role="listbox">
-                                            <button
-                                                className="benchmarkOption"
-                                                type="button"
-                                                onClick={() => {
-                                                    setBenchmarkFilter("test");
-                                                    setBenchmarkMenuOpen(false);
-                                                }}
-                                            >
-                                                test
-                                            </button>
-                                            {availableBenchmarks.map((b) => (
-                                                <button
-                                                    key={b}
-                                                    className="benchmarkOption"
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setBenchmarkFilter(String(b));
-                                                        setBenchmarkMenuOpen(false);
-                                                    }}
-                                                >
-                                                    {b}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            </label>
-
-                            <label className="field">
-                                <span>2) Color by</span>
-                                <select value={colorMode} onChange={(e) => setColorMode(e.target.value)}>
-                                    <option value="status">Status</option>
-                                    <option value="users">Users</option>
-                                </select>
-                            </label>
-
-                            <div className="field">
-                                <span>3) Show statuses</span>
-
-                                <div className={colorMode === "users" ? "statusUsersRow" : undefined}>
-                                    {colorMode === "users" ? (
-                                        <div className="userPicker">
-                                            <div className="userPickerTitle">Commands</div>
-
-                                            <input
-                                                value={commandQuery}
-                                                onChange={(e) => setCommandQuery(e.target.value)}
-                                                placeholder="Search by prefix…"
-                                            />
-
-                                            <div className="userList">
-                                                {availableCommandNames
-                                                    .filter((name) => {
-                                                        const q = commandQuery.trim().toLowerCase();
-                                                        if (!q) return true;
-                                                        return name.toLowerCase().startsWith(q);
-                                                    })
-                                                    .map((name) => {
-                                                        const col = commandColor(name, commandByName);
-                                                        return (
-                                                            <button
-                                                                key={name}
-                                                                className="userItem"
-                                                                type="button"
-                                                                onClick={() => addSelectedCommand(name)}
-                                                                disabled={selectedCommandSet.has(name)}
-                                                                title={selectedCommandSet.has(name) ? "Already selected" : "Add"}
-                                                            >
-                                                                <span className="dot" style={{ background: col }} />
-                                                                <span className="userItemName">{name}</span>
-                                                            </button>
-                                                        );
-                                                    })}</div>
-
-                                            <div className="viewingBar">
-                                                <div className="viewingTitle">
-                                                    Viewing{" "}
-                                                    {selectedCommands.length > 0
-                                                        ? `${selectedCommands.length} command${selectedCommands.length === 1 ? "" : "s"}`
-                                                        : "all commands"}
-                                                </div>
-
-                                                <div className="chipsRow">
-                                                    {selectedCommands.length === 0 ? (
-                                                        <div className="mutedSmall">
-                                                            No commands selected — showing all.
-                                                        </div>
-                                                    ) : (
-                                                        selectedCommands.map((name) => {
-                                                            const c = commandByName.get(name);
-                                                            const col = c ? c.color : commandColor(name, commandByName);
-                                                            return (
-                                                                <span key={name} className="tagChip">
-                                                                    <span className="dot" style={{ background: col }} />
-                                                                    <span className="tagChipText">{name}</span>
-                                                                    <button
-                                                                        className="tagChipX"
-                                                                        type="button"
-                                                                        onClick={() => removeSelectedCommand(name)}
-                                                                        aria-label={"Remove " + name}
-                                                                        title="Remove"
-                                                                    >
-                                                                        ×
-                                                                    </button>
-                                                                </span>
-                                                            );
-                                                        })
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : null}
-
-                                    <div className={colorMode === "users" ? "checks noDots" : "checks"}>
-                                        <label className="check">
-                                            <input
-                                                type="checkbox"
-                                                checked={statusFilter["non-verified"]}
-                                                onChange={() => toggleStatus("non-verified")}
-                                            />
-                                            {colorMode !== "users" ? (
-                                                <span className="dot" style={{ background: statusColor("non-verified") }} />
-                                            ) : null}
-                                            <span>non-verified</span>
-                                        </label>
-
-                                        <label className="check">
-                                            <input
-                                                type="checkbox"
-                                                checked={statusFilter.verified}
-                                                onChange={() => toggleStatus("verified")}
-                                            />
-                                            {colorMode !== "users" ? (
-                                                <span className="dot" style={{ background: statusColor("verified") }} />
-                                            ) : null}
-                                            <span>verified</span>
-                                        </label>
-
-                                        <label className="check">
-                                            <input
-                                                type="checkbox"
-                                                checked={statusFilter.failed}
-                                                onChange={() => toggleStatus("failed")}
-                                            />
-                                            {colorMode !== "users" ? (
-                                                <span className="dot" style={{ background: statusColor("failed") }} />
-                                            ) : null}
-                                            <span>failed</span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section className="card">
-                        <div className="cardHeader tight">
-                            <div>
-                                <div className="cardTitle">Add a point</div>
-
-                                <div className="cardHint">
-                                    <b>Expected file name pattern</b>:
-                                </div>
-
-                                <div className="cardHint">
-                  <span className="mono">
-                    bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`} or bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}.bench
-                  </span>
-                                </div>
-
-                                <div className="cardHint">
-                                    Where:
-                                    <ul className="hintList">
-                                        <li>
-                                            <span className="mono">{`{BENCH}`}</span> is an integer from <b>200</b> to{" "}
-                                            <b>299</b>
-                                        </li>
-                                        <li>
-                                            <span className="mono">{`{DELAY}`}</span> and{" "}
-                                            <span className="mono">{`{AREA}`}</span> are integers (0..10^9)
-                                        </li>
-                                        <li>
-                                            <span className="mono">description</span> is optional (up to{" "}
-                                            <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
-                                        </li>
-                                        <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
-                                    </ul>
-                                </div>
-
-                                <div className="cardHint">
-                                    Example input: <span className="mono">bench254_15_40</span>
-                                </div>
-
-                                <div className="cardHint">
-                                    Stored file name is generated automatically:
-                                    <span className="mono"> bench{`{BENCH}`}_{`{DELAY}`}_{`{AREA}`}_{`{COMMAND}`}_{`{POINT_ID}`}.bench</span>
-                                </div>
-
-                                <div className="cardHint">
-                                    The latest added point is shown as a <b>diamond</b> on the chart.
-                                </div>
-
-                                <div className="cardHint">
-                                    File is uploaded to S3. Per-file limit: {formatGb(maxSingleUploadBytes)} GB.
-                                </div>
-                                <div className="cardHint">
-                                    You can upload {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
-                                    for multi-file uploads.
-                                </div>
-                                <div className="cardHint">
-                                    If you upload only one file, it does not consume multi-file quota.
-                                </div>
-                                <div className="cardHint">
-                                    Multi-file upload limit: {maxMultiFileBatchCount} files per batch.
-                                </div>
-                            </div>
-                        </div>
-
-                        <form className="form" onSubmit={addPointFromFile}>
-                            <label className="field">
-                                <span>file</span>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".bench"
-                                    multiple
-                                    onChange={onFileChange}
-                                    className={benchFiles.length > 0 && !canAdd ? "bad" : ""}
-                                />
-                            </label>
-
-                            <label className="field">
-                                <span>description (max {MAX_DESCRIPTION_LEN})</span>
-                                <input
-                                    value={descriptionDraft}
-                                    onChange={(e) => {
-                                        setDescriptionDraft(e.target.value.slice(0, MAX_DESCRIPTION_LEN));
-                                        setUploadError(" ");
-                                    }}
-                                    placeholder="Short description (default: schema)"
-                                />
-                            </label>
-
-                            {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
-
-                            <button className="btn primary" type="submit" disabled={!canAdd}>
-                                {isUploading ? "Uploading..." : "Upload & create point"}
-                            </button>
-
-                            {isUploading && uploadProgress && uploadProgress.total > 1 ? (
-                                <div className="cardHint">
-                                    Processed {uploadProgress.done} / {uploadProgress.total} files
-                                </div>
-                            ) : null}
-
-                            {uploadLogText ? (
-                                <button className="btn ghost" type="button" onClick={downloadUploadLog}>
-                                    Download upload log
-                                </button>
-                            ) : null}
-                        </form>
-                    </section>
+                    <AddPointSection
+                        formatGb={formatGb}
+                        maxSingleUploadBytes={maxSingleUploadBytes}
+                        remainingUploadBytes={remainingUploadBytes}
+                        totalUploadQuotaBytes={totalUploadQuotaBytes}
+                        maxMultiFileBatchCount={maxMultiFileBatchCount}
+                        addPointFromFile={addPointFromFile}
+                        fileInputRef={fileInputRef}
+                        benchFiles={benchFiles}
+                        canAdd={canAdd}
+                        onFileChange={onFileChange}
+                        descriptionDraft={descriptionDraft}
+                        onDescriptionDraftChange={(value) => {
+                            setDescriptionDraft(value.slice(0, MAX_DESCRIPTION_LEN));
+                            setUploadError(" ");
+                        }}
+                        uploadError={uploadError}
+                        isUploading={isUploading}
+                        uploadProgress={uploadProgress}
+                        uploadLogText={uploadLogText}
+                        onDownloadUploadLog={downloadUploadLog}
+                    />
 
                     {isAdmin ? (
-                        <section className="card">
-                            <div className="cardHeader tight">
-                                <div>
-                                    <div className="cardTitle">Admin: User settings</div>
-                                    <div className="cardHint">Search by user id and edit upload quotas.</div>
-                                </div>
-                            </div>
-
-                            <div className="form">
-                                <label className="field">
-                                    <span>User id</span>
-                                    <input
-                                        value={adminUserIdDraft}
-                                        onChange={(e) => setAdminUserIdDraft(e.target.value)}
-                                        inputMode="numeric"
-                                        placeholder="e.g. 7"
-                                    />
-                                </label>
-
-                                <button className="btn ghost" type="button" onClick={loadAdminUser} disabled={isAdminLoading}>
-                                    {isAdminLoading ? "Loading..." : "Load user"}
-                                </button>
-
-                                {adminPanelError ? <div className="error">{adminPanelError}</div> : null}
-
-                                {adminUser ? (
-                                    <>
-                                        <div className="cardHint">
-                                            User: <b>{adminUser.name}</b> (id: {adminUser.id}, role: {adminUser.role})
-                                        </div>
-                                        <div className="cardHint">
-                                            Used quota: {formatGb(adminUser.uploadedBytesTotal)} GB (deleting points does not refund).
-                                        </div>
-
-                                        <label className="field">
-                                            <span>Max single file (GB)</span>
-                                            <input
-                                                value={adminSingleGbDraft}
-                                                onChange={(e) => setAdminSingleGbDraft(e.target.value)}
-                                                inputMode="decimal"
-                                            />
-                                        </label>
-
-                                        <label className="field">
-                                            <span>Total quota (GB)</span>
-                                            <input
-                                                value={adminTotalGbDraft}
-                                                onChange={(e) => setAdminTotalGbDraft(e.target.value)}
-                                                inputMode="decimal"
-                                            />
-                                        </label>
-
-                                        <label className="field">
-                                            <span>Max files per multi-file batch</span>
-                                            <input
-                                                value={adminBatchCountDraft}
-                                                onChange={(e) => setAdminBatchCountDraft(e.target.value)}
-                                                inputMode="numeric"
-                                            />
-                                        </label>
-
-                                        <button
-                                            className="btn primary"
-                                            type="button"
-                                            onClick={saveAdminUserSettings}
-                                            disabled={isAdminSaving}
-                                        >
-                                            {isAdminSaving ? "Saving..." : "Save settings"}
-                                        </button>
-
-                                        <div className="cardHint">Latest action logs:</div>
-                                        <div className="list compactList">
-                                            {adminLogs.length === 0 ? (
-                                                <div className="empty">No logs.</div>
-                                            ) : (
-                                                adminLogs.slice(0, 20).map((log) => (
-                                                    <div className="row compactRow" key={log.id}>
-                                                        <div className="compactMain">
-                                                            <div className="compactTop">
-                                                                <span className="pill subtle">{new Date(log.createdAt).toLocaleString()}</span>
-                                                                <span className="pill">{log.action}</span>
-                                                                <span className="pill">actor: {log.actorName || "system"}</span>
-                                                            </div>
-                                                            <div className="compactBottom">
-                                                                <span className="mono mutedMono">{JSON.stringify(log.details || {})}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    </>
-                                ) : null}
-                            </div>
-                        </section>
+                        <AdminSettingsSection
+                            adminUserIdDraft={adminUserIdDraft}
+                            onAdminUserIdDraftChange={setAdminUserIdDraft}
+                            loadAdminUser={loadAdminUser}
+                            isAdminLoading={isAdminLoading}
+                            adminPanelError={adminPanelError}
+                            adminUser={adminUser}
+                            formatGb={formatGb}
+                            adminSingleGbDraft={adminSingleGbDraft}
+                            onAdminSingleGbDraftChange={setAdminSingleGbDraft}
+                            adminTotalGbDraft={adminTotalGbDraft}
+                            onAdminTotalGbDraftChange={setAdminTotalGbDraft}
+                            adminBatchCountDraft={adminBatchCountDraft}
+                            onAdminBatchCountDraftChange={setAdminBatchCountDraft}
+                            saveAdminUserSettings={saveAdminUserSettings}
+                            isAdminSaving={isAdminSaving}
+                            adminLogs={adminLogs}
+                        />
                     ) : null}
 
-                    <section className="card listCard">
-                        <div className="cardHeader tight">
-                            <div>
-                                <div className="cardTitle">Find points</div>
-                                <div className="cardHint">
-                                    Search by <b>file name prefix</b>. Shows exactly {DELETE_PREVIEW_LIMIT} slots.
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="form">
-                            <label className="field">
-                                <span>file prefix</span>
-                                <input
-                                    value={deletePrefix}
-                                    onChange={(e) => setDeletePrefix(e.target.value)}
-                                    placeholder="e.g. bench256_123"
-                                />
-                            </label>
-                        </div>
-
-                        <div className="list compactList deleteListFixed">
-                            {deletePreview.map((p) => (
-                                <div className="row compactRow" key={p.id}>
-                                    <div className="compactMain">
-                                        <div className="compactTop">
-                                            <span className="pill subtle">by {p.sender}</span>
-                                            <span className="pill">name: {p.description}</span>
-                                            <span className="pill">
-                        <span className="dot" style={{ background: statusColor(p.status) }} />
-                                                {p.status}
-                      </span>
-                                        </div>
-
-                                        <div className="compactBottom">
-                      <span className="mono">
-                        area=<b>{formatIntNoGrouping(p.area)}</b>
-                      </span>
-                                            <span className="mono">
-                        delay=<b>{formatIntNoGrouping(p.delay)}</b>
-                      </span>
-                                            <span className="mono mutedMono">{p.fileName}</span>
-                                        </div>
-                                    </div>
-
-                                    <button className="btn ghost small" onClick={() => focusPoint(p)}>
-                                        Find
-                                    </button>
-                                    <button
-                                        className="btn ghost small"
-                                        onClick={() => downloadCircuit(p)}
-                                        disabled={!getPointDownloadUrl(p)}
-                                    >
-                                        Download circuit
-                                    </button>
-                                    {canDeletePoint(p) ? (
-                                        <button
-                                            className="btn danger small"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                confirmAndDeletePoint(p.id);
-                                            }}
-                                        >
-                                            Delete
-                                        </button>
-                                    ) : null}
-                                </div>
-                            ))}
-
-                            {Array.from({ length: placeholdersCount }).map((_, i) => (
-                                <div className="row compactRow placeholderRow" key={`ph-${i}`}>
-                                    <div className="placeholderLine" />
-                                </div>
-                            ))}
-                        </div>
-
-                        {deleteMatches.length === 0 ? (
-                            <div className="empty">No points match this prefix.</div>
-                        ) : deleteHasMore ? (
-                            <div className="moreHint">
-                                Showing {deletePreview.length} of {deleteMatches.length} matches.
-                            </div>
-                        ) : null}
-                    </section>
-
+                    <FindPointsSection
+                        deletePrefix={deletePrefix}
+                        onDeletePrefixChange={setDeletePrefix}
+                        deletePreview={deletePreview}
+                        placeholdersCount={placeholdersCount}
+                        deleteMatches={deleteMatches}
+                        deleteHasMore={deleteHasMore}
+                        onFocusPoint={focusPoint}
+                        onDownloadCircuit={downloadCircuit}
+                        getPointDownloadUrl={getPointDownloadUrl}
+                        canDeletePoint={canDeletePoint}
+                        onConfirmAndDeletePoint={confirmAndDeletePoint}
+                    />
                 </aside>
             </main>
 
-            {actionPoint ? (
-                <div className="pointModalBackdrop" onClick={closePointActionModal}>
-                    <div className="pointModal" onClick={(e) => e.stopPropagation()}>
-                        <div className="pointModalTitle">Point actions</div>
-                        <div className="pointModalFile mono">{actionPoint.fileName}</div>
-                        <div className="pointModalActions">
-                            <button
-                                className="btn ghost small"
-                                onClick={() => downloadCircuit(actionPoint)}
-                                disabled={!getPointDownloadUrl(actionPoint)}
-                            >
-                                Download
-                            </button>
-                            {canDeletePoint(actionPoint) ? (
-                                <button
-                                    className="btn danger small"
-                                    onClick={async () => {
-                                        const deleted = await confirmAndDeletePoint(actionPoint.id);
-                                        if (deleted) closePointActionModal();
-                                    }}
-                                >
-                                    Delete
-                                </button>
-                            ) : null}
-                            <button className="btn small" onClick={closePointActionModal}>
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
+            <PointActionModal
+                actionPoint={actionPoint}
+                closePointActionModal={closePointActionModal}
+                onDownloadCircuit={downloadCircuit}
+                getPointDownloadUrl={getPointDownloadUrl}
+                canDeletePoint={canDeletePoint}
+                confirmAndDeletePoint={confirmAndDeletePoint}
+            />
 
             {navigateNotice ? (
                 <div className="navigateToast" role="status" aria-live="polite">

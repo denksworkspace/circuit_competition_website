@@ -1,0 +1,153 @@
+:root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #d9dde3;
+    --text: #111827;
+    --muted: #6b7280;
+    --primary: #111827;
+    --danger: #b91c1c;
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+.page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.subtitle {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.chips {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.chip {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.chip.subtle { color: var(--muted); }
+
+.layout {
+    width: min(1200px, calc(100% - 36px));
+    margin: 16px auto 22px;
+    display: grid;
+    grid-template-columns: 1.8fr 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.chartCard {
+    display: flex;
+    flex-direction: column;
+    min-height: 560px;
+}
+
+.cardHeader {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cardHeader.tight {
+    border-bottom: none;
+    padding-bottom: 8px;
+}
+
+.cardTitle {
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+
+.cardHint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.chartWrap {
+    padding: 10px 12px 12px;
+    height: 520px;
+    user-select: none;
+}
+
+.chartWrap :focus,
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+svg:focus,
+svg *:focus {
+    outline: none !important;
+}
+
+.side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.leftCol {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}

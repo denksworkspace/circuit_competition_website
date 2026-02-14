@@ -1,0 +1,258 @@
+.listCard .empty,
+.empty {
+    padding: 14px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.list {
+    display: grid;
+    gap: 10px;
+    padding: 0 14px 14px;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.rowLeft {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    min-width: 0;
+}
+
+.rowMain {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.rowTop {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.rowBottom {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.badge {
+    min-width: 38px;
+    height: 26px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #f3f4f6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mono b { color: var(--text); }
+
+.pill {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #f3f4f6;
+    border: 1px solid var(--border);
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--text);
+}
+
+.pill.subtle {
+    color: var(--muted);
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+}
+
+.checks {
+    display: grid;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.check {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--text);
+    user-select: none;
+}
+
+.check input {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    margin: 0;
+}
+
+.link {
+    font-size: 12px;
+    color: #2563eb;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 520px;
+}
+
+.link:hover {
+    text-decoration: underline;
+}
+
+.compactList {
+    padding-top: 6px;
+}
+
+.compactRow {
+    padding: 8px 10px;
+    align-items: center;
+}
+
+.compactMain {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.compactTop {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.compactBottom {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: baseline;
+    min-width: 0;
+}
+
+.mutedMono {
+    color: var(--muted);
+    max-width: 420px;
+}
+
+.moreHint {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 8px 14px 12px;
+}
+
+.deleteListFixed {
+    padding: 0 14px 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.placeholderRow {
+    border-style: dashed;
+    background: #fafafa;
+}
+
+.placeholderLine {
+    height: 22px;
+    width: 100%;
+    border-radius: 10px;
+    background: linear-gradient(90deg, #f3f4f6, #e5e7eb, #f3f4f6);
+    opacity: 0.65;
+}
+
+.hintList {
+    margin: 6px 0 0 18px;
+    padding: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.hintList li {
+    margin: 3px 0;
+}
+
+.sentPagerNumbers {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 4px 0 10px 14px;
+}
+
+.pagerNum {
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 12px;
+    padding: 2px 4px;
+    cursor: pointer;
+}
+
+.pagerNum.active {
+    color: #111827;
+    font-weight: 700;
+}
+
+.pagerEllipsis {
+    color: #9ca3af;
+    font-size: 12px;
+    padding: 2px 4px;
+}
+
+.sentActions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    min-width: 120px;
+}
+
+.sentSubmission {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.footer {
+    margin-top: auto;
+    padding: 14px 18px 18px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+}

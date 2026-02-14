@@ -1,0 +1,205 @@
+.loginPage {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+}
+
+.loginCard {
+    width: min(520px, 100%);
+}
+
+.topbarRight {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.hello {
+    font-size: 13px;
+    color: var(--text);
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.helloName {
+    font-weight: 800;
+}
+
+.statusUsersRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: start;
+    margin-top: 2px;
+}
+
+.checks.noDots .check {
+    gap: 8px;
+}
+
+.userPicker {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+}
+
+.userPickerTitle {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.userList {
+    display: grid;
+    gap: 6px;
+    max-height: 180px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.userItem {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    text-align: left;
+}
+
+.userItem:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.userItem:hover:not(:disabled) {
+    background: #f8fafc;
+}
+
+.userItemName {
+    font-size: 12px;
+    color: var(--text);
+}
+
+.viewingBar {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    display: grid;
+    gap: 8px;
+}
+
+.viewingTitle {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.chipsRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tagChip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #f3f4f6;
+    color: var(--text);
+}
+
+.tagChipText {
+    font-size: 12px;
+}
+
+.tagChipX {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+    background: #fff;
+    cursor: pointer;
+    line-height: 16px;
+    font-size: 14px;
+    padding: 0;
+}
+
+.tagChipX:hover {
+    background: #fee2e2;
+    border-color: #fecaca;
+}
+
+.mutedSmall {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.pointModalBackdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.32);
+    display: grid;
+    place-items: center;
+    z-index: 60;
+    padding: 16px;
+}
+
+.pointModal {
+    width: min(360px, 100%);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+}
+
+.pointModalTitle {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+
+.pointModalFile {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pointModalActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.navigateToast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 70;
+    max-width: min(540px, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+    box-shadow: var(--shadow);
+    color: var(--text);
+    font-size: 12px;
+}
