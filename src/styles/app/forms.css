@@ -169,7 +169,15 @@ input.bad {
     letter-spacing: 0.2px;
     text-transform: uppercase;
     color: var(--text);
+    grid-row: 1 / 3;
     align-self: center;
+}
+
+.viewAutoActions {
+    grid-column: 2 / 5;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
 }
 
 .error {

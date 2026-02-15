@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
     DEFAULT_TEST_COMMAND_COUNT,
@@ -150,16 +150,6 @@ export default function App() {
     const [delayMaxDraft, setDelayMaxDraft] = useState("50");
     const [areaMaxDraft, setAreaMaxDraft] = useState("1000");
 
-    // When switching to test benchmark, expand view to 50 / 1000
-    useEffect(() => {
-        if (benchmarkFilter === "test") {
-            setDelayMax(50);
-            setAreaMax(1000);
-            setDelayMaxDraft("50");
-            setAreaMaxDraft("1000");
-        }
-    }, [benchmarkFilter]);
-
     const delayAxis = useMemo(() => buildAxis(delayMax, DIVISIONS, MAX_VALUE), [delayMax]);
     const areaAxis = useMemo(() => buildAxis(areaMax, DIVISIONS, MAX_VALUE), [areaMax]);
     const delayOverflowLane = delayAxis.overflow;
@@ -207,6 +197,39 @@ export default function App() {
     const paretoBase = useMemo(() => {
         return computeParetoFrontOriginal(visiblePoints);
     }, [visiblePoints]);
+
+    const fitViewToPoints = useCallback((sourcePoints) => {
+        if (!Array.isArray(sourcePoints) || sourcePoints.length === 0) return false;
+        let maxDelay = 1;
+        let maxArea = 1;
+        for (const p of sourcePoints) {
+            const d = Number(p?.delay);
+            const a = Number(p?.area);
+            if (Number.isFinite(d)) maxDelay = Math.max(maxDelay, Math.min(MAX_VALUE, Math.trunc(d)));
+            if (Number.isFinite(a)) maxArea = Math.max(maxArea, Math.min(MAX_VALUE, Math.trunc(a)));
+        }
+        setDelayMax(maxDelay);
+        setAreaMax(maxArea);
+        setDelayMaxDraft(String(maxDelay));
+        setAreaMaxDraft(String(maxArea));
+        return true;
+    }, []);
+
+    const fitViewToPareto = useCallback(() => {
+        fitViewToPoints(paretoBase);
+    }, [fitViewToPoints, paretoBase]);
+
+    const fitViewToAllVisiblePoints = useCallback(() => {
+        fitViewToPoints(visiblePoints);
+    }, [fitViewToPoints, visiblePoints]);
+
+    const prevBenchmarkRef = useRef(benchmarkFilter);
+    useEffect(() => {
+        if (prevBenchmarkRef.current !== benchmarkFilter) {
+            fitViewToAllVisiblePoints();
+            prevBenchmarkRef.current = benchmarkFilter;
+        }
+    }, [benchmarkFilter, fitViewToAllVisiblePoints]);
 
     // Pareto DISPLAY points: show only the segment inside the current rectangle
     // (no recomputation of membership, only cropping for display)
@@ -944,6 +967,8 @@ export default function App() {
                         delayViewValid={delayViewValid}
                         areaViewValid={areaViewValid}
                         canApplyView={canApplyView}
+                        onFitViewToPareto={fitViewToPareto}
+                        onFitViewToAllVisiblePoints={fitViewToAllVisiblePoints}
                     />
 
                     <SentPointsSection

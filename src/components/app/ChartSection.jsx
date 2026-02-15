@@ -41,6 +41,8 @@ export function ChartSection({
     delayViewValid,
     areaViewValid,
     canApplyView,
+    onFitViewToPareto,
+    onFitViewToAllVisiblePoints,
 }) {
     return (
         <section className="card chartCard">
@@ -198,7 +200,7 @@ export function ChartSection({
             </div>
 
             <form className="viewControls" onSubmit={applyView}>
-                <div className="viewTitle">View rectangle</div>
+                <div className="viewTitle">View rectange</div>
 
                 <label className="field compact">
                     <span>
@@ -229,6 +231,15 @@ export function ChartSection({
                 <button className="btn primary" type="submit" disabled={!canApplyView}>
                     Apply
                 </button>
+
+                <div className="viewAutoActions">
+                    <button className="btn primary" type="button" onClick={onFitViewToPareto}>
+                        Fit Pareto
+                    </button>
+                    <button className="btn primary" type="button" onClick={onFitViewToAllVisiblePoints}>
+                        Fit All Points
+                    </button>
+                </div>
             </form>
         </section>
     );

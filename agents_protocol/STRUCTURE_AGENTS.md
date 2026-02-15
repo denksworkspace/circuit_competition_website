@@ -35,5 +35,5 @@ This repository is a Vite + React app with serverless API handlers.
 - `npm run lint`
 
 ## Pass Criteria
-- `PASS` only if structure paths exist as expected and no structural violations are reported by dependency tree/lint checks.
+- `PASS` only if structure paths exist as expected, dependency tree output has no `|?? ... (missing path)` entries, and no structural violations are reported by dependency tree/lint checks.
 - If evidence commands are not run or outputs contradict structure rules, verdict must not be `PASS`.

@@ -3,7 +3,7 @@
 ## Security & Configuration Tips
 - Never commit real secrets (`.env*` except `.env.example`).
 - Keep placeholders in `.env.example`; store real values in local/hosted env settings.
-- If a requested change conflicts with `READMELLM.md` or appears risky/illogical, request explicit confirmation before implementation.
+- If a requested change conflicts with `README.md` or appears risky/illogical, request explicit confirmation before implementation.
 
 ## Security Testing
 - Add/update tests for security-related behavior.
