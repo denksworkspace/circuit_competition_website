@@ -5,6 +5,14 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_DEV_API_TARGET || 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
@@ -12,7 +20,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['src/**/*.{js,jsx}', 'api/**/*.js'],
+      include: ['src/**/*.{js,jsx}'],
       exclude: ['**/*.test.*', '**/node_modules/**', 'dist/**'],
     },
   },

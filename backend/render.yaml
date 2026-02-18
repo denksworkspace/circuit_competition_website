@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: circuit-control-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    autoDeploy: true

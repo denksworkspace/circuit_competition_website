@@ -1,10 +1,20 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+
+function apiUrl(path) {
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    if (!apiBaseUrl) return normalizedPath;
+    return `${apiBaseUrl}${normalizedPath}`;
+}
+
 async function parseJsonSafe(response) {
     return response.json().catch(() => null);
 }
 
 export async function fetchCommands() {
-    const response = await fetch("/api/commands");
+    const response = await fetch(apiUrl("/api/commands"));
     const data = await parseJsonSafe(response);
     if (!response.ok) {
         throw new Error(data?.error || "Failed to load commands.");
@@ -13,7 +23,7 @@ export async function fetchCommands() {
 }
 
 export async function fetchCommandByAuthKey(authKey) {
-    const response = await fetch("/api/auth", {
+    const response = await fetch(apiUrl("/api/auth"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey }),
@@ -28,7 +38,7 @@ export async function fetchCommandByAuthKey(authKey) {
 }
 
 export async function fetchPoints() {
-    const response = await fetch("/api/points");
+    const response = await fetch(apiUrl("/api/points"));
     const data = await parseJsonSafe(response);
     if (!response.ok) {
         throw new Error(data?.error || "Failed to load points.");
@@ -37,7 +47,7 @@ export async function fetchPoints() {
 }
 
 export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize = 1 }) {
-    const response = await fetch("/api/points-upload-url", {
+    const response = await fetch(apiUrl("/api/points-upload-url"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
@@ -51,7 +61,7 @@ export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize 
 }
 
 export async function savePoint(pointPayload) {
-    const response = await fetch("/api/points", {
+    const response = await fetch(apiUrl("/api/points"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pointPayload),
@@ -69,7 +79,7 @@ export async function savePoint(pointPayload) {
 }
 
 export async function validateUploadCircuits({ authKey, files }) {
-    const response = await fetch("/api/points-validate-upload", {
+    const response = await fetch(apiUrl("/api/points-validate-upload"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, files }),
@@ -89,7 +99,7 @@ export async function validateUploadCircuits({ authKey, files }) {
 }
 
 export async function testPointCircuit({ authKey, benchmark, fileName, circuitText }) {
-    const response = await fetch("/api/points-test", {
+    const response = await fetch(apiUrl("/api/points-test"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,7 +122,7 @@ export async function testPointCircuit({ authKey, benchmark, fileName, circuitTe
 }
 
 export async function verifyPointCircuit({ authKey, benchmark, circuitText, pointId, applyStatus, checkerVersion }) {
-    const response = await fetch("/api/points-verify", {
+    const response = await fetch(apiUrl("/api/points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -135,7 +145,7 @@ export async function verifyPointCircuit({ authKey, benchmark, circuitText, poin
 }
 
 export async function runAdminBulkVerify({ authKey, checkerVersion }) {
-    const response = await fetch("/api/admin-points-verify", {
+    const response = await fetch(apiUrl("/api/admin-points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, checkerVersion }),
@@ -151,7 +161,7 @@ export async function runAdminBulkVerify({ authKey, checkerVersion }) {
 }
 
 export async function runAdminBulkVerifyPoint({ authKey, checkerVersion, pointId }) {
-    const response = await fetch("/api/admin-points-verify", {
+    const response = await fetch(apiUrl("/api/admin-points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, checkerVersion, pointId }),
@@ -165,7 +175,7 @@ export async function runAdminBulkVerifyPoint({ authKey, checkerVersion, pointId
 }
 
 export async function applyAdminPointStatuses({ authKey, updates, checkerVersion }) {
-    const response = await fetch("/api/admin-points-apply", {
+    const response = await fetch(apiUrl("/api/admin-points-apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, updates, checkerVersion }),
@@ -178,7 +188,7 @@ export async function applyAdminPointStatuses({ authKey, updates, checkerVersion
 }
 
 export async function runAdminMetricsAudit({ authKey }) {
-    const response = await fetch("/api/admin-points-audit", {
+    const response = await fetch(apiUrl("/api/admin-points-audit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey }),
@@ -193,7 +203,7 @@ export async function runAdminMetricsAudit({ authKey }) {
 }
 
 export async function runAdminMetricsAuditPoint({ authKey, pointId }) {
-    const response = await fetch("/api/admin-points-audit", {
+    const response = await fetch(apiUrl("/api/admin-points-audit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, pointId }),
@@ -207,7 +217,7 @@ export async function runAdminMetricsAuditPoint({ authKey, pointId }) {
 }
 
 export async function planTruthTablesUpload({ authKey, fileNames }) {
-    const response = await fetch("/api/truth-tables-plan", {
+    const response = await fetch(apiUrl("/api/truth-tables-plan"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, fileNames }),
@@ -222,7 +232,7 @@ export async function planTruthTablesUpload({ authKey, fileNames }) {
 }
 
 export async function requestTruthUploadUrl({ authKey, fileName, fileSize }) {
-    const response = await fetch("/api/truth-upload-url", {
+    const response = await fetch(apiUrl("/api/truth-upload-url"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, fileName, fileSize }),
@@ -235,7 +245,7 @@ export async function requestTruthUploadUrl({ authKey, fileName, fileSize }) {
 }
 
 export async function saveTruthTable({ authKey, fileName, allowReplace, allowCreateBenchmark }) {
-    const response = await fetch("/api/truth-tables", {
+    const response = await fetch(apiUrl("/api/truth-tables"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ authKey, fileName, allowReplace, allowCreateBenchmark }),
@@ -251,7 +261,7 @@ export async function saveTruthTable({ authKey, fileName, allowReplace, allowCre
 }
 
 export async function deletePoint({ id, authKey }) {
-    const response = await fetch("/api/points", {
+    const response = await fetch(apiUrl("/api/points"), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, authKey }),
@@ -271,7 +281,7 @@ export async function fetchAdminUserById({ authKey, userId }) {
         userId: String(userId || ""),
     });
 
-    const response = await fetch(`/api/admin-users?${query.toString()}`);
+    const response = await fetch(apiUrl(`/api/admin-users?${query.toString()}`));
     const data = await parseJsonSafe(response);
     if (!response.ok) {
         throw new Error(data?.error || "Failed to load user.");
@@ -290,7 +300,7 @@ export async function updateAdminUserUploadSettings({
     totalUploadQuotaGb,
     maxMultiFileBatchCount,
 }) {
-    const response = await fetch("/api/admin-users", {
+    const response = await fetch(apiUrl("/api/admin-users"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
