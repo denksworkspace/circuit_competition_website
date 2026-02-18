@@ -24,6 +24,9 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
 vi.mock("../../api/_lib/actionLogs.js", () => ({
     addActionLog: vi.fn(),
 }));
+vi.mock("../../api/_lib/truthTables.js", () => ({
+    ensureTruthTablesSchema: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "../../api/_roles.js";

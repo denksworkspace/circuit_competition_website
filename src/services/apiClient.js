@@ -68,6 +68,160 @@ export async function savePoint(pointPayload) {
     };
 }
 
+export async function validateUploadCircuits({ authKey, files }) {
+    const response = await fetch("/api/points-validate-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, files }),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const details = Array.isArray(data?.files) ? data.files : [];
+        const error = new Error(data?.error || "Circuit validation failed.");
+        error.details = details;
+        throw error;
+    }
+
+    return {
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function testPointCircuit({ authKey, benchmark, fileName, circuitText }) {
+    const response = await fetch("/api/points-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            authKey,
+            benchmark,
+            fileName,
+            circuitText,
+        }),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to run CEC.");
+    }
+
+    return {
+        equivalent: Boolean(data?.equivalent),
+        output: String(data?.output || ""),
+    };
+}
+
+export async function verifyPointCircuit({ authKey, benchmark, circuitText, pointId, applyStatus, checkerVersion }) {
+    const response = await fetch("/api/points-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            authKey,
+            benchmark,
+            circuitText,
+            pointId,
+            applyStatus,
+            checkerVersion,
+        }),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const error = new Error(data?.error || "Failed to verify point.");
+        error.code = data?.code || null;
+        throw error;
+    }
+    return data;
+}
+
+export async function runAdminBulkVerify({ authKey, checkerVersion }) {
+    const response = await fetch("/api/admin-points-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, checkerVersion }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to run bulk verification.");
+    }
+    return {
+        checkerVersion: data?.checkerVersion || "ABC",
+        log: Array.isArray(data?.log) ? data.log : [],
+    };
+}
+
+export async function applyAdminPointStatuses({ authKey, updates, checkerVersion }) {
+    const response = await fetch("/api/admin-points-apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, updates, checkerVersion }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to apply statuses.");
+    }
+    return data;
+}
+
+export async function runAdminMetricsAudit({ authKey }) {
+    const response = await fetch("/api/admin-points-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to run metrics audit.");
+    }
+    return {
+        mismatches: Array.isArray(data?.mismatches) ? data.mismatches : [],
+    };
+}
+
+export async function planTruthTablesUpload({ authKey, fileNames }) {
+    const response = await fetch("/api/truth-tables-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, fileNames }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to prepare truth upload.");
+    }
+    return {
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function requestTruthUploadUrl({ authKey, fileName, fileSize }) {
+    const response = await fetch("/api/truth-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, fileName, fileSize }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to get truth upload URL.");
+    }
+    return data;
+}
+
+export async function saveTruthTable({ authKey, fileName, allowReplace, allowCreateBenchmark }) {
+    const response = await fetch("/api/truth-tables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, fileName, allowReplace, allowCreateBenchmark }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const error = new Error(data?.error || "Failed to save truth table.");
+        error.code = data?.code || null;
+        error.details = data || null;
+        throw error;
+    }
+    return data;
+}
+
 export async function deletePoint({ id, authKey }) {
     const response = await fetch("/api/points", {
         method: "DELETE",

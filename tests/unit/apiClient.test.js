@@ -5,8 +5,11 @@ import {
     fetchCommandByAuthKey,
     fetchCommands,
     fetchPoints,
+    planTruthTablesUpload,
+    requestTruthUploadUrl,
     requestUploadUrl,
     savePoint,
+    saveTruthTable,
 } from "../../src/services/apiClient.js";
 
 function mockResponse({ ok = true, body = {}, jsonReject = false } = {}) {
@@ -71,5 +74,26 @@ describe("apiClient", () => {
     it("deletePoint throws fallback message", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ ok: false, jsonReject: true }));
         await expect(deletePoint({ id: "1", authKey: "k" })).rejects.toThrow("Failed to delete point.");
+    });
+
+    it("planTruthTablesUpload returns file list", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({ body: { files: [{ fileName: "bench200.truth" }] } }));
+        await expect(planTruthTablesUpload({ authKey: "k", fileNames: ["bench200.truth"] }))
+            .resolves.toEqual({ files: [{ fileName: "bench200.truth" }] });
+    });
+
+    it("requestTruthUploadUrl throws api error", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({ ok: false, body: { error: "bad" } }));
+        await expect(requestTruthUploadUrl({ authKey: "k", fileName: "bench200.truth", fileSize: 1 }))
+            .rejects.toThrow("bad");
+    });
+
+    it("saveTruthTable attaches code/details on failure", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({
+            ok: false,
+            body: { error: "exists", code: "TRUTH_EXISTS", existingTruthFileName: "bench200.truth" },
+        }));
+        await expect(saveTruthTable({ authKey: "k", fileName: "bench200.truth" }))
+            .rejects.toMatchObject({ message: "exists", code: "TRUTH_EXISTS" });
     });
 });

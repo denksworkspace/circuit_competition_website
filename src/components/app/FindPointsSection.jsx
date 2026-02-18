@@ -13,6 +13,9 @@ export function FindPointsSection({
     onFocusPoint,
     onDownloadCircuit,
     getPointDownloadUrl,
+    canTestPoint,
+    onTestPoint,
+    testingPointId,
     canDeletePoint,
     onConfirmAndDeletePoint,
 }) {
@@ -72,6 +75,15 @@ export function FindPointsSection({
                         >
                             Download circuit
                         </button>
+                        {canTestPoint(p) ? (
+                            <button
+                                className="btn ghost small"
+                                onClick={() => onTestPoint(p)}
+                                disabled={testingPointId === p.id}
+                            >
+                                {testingPointId === p.id ? "Testing..." : "Test"}
+                            </button>
+                        ) : null}
                         {canDeletePoint(p) ? (
                             <button
                                 className="btn danger small"

@@ -43,6 +43,7 @@ export function ChartSection({
     canApplyView,
     onFitViewToPareto,
     onFitViewToAllVisiblePoints,
+    truthTableOn,
 }) {
     return (
         <section className="card chartCard">
@@ -55,11 +56,15 @@ export function ChartSection({
                         it is visible.
                     </div>
                     <div className="cardHint">
-                        Click any point on the chart to open actions: <b>Download</b> and <b>Delete</b>.
+                        Click any point on the chart to open actions: <b>Download</b>, <b>Test</b> (admin), and <b>Delete</b>.
                     </div>
                 </div>
 
                 <div className="toolbar">
+                    <span className="pill">
+                        <span className="dot" style={{ background: truthTableOn ? "#16a34a" : "#dc2626" }} />
+                        {truthTableOn ? "truth table on" : "truth table off"}
+                    </span>
                     {isTestBenchSelected ? (
                         <>
                             <button className="btn ghost" onClick={onGenerateRandomTestPoints}>

@@ -182,6 +182,10 @@ describe("App integration", () => {
 
         installFetchRouter({
             ...bootstrapRoutes({ authBody: { command } }),
+            "POST /api/points-validate-upload": () => {
+                calls.push("validate-upload");
+                return Promise.resolve(jsonResponse(200, { ok: true, files: [{ ok: true }] }));
+            },
             "POST /api/points-upload-url": ({ init }) => {
                 calls.push("upload-url");
                 const body = JSON.parse(init.body);
@@ -235,10 +239,105 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         await waitFor(() => {
-            expect(calls).toEqual(["upload-url", "put-s3", "save-point"]);
+            expect(calls).toEqual(["validate-upload", "upload-url", "put-s3", "save-point"]);
         });
 
         expect(await screen.findByText(/schema-test/)).toBeInTheDocument();
         expect(screen.getAllByText("delay=").length).toBeGreaterThan(0);
+    });
+
+    it("blocks upload when ABC metrics validation fails", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        const calls = [];
+
+        installFetchRouter({
+            ...bootstrapRoutes({ authBody: { command } }),
+            "POST /api/points-validate-upload": () => {
+                calls.push("validate-upload");
+                return Promise.resolve(
+                    jsonResponse(422, {
+                        error: "Circuit metrics do not match file names.",
+                        files: [
+                            {
+                                fileName: "bench254_15_40.bench",
+                                ok: false,
+                                reason: "Metric mismatch: area expected 40, actual 41",
+                            },
+                        ],
+                    })
+                );
+            },
+        });
+
+        render(<App />);
+
+        fireEvent.change(await screen.findByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Add a point");
+
+        const validFile = new File(["bench data"], "bench254_15_40.bench", { type: "text/plain" });
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [validFile] },
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
+
+        expect(await screen.findByText(/area expected 40, actual 41/)).toBeInTheDocument();
+        expect(calls).toEqual(["validate-upload"]);
+    });
+
+    it("shows truth conflict modal for admin when benchmark is missing", async () => {
+        const command = withDefaultQuota({ id: 1, name: "admin1", color: "#111", role: "admin" });
+        installFetchRouter({
+            ...bootstrapRoutes({ authBody: { command } }),
+            "GET /api/admin-users?authKey=key_ok&userId=7": () =>
+                Promise.resolve(jsonResponse(200, {
+                    user: {
+                        id: 7,
+                        name: "u7",
+                        role: "participant",
+                        maxSingleUploadBytes: 1,
+                        totalUploadQuotaBytes: 1,
+                        uploadedBytesTotal: 0,
+                        maxMultiFileBatchCount: 1,
+                    },
+                    actionLogs: [],
+                })),
+            "POST /api/truth-tables-plan": () =>
+                Promise.resolve(jsonResponse(200, {
+                    files: [
+                        {
+                            fileName: "bench299.truth",
+                            benchmark: "299",
+                            action: "requires_create_benchmark",
+                            ok: false,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+        fireEvent.change(await screen.findByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Admin: User settings");
+
+        fireEvent.change(screen.getByPlaceholderText("e.g. 7"), {
+            target: { value: "7" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Load user" }));
+        await screen.findByText(/User: /);
+
+        const truthFile = new File(["truth"], "bench299.truth", { type: "text/plain" });
+        fireEvent.change(screen.getByLabelText("Files"), {
+            target: { files: [truthFile] },
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Upload truth files" }));
+        expect(await screen.findByText("Resolve truth upload conflicts")).toBeInTheDocument();
+        expect(screen.getByText("Add new benchmark 299?")).toBeInTheDocument();
     });
 });

@@ -42,6 +42,7 @@ describe("api/_lib/points", () => {
         expect(point.delay).toBe(10);
         expect(point.area).toBe(20);
         expect(point.fileName).toBe("f.bench");
+        expect(point.hasTruth).toBe(false);
         expect(point.fileKey).toBe("points/f.bench");
         expect(point.downloadUrl).toBe("https://cdn.example.com/points/f.bench");
     });

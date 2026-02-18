@@ -4,6 +4,9 @@ export function PointActionModal({
     closePointActionModal,
     onDownloadCircuit,
     getPointDownloadUrl,
+    canTestPoint,
+    onTestPoint,
+    testingPointId,
     canDeletePoint,
     confirmAndDeletePoint,
 }) {
@@ -22,6 +25,15 @@ export function PointActionModal({
                     >
                         Download
                     </button>
+                    {canTestPoint(actionPoint) ? (
+                        <button
+                            className="btn ghost small"
+                            onClick={() => onTestPoint(actionPoint)}
+                            disabled={testingPointId === actionPoint.id}
+                        >
+                            {testingPointId === actionPoint.id ? "Testing..." : "Test"}
+                        </button>
+                    ) : null}
                     {canDeletePoint(actionPoint) ? (
                         <button
                             className="btn danger small"

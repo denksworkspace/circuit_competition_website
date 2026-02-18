@@ -36,6 +36,7 @@ export function normalizePointRow(row) {
         fileName: row.file_name,
         status: row.status,
         checkerVersion: row.checker_version ?? null,
+        hasTruth: Boolean(row.has_truth),
         fileKey: buildObjectKey(row.file_name),
         downloadUrl: buildDownloadUrl(row.file_name),
     };

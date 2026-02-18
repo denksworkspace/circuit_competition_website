@@ -31,14 +31,22 @@ import {
 import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUtils.js";
 import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/testPointUtils.js";
 import {
+    applyAdminPointStatuses,
     deletePoint,
     fetchAdminUserById,
     fetchCommandByAuthKey,
     fetchCommands,
     fetchPoints,
+    planTruthTablesUpload,
+    runAdminBulkVerify,
+    runAdminMetricsAudit,
     requestUploadUrl,
+    requestTruthUploadUrl,
     savePoint,
+    saveTruthTable,
     updateAdminUserUploadSettings,
+    validateUploadCircuits,
+    verifyPointCircuit,
 } from "./services/apiClient.js";
 
 export default function App() {
@@ -110,6 +118,7 @@ export default function App() {
     // Upload
     const [benchFiles, setBenchFiles] = useState(() => []);
     const [descriptionDraft, setDescriptionDraft] = useState("");
+    const [selectedChecker, setSelectedChecker] = useState("none");
     const [uploadError, setUploadError] = useState(" ");
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
@@ -117,6 +126,7 @@ export default function App() {
     const [uploadLogText, setUploadLogText] = useState("");
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
+    const [testingPointId, setTestingPointId] = useState(null);
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
     const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
@@ -132,6 +142,20 @@ export default function App() {
     const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
+    const [truthFiles, setTruthFiles] = useState(() => []);
+    const truthFilesInputRef = useRef(null);
+    const [isTruthUploading, setIsTruthUploading] = useState(false);
+    const [truthUploadProgress, setTruthUploadProgress] = useState(null);
+    const [truthUploadError, setTruthUploadError] = useState("");
+    const [truthUploadLogText, setTruthUploadLogText] = useState("");
+    const [truthConflicts, setTruthConflicts] = useState(() => []);
+    const [isTruthConflictModalOpen, setIsTruthConflictModalOpen] = useState(false);
+    const [isBulkVerifyRunning, setIsBulkVerifyRunning] = useState(false);
+    const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
+    const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
+    const [bulkMetricsAuditLogText, setBulkMetricsAuditLogText] = useState("");
+    const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
+    const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -368,6 +392,39 @@ export default function App() {
         return description;
     }
 
+    function parseTruthFileName(fileNameRaw) {
+        const fileName = String(fileNameRaw || "").trim();
+        const match = fileName.match(/^bench(2\d\d)\.truth$/i);
+        if (!match) {
+            return {
+                ok: false,
+                error: "Invalid truth file name. Expected: bench{200..299}.truth",
+            };
+        }
+        return {
+            ok: true,
+            benchmark: String(Number(match[1])),
+            fileName,
+        };
+    }
+
+    async function readCircuitFileAsText(file) {
+        if (file && typeof file.text === "function") {
+            return await file.text();
+        }
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("Failed to read file content."));
+            reader.readAsText(file);
+        });
+    }
+
+    function clearTruthFileInput() {
+        setTruthFiles([]);
+        if (truthFilesInputRef.current) truthFilesInputRef.current.value = "";
+    }
+
     function getPointDownloadUrl(p) {
         if (!p || !p.fileName || p.benchmark === "test") return null;
         if (p.downloadUrl) return p.downloadUrl;
@@ -380,6 +437,11 @@ export default function App() {
         return Boolean(currentCommand && p.sender === currentCommand.name);
     }
 
+    function canTestPoint(p) {
+        if (!p || p.benchmark === "test") return false;
+        return Boolean(currentCommand?.role === ROLE_ADMIN);
+    }
+
     async function downloadCircuit(p) {
         const url = getPointDownloadUrl(p);
         if (!url) {
@@ -387,27 +449,17 @@ export default function App() {
             return;
         }
 
-        try {
-            const headRes = await fetch(url, { method: "HEAD" });
-            if (!headRes.ok) {
-                window.alert("File does not exist.");
-                return;
-            }
-        } catch {
-            window.alert("File does not exist.");
-            return;
-        }
-
         const a = document.createElement("a");
         a.href = url;
         a.download = p.fileName || "circuit.bench";
+        a.target = "_blank";
         a.rel = "noopener noreferrer";
         document.body.appendChild(a);
         a.click();
         a.remove();
     }
 
-    async function createPointFromUploadedFile(sourceFile, parsed, description) {
+    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null) {
         const pointId = uid();
         const storedFileName = buildStoredFileName({
             benchmark: parsed.benchmark,
@@ -439,8 +491,8 @@ export default function App() {
             description,
             sender: currentCommand.name,
             fileName: storedFileName,
-            status: "non-verified",
-            checkerVersion: null,
+            status: verificationResult?.status || "non-verified",
+            checkerVersion: verificationResult?.checkerVersion || null,
         };
 
         const savedPayload = await savePoint({
@@ -476,27 +528,51 @@ export default function App() {
         setUploadLogText("");
 
         try {
-            const savedPoints = [];
-            const logRows = [];
-
+            const preparedFiles = [];
+            const validationFiles = [];
             for (const file of benchFiles) {
                 const parsed = parseBenchFileName(file.name);
                 if (!parsed.ok) {
-                    logRows.push({
-                        fileName: file.name,
-                        success: false,
-                        reason: parsed.error,
-                    });
-                    setUploadProgress((prev) => {
-                        if (!prev) return prev;
-                        return { ...prev, done: prev.done + 1 };
-                    });
-                    continue;
+                    throw new Error(parsed.error);
                 }
+                const circuitText = await readCircuitFileAsText(file);
+                preparedFiles.push({ file, parsed, circuitText });
+                validationFiles.push({
+                    fileName: file.name,
+                    circuitText,
+                });
+            }
 
-                if (file.size > maxSingleUploadBytes) {
+            try {
+                await validateUploadCircuits({
+                    authKey: authKeyDraft,
+                    files: validationFiles,
+                });
+            } catch (validationError) {
+                const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
+                if (benchFiles.length > 1 && detailRows.length > 0) {
+                    const lines = detailRows.map(
+                        (row) =>
+                            `file=${row.fileName || "<unknown>"}; success=${row.ok ? "true" : "false"}; reason=${row.reason || "OK"}`
+                    );
+                    setUploadLogText(lines.join("\n"));
+                    setUploadError("Batch validation failed. Download log for details.");
+                } else if (detailRows.length > 0) {
+                    const firstFail = detailRows.find((row) => !row.ok);
+                    setUploadError(firstFail?.reason || validationError?.message || "Circuit validation failed.");
+                } else {
+                    setUploadError(validationError?.message || "Circuit validation failed.");
+                }
+                return;
+            }
+
+            const savedPoints = [];
+            const logRows = [];
+
+            for (const item of preparedFiles) {
+                if (item.file.size > maxSingleUploadBytes) {
                     logRows.push({
-                        fileName: file.name,
+                        fileName: item.file.name,
                         success: false,
                         reason: `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`,
                     });
@@ -508,16 +584,30 @@ export default function App() {
                 }
 
                 try {
-                    const saved = await createPointFromUploadedFile(file, parsed, description);
+                    let verificationResult = null;
+                    if (selectedChecker === "ABC") {
+                        const verified = await verifyPointCircuit({
+                            authKey: authKeyDraft,
+                            benchmark: item.parsed.benchmark,
+                            circuitText: item.circuitText,
+                            checkerVersion: "ABC",
+                            applyStatus: false,
+                        });
+                        verificationResult = {
+                            status: verified?.status || "non-verified",
+                            checkerVersion: verified?.checkerVersion || "ABC",
+                        };
+                    }
+                    const saved = await createPointFromUploadedFile(item.file, item.parsed, description, verificationResult);
                     savedPoints.push(saved);
                     logRows.push({
-                        fileName: file.name,
+                        fileName: item.file.name,
                         success: true,
                         reason: "Uploaded successfully.",
                     });
                 } catch (err) {
                     logRows.push({
-                        fileName: file.name,
+                        fileName: item.file.name,
                         success: false,
                         reason: err?.message || "Failed to upload point.",
                     });
@@ -614,6 +704,35 @@ export default function App() {
         if (!p || !canDeletePoint(p)) return false;
         if (!window.confirm(`Delete ${p.fileName}?`)) return false;
         return await deletePointById(pointId);
+    }
+
+    async function onTestPoint(point) {
+        if (!canTestPoint(point)) return;
+        setTestingPointId(point.id);
+        try {
+            const result = await verifyPointCircuit({
+                authKey: authKeyDraft,
+                pointId: point.id,
+                applyStatus: true,
+                checkerVersion: "ABC",
+            });
+            setPoints((prev) =>
+                prev.map((row) =>
+                    row.id === point.id
+                        ? {
+                            ...row,
+                            status: result.status,
+                            checkerVersion: result.checkerVersion,
+                        }
+                        : row
+                )
+            );
+            window.alert(result.equivalent ? "CEC: equivalent. Status updated to verified." : "CEC: not equivalent. Status updated to failed.");
+        } catch (error) {
+            window.alert(error?.message || "Failed to run CEC.");
+        } finally {
+            setTestingPointId(null);
+        }
     }
 
     function clearAllTestNoConfirm() {
@@ -809,6 +928,317 @@ export default function App() {
         }
     }
 
+    function onTruthFilesChange(e) {
+        const files = Array.from(e.target.files || []);
+        setTruthFiles(files);
+        setTruthUploadError("");
+        setTruthUploadLogText("");
+        setTruthUploadProgress(null);
+        setTruthConflicts([]);
+        setIsTruthConflictModalOpen(false);
+    }
+
+    async function uploadAndSaveTruthFile(file, { allowReplace = false, allowCreateBenchmark = false } = {}) {
+        const uploadMeta = await requestTruthUploadUrl({
+            authKey: authKeyDraft,
+            fileName: file.name,
+            fileSize: file.size,
+        });
+        const putRes = await fetch(uploadMeta.uploadUrl, {
+            method: "PUT",
+            body: file,
+        });
+        if (!putRes.ok) {
+            throw new Error("Failed to upload truth file to S3.");
+        }
+        await saveTruthTable({
+            authKey: authKeyDraft,
+            fileName: file.name,
+            allowReplace,
+            allowCreateBenchmark,
+        });
+    }
+
+    function toTruthLogText(rows) {
+        return rows
+            .map((row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`)
+            .join("\n");
+    }
+
+    async function uploadTruthTables() {
+        if (truthFiles.length === 0) {
+            setTruthUploadError("Select at least one .truth file.");
+            return;
+        }
+        setIsTruthUploading(true);
+        setTruthUploadProgress({ done: 0, total: truthFiles.length });
+        setTruthUploadError("");
+        setTruthUploadLogText("");
+        setTruthConflicts([]);
+        setIsTruthConflictModalOpen(false);
+
+        try {
+            const invalidName = truthFiles.find((file) => !parseTruthFileName(file.name).ok);
+            if (invalidName) {
+                setTruthUploadError("Invalid truth file name. Expected: bench{200..299}.truth");
+                return;
+            }
+
+            const plan = await planTruthTablesUpload({
+                authKey: authKeyDraft,
+                fileNames: truthFiles.map((f) => f.name),
+            });
+            const fileByName = new Map(truthFiles.map((file) => [file.name, file]));
+            const logRows = [];
+            const pending = [];
+
+            for (const item of plan.files) {
+                const sourceFile = fileByName.get(item.fileName);
+                if (!sourceFile) continue;
+                if (item.action === "invalid") {
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: false,
+                        reason: item.reason || "Invalid truth file.",
+                    });
+                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+                    continue;
+                }
+                if (item.action === "requires_replace" || item.action === "requires_create_benchmark") {
+                    pending.push({
+                        ...item,
+                        checked: false,
+                    });
+                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+                    continue;
+                }
+                try {
+                    await uploadAndSaveTruthFile(sourceFile);
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: true,
+                        reason: "Uploaded successfully.",
+                    });
+                } catch (error) {
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: false,
+                        reason: error?.message || "Failed to upload truth file.",
+                    });
+                }
+                setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+            }
+
+            if (pending.length > 0) {
+                setTruthConflicts(pending);
+                setIsTruthConflictModalOpen(true);
+            }
+
+            if (logRows.length > 0) {
+                setTruthUploadLogText(toTruthLogText(logRows));
+            }
+            if (pending.length > 0) {
+                setTruthUploadError("Some files require confirmation. Review the conflict dialog.");
+            } else {
+                const failed = logRows.filter((row) => !row.success).length;
+                if (failed > 0) {
+                    setTruthUploadError("Some truth files failed. Download log for details.");
+                }
+                clearTruthFileInput();
+            }
+        } catch (error) {
+            setTruthUploadError(error?.message || "Failed to upload truth files.");
+        } finally {
+            setIsTruthUploading(false);
+            setTruthUploadProgress(null);
+        }
+    }
+
+    function setTruthConflictChecked(fileName, checked) {
+        setTruthConflicts((prev) => prev.map((row) => (row.fileName === fileName ? { ...row, checked } : row)));
+    }
+
+    function selectAllTruthConflicts() {
+        setTruthConflicts((prev) => prev.map((row) => ({ ...row, checked: true })));
+    }
+
+    function clearAllTruthConflicts() {
+        setTruthConflicts((prev) => prev.map((row) => ({ ...row, checked: false })));
+    }
+
+    async function applyTruthConflicts() {
+        if (truthConflicts.length === 0) {
+            setIsTruthConflictModalOpen(false);
+            return;
+        }
+        setIsTruthUploading(true);
+        setTruthUploadProgress({ done: 0, total: truthConflicts.length });
+        try {
+            const fileByName = new Map(truthFiles.map((file) => [file.name, file]));
+            const logRows = truthUploadLogText
+                ? truthUploadLogText.split("\n").filter(Boolean).map((line) => {
+                    const parts = line.split("; ");
+                    return {
+                        fileName: parts[0]?.replace(/^file=/, "") || "<unknown>",
+                        success: parts[1]?.replace(/^success=/, "") === "true",
+                        reason: parts[2]?.replace(/^reason=/, "") || "",
+                    };
+                })
+                : [];
+
+            for (const item of truthConflicts) {
+                if (!item.checked) {
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: false,
+                        reason: "Skipped by admin decision.",
+                    });
+                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+                    continue;
+                }
+                const sourceFile = fileByName.get(item.fileName);
+                if (!sourceFile) {
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: false,
+                        reason: "Local file is missing.",
+                    });
+                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+                    continue;
+                }
+                try {
+                    await uploadAndSaveTruthFile(sourceFile, {
+                        allowReplace: item.action === "requires_replace",
+                        allowCreateBenchmark: item.action === "requires_create_benchmark",
+                    });
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: true,
+                        reason: "Uploaded successfully after confirmation.",
+                    });
+                } catch (error) {
+                    logRows.push({
+                        fileName: item.fileName,
+                        success: false,
+                        reason: error?.message || "Failed to upload truth file.",
+                    });
+                }
+                setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+            }
+
+            setTruthUploadLogText(toTruthLogText(logRows));
+            const failed = logRows.filter((row) => !row.success).length;
+            setTruthUploadError(failed > 0 ? "Some truth files failed. Download log for details." : "");
+            setTruthConflicts([]);
+            setIsTruthConflictModalOpen(false);
+            clearTruthFileInput();
+        } finally {
+            setIsTruthUploading(false);
+            setTruthUploadProgress(null);
+        }
+    }
+
+    function closeTruthConflictModal() {
+        setIsTruthConflictModalOpen(false);
+    }
+
+    function toTextLog(rows) {
+        return rows.map((row) => JSON.stringify(row)).join("\n");
+    }
+
+    async function runBulkVerifyAllPoints() {
+        setIsBulkVerifyRunning(true);
+        setAdminPanelError("");
+        try {
+            const result = await runAdminBulkVerify({
+                authKey: authKeyDraft,
+                checkerVersion: "ABC",
+            });
+            const rows = result.log || [];
+            setBulkVerifyLogText(toTextLog(rows));
+
+            const updates = rows
+                .filter((row) => row.ok && (row.recommendedStatus === "verified" || row.recommendedStatus === "failed"))
+                .map((row) => ({
+                    pointId: row.pointId,
+                    status: row.recommendedStatus,
+                    benchmark: row.benchmark,
+                    fileName: row.fileName,
+                    checked: true,
+                }));
+
+            if (updates.length === 0) {
+                window.alert("Bulk check completed. No status updates available.");
+                return;
+            }
+
+            setBulkVerifyCandidates(updates);
+            setIsBulkVerifyApplyModalOpen(true);
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to run bulk verification.");
+        } finally {
+            setIsBulkVerifyRunning(false);
+        }
+    }
+
+    async function runBulkMetricsAudit() {
+        setIsBulkMetricsAuditRunning(true);
+        setAdminPanelError("");
+        try {
+            const result = await runAdminMetricsAudit({ authKey: authKeyDraft });
+            setBulkMetricsAuditLogText(toTextLog(result.mismatches || []));
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to run metrics audit.");
+        } finally {
+            setIsBulkMetricsAuditRunning(false);
+        }
+    }
+
+    function setBulkVerifyCandidateChecked(pointId, checked) {
+        setBulkVerifyCandidates((prev) => prev.map((row) => (row.pointId === pointId ? { ...row, checked } : row)));
+    }
+
+    function selectAllBulkVerifyCandidates() {
+        setBulkVerifyCandidates((prev) => prev.map((row) => ({ ...row, checked: true })));
+    }
+
+    function clearAllBulkVerifyCandidates() {
+        setBulkVerifyCandidates((prev) => prev.map((row) => ({ ...row, checked: false })));
+    }
+
+    function closeBulkVerifyApplyModal() {
+        setIsBulkVerifyApplyModalOpen(false);
+    }
+
+    async function applySelectedBulkVerifyCandidates() {
+        const updates = bulkVerifyCandidates
+            .filter((row) => row.checked)
+            .map((row) => ({ pointId: row.pointId, status: row.status }));
+        if (updates.length === 0) {
+            setIsBulkVerifyApplyModalOpen(false);
+            return;
+        }
+
+        setIsBulkVerifyRunning(true);
+        setAdminPanelError("");
+        try {
+            await applyAdminPointStatuses({
+                authKey: authKeyDraft,
+                updates,
+                checkerVersion: "ABC",
+            });
+            const freshPoints = await fetchPoints();
+            setPoints(freshPoints);
+            setIsBulkVerifyApplyModalOpen(false);
+            setBulkVerifyCandidates([]);
+            window.alert(`Applied statuses for ${updates.length} points.`);
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to apply statuses.");
+        } finally {
+            setIsBulkVerifyRunning(false);
+        }
+    }
+
     function downloadUploadLog() {
         if (!uploadLogText) return;
         const blob = new Blob([uploadLogText], { type: "text/plain;charset=utf-8;" });
@@ -816,6 +1246,45 @@ export default function App() {
         const a = document.createElement("a");
         a.href = url;
         a.download = `upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadTruthUploadLog() {
+        if (!truthUploadLogText) return;
+        const blob = new Blob([truthUploadLogText], { type: "text/plain;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `truth-upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadBulkVerifyLog() {
+        if (!bulkVerifyLogText) return;
+        const blob = new Blob([bulkVerifyLogText], { type: "text/plain;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bulk-cec-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadBulkMetricsAuditLog() {
+        if (!bulkMetricsAuditLogText) return;
+        const blob = new Blob([bulkMetricsAuditLogText], { type: "text/plain;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bulk-metrics-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -912,6 +1381,9 @@ export default function App() {
     const isTestBenchSelected = benchmarkFilter === "test";
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
     const benchmarkLabel = benchmarkFilter === "test" ? "test" : String(benchmarkFilter);
+    const truthTableOn =
+        benchmarkFilter !== "test" &&
+        points.some((p) => String(p.benchmark) === String(benchmarkFilter) && p.hasTruth);
 
     return (
         <div className="page">
@@ -969,6 +1441,7 @@ export default function App() {
                         canApplyView={canApplyView}
                         onFitViewToPareto={fitViewToPareto}
                         onFitViewToAllVisiblePoints={fitViewToAllVisiblePoints}
+                        truthTableOn={truthTableOn}
                     />
 
                     <SentPointsSection
@@ -1031,6 +1504,8 @@ export default function App() {
                         uploadProgress={uploadProgress}
                         uploadLogText={uploadLogText}
                         onDownloadUploadLog={downloadUploadLog}
+                        selectedChecker={selectedChecker}
+                        onSelectedCheckerChange={setSelectedChecker}
                     />
 
                     {isAdmin ? (
@@ -1051,6 +1526,36 @@ export default function App() {
                             saveAdminUserSettings={saveAdminUserSettings}
                             isAdminSaving={isAdminSaving}
                             adminLogs={adminLogs}
+                            truthFilesInputRef={truthFilesInputRef}
+                            onTruthFilesChange={onTruthFilesChange}
+                            uploadTruthTables={uploadTruthTables}
+                            isTruthUploading={isTruthUploading}
+                            truthUploadError={truthUploadError}
+                            truthUploadLogText={truthUploadLogText}
+                            truthUploadProgress={truthUploadProgress}
+                            onDownloadTruthUploadLog={downloadTruthUploadLog}
+                            truthConflicts={truthConflicts}
+                            isTruthConflictModalOpen={isTruthConflictModalOpen}
+                            setTruthConflictChecked={setTruthConflictChecked}
+                            selectAllTruthConflicts={selectAllTruthConflicts}
+                            clearAllTruthConflicts={clearAllTruthConflicts}
+                            applyTruthConflicts={applyTruthConflicts}
+                            closeTruthConflictModal={closeTruthConflictModal}
+                            runBulkVerifyAllPoints={runBulkVerifyAllPoints}
+                            isBulkVerifyRunning={isBulkVerifyRunning}
+                            bulkVerifyLogText={bulkVerifyLogText}
+                            onDownloadBulkVerifyLog={downloadBulkVerifyLog}
+                            runBulkMetricsAudit={runBulkMetricsAudit}
+                            isBulkMetricsAuditRunning={isBulkMetricsAuditRunning}
+                            bulkMetricsAuditLogText={bulkMetricsAuditLogText}
+                            onDownloadBulkMetricsAuditLog={downloadBulkMetricsAuditLog}
+                            bulkVerifyCandidates={bulkVerifyCandidates}
+                            isBulkVerifyApplyModalOpen={isBulkVerifyApplyModalOpen}
+                            setBulkVerifyCandidateChecked={setBulkVerifyCandidateChecked}
+                            selectAllBulkVerifyCandidates={selectAllBulkVerifyCandidates}
+                            clearAllBulkVerifyCandidates={clearAllBulkVerifyCandidates}
+                            applySelectedBulkVerifyCandidates={applySelectedBulkVerifyCandidates}
+                            closeBulkVerifyApplyModal={closeBulkVerifyApplyModal}
                         />
                     ) : null}
 
@@ -1064,6 +1569,9 @@ export default function App() {
                         onFocusPoint={focusPoint}
                         onDownloadCircuit={downloadCircuit}
                         getPointDownloadUrl={getPointDownloadUrl}
+                        canTestPoint={canTestPoint}
+                        onTestPoint={onTestPoint}
+                        testingPointId={testingPointId}
                         canDeletePoint={canDeletePoint}
                         onConfirmAndDeletePoint={confirmAndDeletePoint}
                     />
@@ -1075,6 +1583,9 @@ export default function App() {
                 closePointActionModal={closePointActionModal}
                 onDownloadCircuit={downloadCircuit}
                 getPointDownloadUrl={getPointDownloadUrl}
+                canTestPoint={canTestPoint}
+                onTestPoint={onTestPoint}
+                testingPointId={testingPointId}
                 canDeletePoint={canDeletePoint}
                 confirmAndDeletePoint={confirmAndDeletePoint}
             />

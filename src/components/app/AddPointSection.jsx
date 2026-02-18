@@ -19,6 +19,8 @@ export function AddPointSection({
     uploadProgress,
     uploadLogText,
     onDownloadUploadLog,
+    selectedChecker,
+    onSelectedCheckerChange,
 }) {
     return (
         <section className="card">
@@ -101,6 +103,14 @@ export function AddPointSection({
                         onChange={(e) => onDescriptionDraftChange(e.target.value)}
                         placeholder="Short description (default: schema)"
                     />
+                </label>
+
+                <label className="field">
+                    <span>checker</span>
+                    <select value={selectedChecker} onChange={(e) => onSelectedCheckerChange(e.target.value)}>
+                        <option value="none">Do not verify (non-verified)</option>
+                        <option value="ABC">ABC</option>
+                    </select>
                 </label>
 
                 {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
