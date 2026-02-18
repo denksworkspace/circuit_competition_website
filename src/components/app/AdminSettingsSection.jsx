@@ -33,10 +33,12 @@ export function AdminSettingsSection({
     closeTruthConflictModal,
     runBulkVerifyAllPoints,
     isBulkVerifyRunning,
+    bulkVerifyProgress,
     bulkVerifyLogText,
     onDownloadBulkVerifyLog,
     runBulkMetricsAudit,
     isBulkMetricsAuditRunning,
+    bulkMetricsAuditProgress,
     bulkMetricsAuditLogText,
     onDownloadBulkMetricsAuditLog,
     bulkVerifyCandidates,
@@ -161,6 +163,11 @@ export function AdminSettingsSection({
                         >
                             {isBulkVerifyRunning ? "Checking all points..." : "Check all points (CEC)"}
                         </button>
+                        {isBulkVerifyRunning && bulkVerifyProgress ? (
+                            <div className="cardHint">
+                                Processed {bulkVerifyProgress.done} / {bulkVerifyProgress.total} points
+                            </div>
+                        ) : null}
                         {bulkVerifyLogText ? (
                             <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
                                 Download CEC log
@@ -175,6 +182,11 @@ export function AdminSettingsSection({
                         >
                             {isBulkMetricsAuditRunning ? "Auditing..." : "Audit all point metrics (ABC)"}
                         </button>
+                        {isBulkMetricsAuditRunning && bulkMetricsAuditProgress ? (
+                            <div className="cardHint">
+                                Processed {bulkMetricsAuditProgress.done} / {bulkMetricsAuditProgress.total} points
+                            </div>
+                        ) : null}
                         {bulkMetricsAuditLogText ? (
                             <button className="btn ghost" type="button" onClick={onDownloadBulkMetricsAuditLog}>
                                 Download metrics audit log

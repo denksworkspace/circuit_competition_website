@@ -150,6 +150,20 @@ export async function runAdminBulkVerify({ authKey, checkerVersion }) {
     };
 }
 
+export async function runAdminBulkVerifyPoint({ authKey, checkerVersion, pointId }) {
+    const response = await fetch("/api/admin-points-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, checkerVersion, pointId }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to verify point.");
+    }
+    const log = Array.isArray(data?.log) ? data.log : [];
+    return log[0] || null;
+}
+
 export async function applyAdminPointStatuses({ authKey, updates, checkerVersion }) {
     const response = await fetch("/api/admin-points-apply", {
         method: "POST",
@@ -176,6 +190,20 @@ export async function runAdminMetricsAudit({ authKey }) {
     return {
         mismatches: Array.isArray(data?.mismatches) ? data.mismatches : [],
     };
+}
+
+export async function runAdminMetricsAuditPoint({ authKey, pointId }) {
+    const response = await fetch("/api/admin-points-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, pointId }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to audit point.");
+    }
+    const mismatches = Array.isArray(data?.mismatches) ? data.mismatches : [];
+    return mismatches[0] || null;
 }
 
 export async function planTruthTablesUpload({ authKey, fileNames }) {

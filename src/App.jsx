@@ -38,8 +38,8 @@ import {
     fetchCommands,
     fetchPoints,
     planTruthTablesUpload,
-    runAdminBulkVerify,
-    runAdminMetricsAudit,
+    runAdminBulkVerifyPoint,
+    runAdminMetricsAuditPoint,
     requestUploadUrl,
     requestTruthUploadUrl,
     savePoint,
@@ -154,6 +154,8 @@ export default function App() {
     const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
     const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
     const [bulkMetricsAuditLogText, setBulkMetricsAuditLogText] = useState("");
+    const [bulkVerifyProgress, setBulkVerifyProgress] = useState(null);
+    const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
     const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
 
@@ -1148,13 +1150,20 @@ export default function App() {
 
     async function runBulkVerifyAllPoints() {
         setIsBulkVerifyRunning(true);
+        const targetPoints = points.filter((p) => p.benchmark !== "test");
+        setBulkVerifyProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
         try {
-            const result = await runAdminBulkVerify({
-                authKey: authKeyDraft,
-                checkerVersion: "ABC",
-            });
-            const rows = result.log || [];
+            const rows = [];
+            for (const point of targetPoints) {
+                const row = await runAdminBulkVerifyPoint({
+                    authKey: authKeyDraft,
+                    checkerVersion: "ABC",
+                    pointId: point.id,
+                });
+                if (row) rows.push(row);
+                setBulkVerifyProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+            }
             setBulkVerifyLogText(toTextLog(rows));
 
             const updates = rows
@@ -1178,19 +1187,31 @@ export default function App() {
             setAdminPanelError(error?.message || "Failed to run bulk verification.");
         } finally {
             setIsBulkVerifyRunning(false);
+            setBulkVerifyProgress(null);
         }
     }
 
     async function runBulkMetricsAudit() {
         setIsBulkMetricsAuditRunning(true);
+        const targetPoints = points.filter((p) => p.benchmark !== "test");
+        setBulkMetricsAuditProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
         try {
-            const result = await runAdminMetricsAudit({ authKey: authKeyDraft });
-            setBulkMetricsAuditLogText(toTextLog(result.mismatches || []));
+            const mismatches = [];
+            for (const point of targetPoints) {
+                const mismatch = await runAdminMetricsAuditPoint({
+                    authKey: authKeyDraft,
+                    pointId: point.id,
+                });
+                if (mismatch) mismatches.push(mismatch);
+                setBulkMetricsAuditProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+            }
+            setBulkMetricsAuditLogText(toTextLog(mismatches));
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to run metrics audit.");
         } finally {
             setIsBulkMetricsAuditRunning(false);
+            setBulkMetricsAuditProgress(null);
         }
     }
 
@@ -1543,10 +1564,12 @@ export default function App() {
                             closeTruthConflictModal={closeTruthConflictModal}
                             runBulkVerifyAllPoints={runBulkVerifyAllPoints}
                             isBulkVerifyRunning={isBulkVerifyRunning}
+                            bulkVerifyProgress={bulkVerifyProgress}
                             bulkVerifyLogText={bulkVerifyLogText}
                             onDownloadBulkVerifyLog={downloadBulkVerifyLog}
                             runBulkMetricsAudit={runBulkMetricsAudit}
                             isBulkMetricsAuditRunning={isBulkMetricsAuditRunning}
+                            bulkMetricsAuditProgress={bulkMetricsAuditProgress}
                             bulkMetricsAuditLogText={bulkMetricsAuditLogText}
                             onDownloadBulkMetricsAuditLog={downloadBulkMetricsAuditLog}
                             bulkVerifyCandidates={bulkVerifyCandidates}

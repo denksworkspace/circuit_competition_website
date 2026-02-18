@@ -1,32 +1,14 @@
 # Structure Guidelines
 
-## Project Structure & Module Organization
-This repository is a Vite + React app with serverless API handlers.
+## Scope
+- Keep structure aligned to Vite + React + serverless API layout.
+- Expected roots: `src/`, `api/`, `tests/`, `public/`.
 
-- `src/`: frontend app code (`components/`, `services/`, `utils/`, `constants/`).
-- `api/`: backend endpoints and shared API helpers in `api/_lib/`.
-- `tests/`: Vitest suites split by scope:
-  - `tests/unit/` for frontend utilities/services,
-  - `tests/components/` for UI behavior,
-  - `tests/api/` for endpoint handlers and API libs,
-  - `tests/security/` for leak checks.
-- `public/`: static assets.
-- Root config: `vite.config.js`, `eslint.config.js`, `package.json`.
-
-## Refactoring Rules
-- Remove unused imports whenever you touch a file.
-- If a file mixes multiple responsibilities or becomes hard to maintain/debug, extract cohesive parts into smaller modules/components without changing behavior.
-- Remove duplicated code/styles when found.
-- If duplicated logic exists across different files and does the same job, either delete one duplicate or extract that logic into a shared module/component/helper.
-
-## Dependency Tree Remediation
-- When `AGENTS.md tree-dependency` shows weak dependency coverage compared to expected project size/complexity, treat it as a structural issue.
-- When `AGENTS.md tree-dependency` shows dependencies crossing folder boundaries that should not be crossed, treat it as a structural issue.
-- For detected structural issues, run:
-  - `AGENTS.md [ALL] fix [<affected files>]`
-  - then `AGENTS.md check`
-  - if issues remain, run `AGENTS.md fix`
-- Do not output a separate report for each internal remediation command. Output only for the command explicitly requested by the developer.
+## Rules
+- Remove unused imports in touched files.
+- Split multi-responsibility files into cohesive modules without behavior changes.
+- Remove duplicate logic/styles; prefer shared helpers for reused logic.
+- Treat dependency-tree boundary violations or missing paths as structural failures.
 
 ## Evidence Commands
 - `find src api tests -maxdepth 4 -type d | sort`
@@ -35,5 +17,5 @@ This repository is a Vite + React app with serverless API handlers.
 - `npm run lint`
 
 ## Pass Criteria
-- `PASS` only if structure paths exist as expected, dependency tree output has no `|?? ... (missing path)` entries, and no structural violations are reported by dependency tree/lint checks.
-- If evidence commands are not run or outputs contradict structure rules, verdict must not be `PASS`.
+- `PASS` only if required paths exist, dependency tree has no `|?? ... (missing path)`, and lint shows no structural violations.
+- Missing evidence or contradictory outputs => non-`PASS`.

@@ -1,17 +1,8 @@
 # Compilation Guidelines
 
 ## Deterministic Compile Policy
-- The protocol must return non-`PASS` when deterministic compile or resolution guarantees are violated.
-- Treat each of the following as non-`PASS`:
-  - unresolved imports or missing dependencies,
-  - missing required file paths referenced by the protocol,
-  - build/compile errors in selected scope,
-  - UB (undefined behavior) in protocol sense: non-deterministic logic that can produce inconsistent outcomes for the same inputs.
-
-## Compile Verification Strategy
-- Prefer deterministic commands with stable output for the same source state.
-- For application-level compilation, use the project build command.
-- For protocol-level path resolution checks, verify required AGENTS files exist at referenced paths.
+- Non-`PASS` for unresolved imports, missing required paths, build errors, or protocol-level undefined behavior (non-deterministic outcomes for same inputs).
+- Compile and path-resolution checks must be deterministic and repeatable.
 
 ## Evidence Commands
 - `npm run build`
@@ -19,5 +10,5 @@
 - `npm run lint`
 
 ## Pass Criteria
-- `PASS` only if compile/build commands succeed, required AGENTS paths resolve, and no deterministic-compile UB condition is detected.
-- If evidence commands are not run or any check fails, verdict must not be `PASS`.
+- `PASS` only if build succeeds, required AGENTS paths resolve, and no deterministic-compile UB condition is detected.
+- Missing evidence or any failure => non-`PASS`.

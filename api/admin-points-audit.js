@@ -9,6 +9,7 @@ export default async function handler(req, res) {
 
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
+    const pointId = body?.pointId ? String(body.pointId) : null;
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
         return;
@@ -30,12 +31,20 @@ export default async function handler(req, res) {
         return;
     }
 
-    const pointsRes = await sql`
-      select id, benchmark, delay, area, file_name
-      from points
-      where benchmark <> 'test'
-      order by created_at desc
-    `;
+    const pointsRes = pointId
+        ? await sql`
+          select id, benchmark, delay, area, file_name
+          from points
+          where id = ${pointId}
+            and benchmark <> 'test'
+          order by created_at desc
+        `
+        : await sql`
+          select id, benchmark, delay, area, file_name
+          from points
+          where benchmark <> 'test'
+          order by created_at desc
+        `;
 
     const mismatches = [];
     for (const point of pointsRes.rows) {

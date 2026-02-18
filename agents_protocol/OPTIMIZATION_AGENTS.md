@@ -1,62 +1,22 @@
 # Optimization Guidelines
 
-## Performance Mindset
-- Optimize for measurable bottlenecks, not assumptions.
-- Prefer simple and predictable solutions before advanced micro-optimizations.
-- Keep behavior and correctness unchanged while optimizing.
-
-## Algorithmic Complexity
-- Consider time and space complexity for every non-trivial loop/path.
-- Avoid accidental quadratic behavior on growing datasets (nested scans, repeated filtering in loops, repeated sorting).
-- Precompute/reuse derived structures (`Map`, `Set`, indexes, memoized values) when repeated lookups are required.
-- Push expensive operations out of hot paths and render loops.
-- For frontend lists/charts, avoid recomputing large transformations unless inputs changed.
-
-## React/Frontend Runtime
-- Use memoization (`useMemo`, `useCallback`) only where it removes real repeated work.
-- Keep component boundaries small enough to reduce unnecessary re-renders.
-- Avoid passing unstable inline objects/functions into deep trees when it causes render churn.
-- Batch state updates where possible and avoid update cascades.
-- Prefer pagination/virtualization for large lists.
-
-## Parallelism and Concurrency
-- Parallelize independent I/O-bound work (multiple reads/requests) instead of serial waiting.
-- Use bounded concurrency for bulk operations to avoid resource spikes.
-- Avoid race conditions when updating shared state; ensure deterministic merge/update order.
-- Use cancellation/abort signals for stale async work in UI flows.
-
-## Network and API Efficiency
-- Minimize request count: combine compatible calls, avoid duplicate fetches.
-- Avoid over-fetching payloads; request only fields needed by the current feature.
-- Reuse cached data where safe and invalidate cache intentionally.
-- Add timeouts/retries only when appropriate, and avoid retry storms.
-- Prefer server-side filtering/pagination over fetching full datasets and filtering on client.
-
-## Database and Backend Paths
-- Avoid N+1 query patterns; fetch related data in set-based queries.
-- Add/select indexes for frequent filter/join/order keys.
-- Keep transactional scope minimal and explicit.
-- Avoid repeated schema checks/initialization inside hot request paths when not needed.
-
-## Memory and Resource Use
-- Avoid retaining large temporary arrays/objects longer than needed.
-- Stream or chunk large workloads where possible.
-- Clean up timers/listeners/subscriptions to prevent leaks.
-
-## Verification Requirements
-- Validate optimizations with evidence: benchmark numbers, profiling snapshots, or before/after timings.
-- Re-run lint/tests after optimization changes.
-- Document meaningful tradeoffs (readability vs speed, memory vs CPU, latency vs throughput).
+## Rules
+- Optimize only measured bottlenecks; keep behavior unchanged.
+- Avoid accidental quadratic paths; use `Map`/`Set`/indexes for repeated lookups.
+- Keep expensive work out of hot render/request paths.
+- Prefer bounded concurrency; avoid races and non-deterministic async merges.
+- Prevent over-fetching and duplicate requests.
+- Validate optimization claims with concrete measurements or asymptotic evidence.
 
 ## Evidence Commands
 - `AGENTS.md [<files>] asymptotics`
 - `npm run lint`
 - `npm run test:run`
 - `npm run build`
-- Optional metric capture (when applicable):
+- Optional:
   - `time npm run test:run`
   - `time npm run build`
 
 ## Pass Criteria
-- `PASS` only if optimization claims are backed by concrete evidence (asymptotic analysis and/or measurable before-after metrics) and quality gates pass.
-- If evidence commands are not run, metrics are missing for performance claims, or quality gates fail, verdict must not be `PASS`.
+- `PASS` only if optimization claims have evidence and quality gates pass.
+- Missing metrics/evidence or failed quality gates => non-`PASS`.

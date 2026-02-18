@@ -1,17 +1,14 @@
 # Design Guidelines
 
-## Coding Style & Naming Conventions
-- Use ES modules and modern React function components.
-- Keep code and comments in English only.
-- Match existing formatting (4-space indentation, semicolons, double quotes).
-- Naming patterns:
-  - components: `PascalCase` (e.g. `src/components/CustomTooltip.jsx`),
-  - utilities/services/helpers: `camelCase` file names (e.g. `src/services/apiClient.js`, `src/utils/pointUtils.js`),
-  - tests: `*.test.js` / `*.test.jsx`.
-- Use ESLint (`npm run lint`) before opening a PR.
-
-## UI Review Notes
-- Include screenshots for UI changes in PRs.
+## Rules
+- Use ES modules and React function components.
+- Keep code/comments in English.
+- Match repo formatting: 4-space indentation, semicolons, double quotes.
+- Naming:
+  - components: `PascalCase`
+  - utils/services/helpers: `camelCase`
+  - tests: `*.test.js` / `*.test.jsx`
+- Include UI screenshots in PRs when UI changes.
 
 ## Evidence Commands
 - `npm run lint`
@@ -20,5 +17,5 @@
 - `rg -n "(\\bAGETNS\\b|\\bAGNETS\\b|\\bAGNTS\\b|\\bAENTS\\b)" AGENTS.md AGENTS_INDEX.md agents_protocol/*.md | rg -v "e.g.,|typo/context scan|\\(e\\.g\\." || true`
 
 ## Pass Criteria
-- `PASS` only if lint succeeds, non-English code/comment scan has no hits, naming/path conventions are not violated, and typo/context scan has no critical hits for protocol keywords.
-- If evidence commands are not run or outputs show violations, verdict must not be `PASS`.
+- `PASS` only if lint succeeds, naming/path conventions hold, English-only scan is clean for code/comments, and protocol keyword typo scan has no critical hits.
+- Missing evidence or violations => non-`PASS`.
