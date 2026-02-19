@@ -239,9 +239,14 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         await waitFor(() => {
-            expect(calls).toEqual(["validate-upload", "upload-url", "put-s3", "save-point"]);
+            expect(calls).toEqual(["validate-upload"]);
         });
 
+        const applyButtons = await screen.findAllByRole("button", { name: "Apply" });
+        fireEvent.click(applyButtons[applyButtons.length - 1]);
+        await waitFor(() => {
+            expect(calls).toEqual(["validate-upload", "upload-url", "put-s3", "save-point"]);
+        });
         expect(await screen.findByText(/schema-test/)).toBeInTheDocument();
         expect(screen.getAllByText("delay=").length).toBeGreaterThan(0);
     });

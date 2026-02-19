@@ -2,11 +2,20 @@
 const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "")
     .trim()
     .replace(/\/+$/, "");
+const directApiBaseUrl = String(import.meta.env.VITE_DIRECT_API_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
 
 function apiUrl(path) {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     if (!apiBaseUrl) return normalizedPath;
     return `${apiBaseUrl}${normalizedPath}`;
+}
+
+function directApiUrl(path) {
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    if (!directApiBaseUrl) return normalizedPath;
+    return `${directApiBaseUrl}${normalizedPath}`;
 }
 
 async function parseJsonSafe(response) {
@@ -60,8 +69,40 @@ export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize 
     return data;
 }
 
+export async function requestUploadUrlDirect({ authKey, fileName, fileSize, batchSize = 1 }) {
+    const response = await fetch(directApiUrl("/api/points-upload-url-direct"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to get upload URL.");
+    }
+    return data;
+}
+
 export async function savePoint(pointPayload) {
     const response = await fetch(apiUrl("/api/points"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pointPayload),
+    });
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to save point.");
+    }
+
+    return {
+        point: data?.point || null,
+        quota: data?.quota || null,
+    };
+}
+
+export async function savePointDirect(pointPayload) {
+    const response = await fetch(directApiUrl("/api/points-direct"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pointPayload),

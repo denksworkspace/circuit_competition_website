@@ -21,6 +21,8 @@ export function AddPointSection({
     onDownloadUploadLog,
     selectedChecker,
     onSelectedCheckerChange,
+    useParamParser,
+    onUseParamParserChange,
 }) {
     return (
         <section className="card">
@@ -111,6 +113,15 @@ export function AddPointSection({
                         <option value="none">Do not verify (non-verified)</option>
                         <option value="ABC">ABC</option>
                     </select>
+                </label>
+
+                <label className="manualApplyItem">
+                    <input
+                        type="checkbox"
+                        checked={useParamParser}
+                        onChange={(e) => onUseParamParserChange(e.target.checked)}
+                    />
+                    <span>Use parser parameters (Render ABC metrics check)</span>
                 </label>
 
                 {uploadError.trim() ? <div className="error">{uploadError}</div> : null}

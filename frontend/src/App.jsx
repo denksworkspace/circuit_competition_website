@@ -19,6 +19,7 @@ import { AddPointSection } from "./components/app/AddPointSection.jsx";
 import { AdminSettingsSection } from "./components/app/AdminSettingsSection.jsx";
 import { FindPointsSection } from "./components/app/FindPointsSection.jsx";
 import { PointActionModal } from "./components/app/PointActionModal.jsx";
+import { ManualPointApplyModal } from "./components/app/ManualPointApplyModal.jsx";
 import {
     buildAxis,
     buildStoredFileName,
@@ -41,7 +42,9 @@ import {
     runAdminBulkVerifyPoint,
     runAdminMetricsAuditPoint,
     requestUploadUrl,
+    requestUploadUrlDirect,
     requestTruthUploadUrl,
+    savePointDirect,
     savePoint,
     saveTruthTable,
     updateAdminUserUploadSettings,
@@ -126,6 +129,10 @@ export default function App() {
     const [uploadProgress, setUploadProgress] = useState(null);
     const fileInputRef = useRef(null);
     const [uploadLogText, setUploadLogText] = useState("");
+    const [useParamParser, setUseParamParser] = useState(true);
+    const [manualApplyRows, setManualApplyRows] = useState(() => []);
+    const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
+    const [isManualApplying, setIsManualApplying] = useState(false);
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
     const [testingPointId, setTestingPointId] = useState(null);
@@ -426,6 +433,83 @@ export default function App() {
         });
     }
 
+    function isRenderNonVerdictReason(reasonRaw) {
+        const reason = String(reasonRaw || "").toLowerCase();
+        if (!reason) return true;
+        return (
+            reason.includes("timed out") ||
+            reason.includes("timeout") ||
+            reason.includes("failed to compute metrics") ||
+            reason.includes("body too large") ||
+            reason.includes("failed to fetch") ||
+            reason.includes("network")
+        );
+    }
+
+    function normalizeParserResultRow(row, fallbackParsed) {
+        if (!row) {
+            return {
+                kind: "non-verdict",
+                reason: "Render parser response is missing.",
+                parsed: fallbackParsed,
+                changed: false,
+            };
+        }
+        if (row.ok) {
+            return {
+                kind: "pass",
+                reason: "Parser matched filename metrics.",
+                parsed: fallbackParsed,
+                changed: false,
+            };
+        }
+
+        const expectedDelay = Number(row?.expected?.delay);
+        const expectedArea = Number(row?.expected?.area);
+        const actualDelay = Number(row?.actual?.delay);
+        const actualArea = Number(row?.actual?.area);
+        const hasExpected = Number.isFinite(expectedDelay) && Number.isFinite(expectedArea);
+        const hasActual = Number.isFinite(actualDelay) && Number.isFinite(actualArea);
+
+        if (hasExpected && hasActual && actualDelay <= expectedDelay && actualArea <= expectedArea) {
+            return {
+                kind: "pass-adjusted",
+                reason: `Parser adjusted metrics to delay=${actualDelay}, area=${actualArea}.`,
+                parsed: {
+                    ...fallbackParsed,
+                    delay: actualDelay,
+                    area: actualArea,
+                },
+                changed: actualDelay !== fallbackParsed.delay || actualArea !== fallbackParsed.area,
+            };
+        }
+
+        if (hasExpected && hasActual) {
+            return {
+                kind: "failed",
+                reason: row.reason || "Metric mismatch.",
+                parsed: fallbackParsed,
+                changed: false,
+            };
+        }
+
+        if (isRenderNonVerdictReason(row.reason)) {
+            return {
+                kind: "non-verdict",
+                reason: row.reason || "Parser did not return verdict.",
+                parsed: fallbackParsed,
+                changed: false,
+            };
+        }
+
+        return {
+            kind: "failed",
+            reason: row.reason || "Parser validation failed.",
+            parsed: fallbackParsed,
+            changed: false,
+        };
+    }
+
     function clearTruthFileInput() {
         setTruthFiles([]);
         if (truthFilesInputRef.current) truthFilesInputRef.current.value = "";
@@ -465,7 +549,7 @@ export default function App() {
         a.remove();
     }
 
-    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null) {
+    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null, options = {}) {
         const pointId = uid();
         const storedFileName = buildStoredFileName({
             benchmark: parsed.benchmark,
@@ -474,8 +558,16 @@ export default function App() {
             pointId,
             sender: currentCommand.name,
         });
+        const useDirectApi = Boolean(options?.useDirectApi);
 
-        const uploadMeta = await requestUploadUrl({
+        const uploadMeta = useDirectApi
+            ? await requestUploadUrlDirect({
+                authKey: authKeyDraft,
+                fileName: storedFileName,
+                fileSize: sourceFile.size,
+                batchSize: benchFiles.length,
+            })
+            : await requestUploadUrl({
             authKey: authKeyDraft,
             fileName: storedFileName,
             fileSize: sourceFile.size,
@@ -501,7 +593,8 @@ export default function App() {
             checkerVersion: verificationResult?.checkerVersion || null,
         };
 
-        const savedPayload = await savePoint({
+        const saveFn = useDirectApi ? savePointDirect : savePoint;
+        const savedPayload = await saveFn({
             ...point,
             authKey: authKeyDraft,
             fileSize: sourceFile.size,
@@ -534,86 +627,154 @@ export default function App() {
         setUploadLogText("");
 
         try {
+            const useDirectApi = selectedChecker === "none" && !useParamParser;
+            const needsCircuitText = useParamParser || selectedChecker === "ABC";
             const preparedFiles = [];
-            const validationFiles = [];
             for (const file of benchFiles) {
                 const parsed = parseBenchFileName(file.name);
                 if (!parsed.ok) {
                     throw new Error(parsed.error);
                 }
-                const circuitText = await readCircuitFileAsText(file);
+                const circuitText = needsCircuitText ? await readCircuitFileAsText(file) : "";
                 preparedFiles.push({ file, parsed, circuitText });
-                validationFiles.push({
-                    fileName: file.name,
-                    circuitText,
-                });
             }
 
-            try {
-                await validateUploadCircuits({
-                    authKey: authKeyDraft,
-                    files: validationFiles,
-                });
-            } catch (validationError) {
-                const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
-                if (benchFiles.length > 1 && detailRows.length > 0) {
-                    const lines = detailRows.map(
-                        (row) =>
-                            `file=${row.fileName || "<unknown>"}; success=${row.ok ? "true" : "false"}; reason=${row.reason || "OK"}`
-                    );
-                    setUploadLogText(lines.join("\n"));
-                    setUploadError("Batch validation failed. Download log for details.");
-                } else if (detailRows.length > 0) {
-                    const firstFail = detailRows.find((row) => !row.ok);
-                    setUploadError(firstFail?.reason || validationError?.message || "Circuit validation failed.");
-                } else {
-                    setUploadError(validationError?.message || "Circuit validation failed.");
+            const parserByFileName = new Map();
+            if (useParamParser) {
+                const validationFiles = preparedFiles.map((item) => ({
+                    fileName: item.file.name,
+                    circuitText: item.circuitText,
+                }));
+                try {
+                    const parserResult = await validateUploadCircuits({
+                        authKey: authKeyDraft,
+                        files: validationFiles,
+                    });
+                    const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
+                    if (parserRows.length === 0) {
+                        for (const item of preparedFiles) {
+                            parserByFileName.set(item.file.name, { ok: true, fileName: item.file.name });
+                        }
+                    } else {
+                        for (const row of parserRows) {
+                            parserByFileName.set(String(row.fileName || ""), row);
+                        }
+                    }
+                } catch (validationError) {
+                    const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
+                    if (detailRows.length > 0) {
+                        for (const row of detailRows) {
+                            parserByFileName.set(String(row.fileName || ""), row);
+                        }
+                    } else {
+                        for (const item of preparedFiles) {
+                            parserByFileName.set(item.file.name, {
+                                ok: false,
+                                reason: validationError?.message || "Render parser request failed.",
+                            });
+                        }
+                    }
                 }
-                return;
             }
 
-            const savedPoints = [];
+            const immediateRows = [];
+            const manualRows = [];
             const logRows = [];
 
             for (const item of preparedFiles) {
-                if (item.file.size > maxSingleUploadBytes) {
-                    logRows.push({
-                        fileName: item.file.name,
-                        success: false,
-                        reason: `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`,
-                    });
-                    setUploadProgress((prev) => {
-                        if (!prev) return prev;
-                        return { ...prev, done: prev.done + 1 };
-                    });
-                    continue;
+                let parserState = {
+                    kind: "skipped",
+                    reason: "Parser is disabled.",
+                    parsed: item.parsed,
+                    changed: false,
+                };
+                if (useParamParser) {
+                    const parserRow = parserByFileName.get(item.file.name);
+                    parserState = normalizeParserResultRow(parserRow, item.parsed);
                 }
 
-                try {
-                    let verificationResult = null;
-                    if (selectedChecker === "ABC") {
+                let checkerVerdict = null;
+                let checkerVersion = null;
+                if (selectedChecker === "ABC") {
+                    checkerVersion = "ABC";
+                    try {
                         const verified = await verifyPointCircuit({
                             authKey: authKeyDraft,
-                            benchmark: item.parsed.benchmark,
+                            benchmark: parserState.parsed.benchmark,
                             circuitText: item.circuitText,
                             checkerVersion: "ABC",
                             applyStatus: false,
                         });
-                        verificationResult = {
-                            status: verified?.status || "non-verified",
-                            checkerVersion: verified?.checkerVersion || "ABC",
-                        };
+                        checkerVerdict = verified?.status === "verified";
+                    } catch {
+                        checkerVerdict = null;
                     }
-                    const saved = await createPointFromUploadedFile(item.file, item.parsed, description, verificationResult);
-                    savedPoints.push(saved);
+                }
+
+                let finalStatus = "non-verified";
+                if (parserState.kind === "failed" || checkerVerdict === false) {
+                    finalStatus = "failed";
+                } else if (
+                    selectedChecker === "ABC" &&
+                    checkerVerdict === true &&
+                    (!useParamParser || parserState.kind === "pass" || parserState.kind === "pass-adjusted")
+                ) {
+                    finalStatus = "verified";
+                }
+
+                const candidate = {
+                    file: item.file,
+                    parsed: parserState.parsed,
+                    description,
+                    verificationResult: {
+                        status: finalStatus,
+                        checkerVersion,
+                    },
+                    parserChanged: parserState.changed,
+                };
+
+                if (finalStatus !== "verified" || parserState.changed) {
+                    manualRows.push({
+                        key: `${item.file.name}:${item.file.size}:${manualRows.length}`,
+                        checked: true,
+                        delay: parserState.parsed.delay,
+                        area: parserState.parsed.area,
+                        verdict: finalStatus,
+                        candidate,
+                    });
                     logRows.push({
                         fileName: item.file.name,
+                        success: false,
+                        reason: parserState.reason || "Moved to manual apply.",
+                    });
+                    continue;
+                }
+
+                immediateRows.push({
+                    fileName: item.file.name,
+                    candidate,
+                });
+            }
+
+            const savedPoints = [];
+            for (const row of immediateRows) {
+                try {
+                    const saved = await createPointFromUploadedFile(
+                        row.candidate.file,
+                        row.candidate.parsed,
+                        description,
+                        row.candidate.verificationResult,
+                        { useDirectApi }
+                    );
+                    savedPoints.push(saved);
+                    logRows.push({
+                        fileName: row.fileName,
                         success: true,
                         reason: "Uploaded successfully.",
                     });
                 } catch (err) {
                     logRows.push({
-                        fileName: item.file.name,
+                        fileName: row.fileName,
                         success: false,
                         reason: err?.message || "Failed to upload point.",
                     });
@@ -624,14 +785,9 @@ export default function App() {
                 });
             }
 
-            if (benchFiles.length > 1) {
-                const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
-                if (batchBytes > remainingUploadBytes) {
-                    setUploadError(
-                        `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`
-                    );
-                    return;
-                }
+            if (manualRows.length > 0) {
+                setManualApplyRows(manualRows);
+                setIsManualApplyOpen(true);
             }
 
             if (savedPoints.length > 0) {
@@ -643,8 +799,7 @@ export default function App() {
 
             if (benchFiles.length >= 2) {
                 const lines = logRows.map(
-                    (row) =>
-                        `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
+                    (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
                 );
                 setUploadLogText(lines.join("\n"));
             }
@@ -671,6 +826,95 @@ export default function App() {
             setIsUploading(false);
             setUploadProgress(null);
         }
+    }
+
+    function setManualApplyChecked(key, checked) {
+        setManualApplyRows((prev) =>
+            prev.map((row) => (row.key === key ? { ...row, checked: Boolean(checked) } : row))
+        );
+    }
+
+    async function applyManualRows() {
+        const selected = manualApplyRows.filter((row) => row.checked);
+        if (selected.length === 0) {
+            setIsManualApplyOpen(false);
+            setManualApplyRows([]);
+            return;
+        }
+
+        const useDirectApi = selectedChecker === "none" && !useParamParser;
+        setIsManualApplying(true);
+        setIsUploading(true);
+        setUploadProgress({ done: 0, total: selected.length });
+
+        const savedPoints = [];
+        const logRows = [];
+        try {
+            for (const row of selected) {
+                try {
+                    const saved = await createPointFromUploadedFile(
+                        row.candidate.file,
+                        row.candidate.parsed,
+                        String(row.candidate.description || "schema"),
+                        row.candidate.verificationResult,
+                        { useDirectApi }
+                    );
+                    savedPoints.push(saved);
+                    logRows.push({
+                        fileName: row.candidate.file.name,
+                        success: true,
+                        reason: "Uploaded successfully (manual apply).",
+                    });
+                } catch (error) {
+                    logRows.push({
+                        fileName: row.candidate.file.name,
+                        success: false,
+                        reason: error?.message || "Failed to upload point.",
+                    });
+                }
+                setUploadProgress((prev) => {
+                    if (!prev) return prev;
+                    return { ...prev, done: prev.done + 1 };
+                });
+            }
+
+            if (savedPoints.length > 0) {
+                setPoints((prev) => [...savedPoints.reverse(), ...prev]);
+                const latestSaved = savedPoints[savedPoints.length - 1];
+                setLastAddedId(latestSaved.id);
+                setBenchmarkFilter(String(latestSaved.benchmark));
+            }
+
+            if (selected.length >= 2) {
+                const lines = logRows.map(
+                    (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
+                );
+                setUploadLogText(lines.join("\n"));
+            }
+
+            const failedCount = logRows.filter((row) => !row.success).length;
+            if (failedCount > 0) {
+                setUploadError(
+                    `Uploaded ${logRows.length - failedCount}/${logRows.length} files. Download log for details.`
+                );
+            } else {
+                setUploadError(" ");
+            }
+            setIsManualApplyOpen(false);
+            setManualApplyRows([]);
+        } finally {
+            setIsManualApplying(false);
+            setIsUploading(false);
+            setUploadProgress(null);
+        }
+    }
+
+    function closeManualApplyModal() {
+        if (!isManualApplyOpen) return;
+        const ok = window.confirm("Если закрыть окно, точки не будут добавлены. Продолжить?");
+        if (!ok) return;
+        setIsManualApplyOpen(false);
+        setManualApplyRows([]);
     }
 
     async function deletePointById(id) {
@@ -1569,6 +1813,8 @@ export default function App() {
                         onDownloadUploadLog={downloadUploadLog}
                         selectedChecker={selectedChecker}
                         onSelectedCheckerChange={setSelectedChecker}
+                        useParamParser={useParamParser}
+                        onUseParamParserChange={setUseParamParser}
                     />
 
                     {isAdmin ? (
@@ -1657,6 +1903,15 @@ export default function App() {
                 testingPointId={testingPointId}
                 canDeletePoint={canDeletePoint}
                 confirmAndDeletePoint={confirmAndDeletePoint}
+            />
+
+            <ManualPointApplyModal
+                open={isManualApplyOpen}
+                rows={manualApplyRows}
+                onToggle={setManualApplyChecked}
+                onApply={applyManualRows}
+                onClose={closeManualApplyModal}
+                isApplying={isManualApplying}
             />
 
             {navigateNotice ? (
