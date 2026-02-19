@@ -548,6 +548,7 @@ export default function App() {
     }
 
     async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null) {
+        const batchSize = Math.max(1, Number(benchFiles.length || 1));
         const pointId = uid();
         const storedFileName = buildStoredFileName({
             benchmark: parsed.benchmark,
@@ -560,7 +561,7 @@ export default function App() {
             authKey: authKeyDraft,
             fileName: storedFileName,
             fileSize: sourceFile.size,
-            batchSize: benchFiles.length,
+            batchSize,
         });
         const putRes = await fetch(uploadMeta.uploadUrl, {
             method: "PUT",
@@ -586,7 +587,7 @@ export default function App() {
             ...point,
             authKey: authKeyDraft,
             fileSize: sourceFile.size,
-            batchSize: benchFiles.length,
+            batchSize,
         });
 
         if (savedPayload?.quota) {
