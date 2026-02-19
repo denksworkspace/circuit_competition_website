@@ -3,6 +3,11 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// @vercel/postgres expects POSTGRES_URL. On non-Vercel hosts we often only have DATABASE_URL.
+if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
+    process.env.POSTGRES_URL = process.env.DATABASE_URL;
+}
+
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(serverDir, "../api");
 const handlerCache = new Map();
