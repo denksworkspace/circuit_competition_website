@@ -114,8 +114,8 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`alter table commands alter column total_upload_quota_bytes set default 53687091200`;
             await sql`alter table commands alter column uploaded_bytes_total set default 0`;
             await sql`alter table commands alter column max_multi_file_batch_count set default 100`;
-            await sql`alter table commands alter column abc_verify_timeout_seconds set default ${DEFAULT_ABC_VERIFY_TIMEOUT_SECONDS}`;
-            await sql`alter table commands alter column abc_metrics_timeout_seconds set default ${DEFAULT_ABC_METRICS_TIMEOUT_SECONDS}`;
+            await sql`alter table commands alter column abc_verify_timeout_seconds set default 60`;
+            await sql`alter table commands alter column abc_metrics_timeout_seconds set default 60`;
         })().catch((error) => {
             uploadSettingsReadyPromise = null;
             throw error;
