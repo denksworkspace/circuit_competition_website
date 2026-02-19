@@ -2,6 +2,7 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { auditCircuitMetrics, downloadPointCircuitText } from "./_lib/pointVerification.js";
 
 export default async function handler(req, res) {
@@ -16,8 +17,9 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
-      select id, role
+      select id, role, abc_metrics_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -30,6 +32,7 @@ export default async function handler(req, res) {
         res.status(403).json({ error: "Only admin can run metrics audit." });
         return;
     }
+    const metricsTimeoutMs = Math.max(1, Number(authRes.rows[0].abc_metrics_timeout_seconds || 60)) * 1000;
 
     const pointsRes = pointId
         ? await sql`
@@ -67,6 +70,7 @@ export default async function handler(req, res) {
                 delay: Number(point.delay),
                 area: Number(point.area),
                 circuitText: downloaded.circuitText,
+                timeoutMs: metricsTimeoutMs,
             });
             if (!audited.ok) {
                 mismatches.push({

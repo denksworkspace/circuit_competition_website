@@ -13,6 +13,10 @@ export function AdminSettingsSection({
     onAdminTotalGbDraftChange,
     adminBatchCountDraft,
     onAdminBatchCountDraftChange,
+    adminVerifyTleSecondsDraft,
+    onAdminVerifyTleSecondsDraftChange,
+    adminMetricsTleSecondsDraft,
+    onAdminMetricsTleSecondsDraftChange,
     saveAdminUserSettings,
     isAdminSaving,
     adminLogs,
@@ -107,6 +111,24 @@ export function AdminSettingsSection({
                             <input
                                 value={adminBatchCountDraft}
                                 onChange={(e) => onAdminBatchCountDraftChange(e.target.value)}
+                                inputMode="numeric"
+                            />
+                        </label>
+
+                        <label className="field">
+                            <span>TLE for checker (seconds)</span>
+                            <input
+                                value={adminVerifyTleSecondsDraft}
+                                onChange={(e) => onAdminVerifyTleSecondsDraftChange(e.target.value)}
+                                inputMode="numeric"
+                            />
+                        </label>
+
+                        <label className="field">
+                            <span>TLE for metrics audit (seconds)</span>
+                            <input
+                                value={adminMetricsTleSecondsDraft}
+                                onChange={(e) => onAdminMetricsTleSecondsDraftChange(e.target.value)}
                                 inputMode="numeric"
                             />
                         </label>

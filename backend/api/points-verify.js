@@ -2,6 +2,7 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import {
     CHECKER_ABC,
     CHECKER_NONE,
@@ -39,8 +40,9 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
-      select id, role, name
+      select id, role, name, abc_verify_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -50,6 +52,7 @@ export default async function handler(req, res) {
         return;
     }
     const actor = authRes.rows[0];
+    const verifyTimeoutMs = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60)) * 1000;
 
     let pointRow = null;
     if (pointId) {
@@ -91,6 +94,7 @@ export default async function handler(req, res) {
     const result = await verifyCircuitWithTruth({
         benchmark,
         circuitText,
+        timeoutMs: verifyTimeoutMs,
     });
     if (!result.ok) {
         const statusCode = result.code === "TRUTH_NOT_FOUND" ? 404 : 422;

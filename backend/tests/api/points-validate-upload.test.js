@@ -10,6 +10,9 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
         ensureCommandRolesSchema: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
+    ensureCommandUploadSettingsSchema: vi.fn(),
+}));
 vi.mock("../../api/_lib/abc.js", () => ({
     getAigStatsFromBenchText: vi.fn(),
 }));

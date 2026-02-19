@@ -47,6 +47,6 @@ describe("api/_lib/commandUploadSettings", () => {
         await mod.ensureCommandUploadSettingsSchema();
         await mod.ensureCommandUploadSettingsSchema();
 
-        expect(sql).toHaveBeenCalledTimes(12);
+        expect(sql).toHaveBeenCalledTimes(18);
     });
 });

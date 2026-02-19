@@ -2,6 +2,7 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import {
     CHECKER_ABC,
     downloadPointCircuitText,
@@ -27,8 +28,9 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
-      select id, role
+      select id, role, abc_verify_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -41,6 +43,7 @@ export default async function handler(req, res) {
         res.status(403).json({ error: "Only admin can run bulk verification." });
         return;
     }
+    const verifyTimeoutMs = Math.max(1, Number(authRes.rows[0].abc_verify_timeout_seconds || 60)) * 1000;
 
     const pointsRes = pointId
         ? await sql`
@@ -80,6 +83,7 @@ export default async function handler(req, res) {
             const verified = await verifyCircuitWithTruth({
                 benchmark,
                 circuitText: downloaded.circuitText,
+                timeoutMs: verifyTimeoutMs,
             });
             if (!verified.ok) {
                 log.push({

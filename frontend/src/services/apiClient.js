@@ -231,11 +231,11 @@ export async function planTruthTablesUpload({ authKey, fileNames }) {
     };
 }
 
-export async function requestTruthUploadUrl({ authKey, fileName, fileSize }) {
+export async function requestTruthUploadUrl({ authKey, fileName, fileSize, batchSize = 1 }) {
     const response = await fetch(apiUrl("/api/truth-upload-url"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, fileName, fileSize }),
+        body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
@@ -244,11 +244,11 @@ export async function requestTruthUploadUrl({ authKey, fileName, fileSize }) {
     return data;
 }
 
-export async function saveTruthTable({ authKey, fileName, allowReplace, allowCreateBenchmark }) {
+export async function saveTruthTable({ authKey, fileName, fileSize, batchSize = 1, allowReplace, allowCreateBenchmark }) {
     const response = await fetch(apiUrl("/api/truth-tables"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, fileName, allowReplace, allowCreateBenchmark }),
+        body: JSON.stringify({ authKey, fileName, fileSize, batchSize, allowReplace, allowCreateBenchmark }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
@@ -299,6 +299,8 @@ export async function updateAdminUserUploadSettings({
     maxSingleUploadGb,
     totalUploadQuotaGb,
     maxMultiFileBatchCount,
+    abcVerifyTimeoutSeconds,
+    abcMetricsTimeoutSeconds,
 }) {
     const response = await fetch(apiUrl("/api/admin-users"), {
         method: "PATCH",
@@ -309,6 +311,8 @@ export async function updateAdminUserUploadSettings({
             maxSingleUploadGb,
             totalUploadQuotaGb,
             maxMultiFileBatchCount,
+            abcVerifyTimeoutSeconds,
+            abcMetricsTimeoutSeconds,
         }),
     });
 

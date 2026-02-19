@@ -3,6 +3,7 @@ import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { runCecBenchTexts } from "./_lib/abc.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { getTruthTableByBenchmark } from "./_lib/truthTables.js";
 
 async function loadReferenceTruthText(benchmark) {
@@ -40,8 +41,9 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
-      select id, role
+      select id, role, abc_verify_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -56,6 +58,7 @@ export default async function handler(req, res) {
         res.status(403).json({ error: "Only admin can run CEC tests." });
         return;
     }
+    const verifyTimeoutMs = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60)) * 1000;
 
     let referenceBenchText;
     try {
@@ -70,6 +73,7 @@ export default async function handler(req, res) {
     const cec = await runCecBenchTexts({
         referenceBenchText,
         candidateBenchText: circuitText,
+        timeoutMs: verifyTimeoutMs,
     });
     if (!cec.ok) {
         const statusCode = cec.code === "ABC_NOT_FOUND" ? 503 : 422;

@@ -15,6 +15,12 @@ export function parsePositiveInt(raw) {
     return value;
 }
 
+export function parseTimeoutSeconds(raw) {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) return null;
+    return value;
+}
+
 export function normalizeUserRow(row) {
     return {
         id: Number(row.id),

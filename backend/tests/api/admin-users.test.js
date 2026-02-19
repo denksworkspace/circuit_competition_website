@@ -16,6 +16,8 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
         maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 1),
         totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 1),
         maxMultiFileBatchCount: Number(row?.max_multi_file_batch_count || 100),
+        abcVerifyTimeoutSeconds: Number(row?.abc_verify_timeout_seconds || 60),
+        abcMetricsTimeoutSeconds: Number(row?.abc_metrics_timeout_seconds || 60),
         uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
         remainingUploadBytes:
             Number(row?.total_upload_quota_bytes || 1) - Number(row?.uploaded_bytes_total || 0),
@@ -78,6 +80,8 @@ describe("api/admin-users handler", () => {
                 maxSingleUploadGb: 1,
                 totalUploadQuotaGb: 2,
                 maxMultiFileBatchCount: 20,
+                abcVerifyTimeoutSeconds: 60,
+                abcMetricsTimeoutSeconds: 60,
             },
         });
         const res = createMockRes();

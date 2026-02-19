@@ -19,7 +19,8 @@ export async function handleGetAdminUser(req, res) {
     }
 
     const userRes = await sql`
-      select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
+      select id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
+             abc_verify_timeout_seconds, abc_metrics_timeout_seconds
       from commands
       where id = ${userId}
       limit 1

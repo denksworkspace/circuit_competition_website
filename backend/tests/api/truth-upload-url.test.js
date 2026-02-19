@@ -10,6 +10,18 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
         ensureCommandRolesSchema: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
+    DEFAULT_MAX_MULTI_FILE_BATCH_COUNT: 100,
+    ensureCommandUploadSettingsSchema: vi.fn(),
+    normalizeCommandUploadSettings: vi.fn((row) => ({
+        maxSingleUploadBytes: Number(row?.max_single_upload_bytes || 1024),
+        totalUploadQuotaBytes: Number(row?.total_upload_quota_bytes || 10_000),
+        maxMultiFileBatchCount: Number(row?.max_multi_file_batch_count || 100),
+        uploadedBytesTotal: Number(row?.uploaded_bytes_total || 0),
+        remainingUploadBytes:
+            Number(row?.total_upload_quota_bytes || 10_000) - Number(row?.uploaded_bytes_total || 0),
+    })),
+}));
 vi.mock("../../api/_lib/s3Presign.js", () => ({
     buildPresignedPutUrl: vi.fn(() => "https://signed.example/truth"),
 }));
@@ -28,7 +40,9 @@ describe("api/truth-upload-url", () => {
     });
 
     it("rejects non-admin", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "participant", max_single_upload_bytes: 1024, total_upload_quota_bytes: 10_000, uploaded_bytes_total: 0, max_multi_file_batch_count: 100 }],
+        });
         const req = createMockReq({
             method: "POST",
             body: { authKey: "k", fileName: "bench200.truth", fileSize: 10 },
@@ -39,7 +53,9 @@ describe("api/truth-upload-url", () => {
     });
 
     it("returns signed url for admin", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: 1, role: "admin", max_single_upload_bytes: 1024, total_upload_quota_bytes: 10_000, uploaded_bytes_total: 0, max_multi_file_batch_count: 100 }],
+        });
         const req = createMockReq({
             method: "POST",
             body: { authKey: "k", fileName: "bench200.truth", fileSize: 10 },

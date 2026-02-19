@@ -49,6 +49,8 @@ import {
     verifyPointCircuit,
 } from "./services/apiClient.js";
 
+const MAX_TRUTH_BATCH_FILES = 100;
+
 export default function App() {
     function bytesToGb(bytes) {
         const value = Number(bytes);
@@ -140,6 +142,8 @@ export default function App() {
     const [adminSingleGbDraft, setAdminSingleGbDraft] = useState("");
     const [adminTotalGbDraft, setAdminTotalGbDraft] = useState("");
     const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
+    const [adminVerifyTleSecondsDraft, setAdminVerifyTleSecondsDraft] = useState("");
+    const [adminMetricsTleSecondsDraft, setAdminMetricsTleSecondsDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
     const [truthFiles, setTruthFiles] = useState(() => []);
@@ -897,6 +901,8 @@ export default function App() {
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
             setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
+            setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
+            setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
         } catch (error) {
             setAdminUser(null);
             setAdminLogs([]);
@@ -917,12 +923,16 @@ export default function App() {
                 maxSingleUploadGb: adminSingleGbDraft,
                 totalUploadQuotaGb: adminTotalGbDraft,
                 maxMultiFileBatchCount: adminBatchCountDraft,
+                abcVerifyTimeoutSeconds: adminVerifyTleSecondsDraft,
+                abcMetricsTimeoutSeconds: adminMetricsTleSecondsDraft,
             });
             setAdminUser(payload.user);
             setAdminLogs(payload.actionLogs);
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
             setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
+            setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
+            setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to save settings.");
         } finally {
@@ -933,7 +943,21 @@ export default function App() {
     function onTruthFilesChange(e) {
         const files = Array.from(e.target.files || []);
         setTruthFiles(files);
-        setTruthUploadError("");
+        if (files.length > MAX_TRUTH_BATCH_FILES) {
+            setTruthUploadError(`Too many files selected. Maximum is ${MAX_TRUTH_BATCH_FILES}.`);
+        } else {
+            const tooLargeTruth = files.find((file) => Number(file.size || 0) > maxSingleUploadBytes);
+            if (tooLargeTruth) {
+                setTruthUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
+            } else {
+                const batchBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
+                if (batchBytes > remainingUploadBytes) {
+                    setTruthUploadError(`Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`);
+                } else {
+                    setTruthUploadError("");
+                }
+            }
+        }
         setTruthUploadLogText("");
         setTruthUploadProgress(null);
         setTruthConflicts([]);
@@ -941,10 +965,12 @@ export default function App() {
     }
 
     async function uploadAndSaveTruthFile(file, { allowReplace = false, allowCreateBenchmark = false } = {}) {
+        const batchSize = Math.max(1, truthFiles.length);
         const uploadMeta = await requestTruthUploadUrl({
             authKey: authKeyDraft,
             fileName: file.name,
             fileSize: file.size,
+            batchSize,
         });
         const putRes = await fetch(uploadMeta.uploadUrl, {
             method: "PUT",
@@ -956,6 +982,8 @@ export default function App() {
         await saveTruthTable({
             authKey: authKeyDraft,
             fileName: file.name,
+            fileSize: file.size,
+            batchSize,
             allowReplace,
             allowCreateBenchmark,
         });
@@ -970,6 +998,20 @@ export default function App() {
     async function uploadTruthTables() {
         if (truthFiles.length === 0) {
             setTruthUploadError("Select at least one .truth file.");
+            return;
+        }
+        if (truthFiles.length > MAX_TRUTH_BATCH_FILES) {
+            setTruthUploadError(`Too many files selected. Maximum is ${MAX_TRUTH_BATCH_FILES}.`);
+            return;
+        }
+        const tooLargeTruth = truthFiles.find((file) => Number(file.size || 0) > maxSingleUploadBytes);
+        if (tooLargeTruth) {
+            setTruthUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
+            return;
+        }
+        const batchBytes = truthFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
+        if (batchBytes > remainingUploadBytes) {
+            setTruthUploadError(`Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`);
             return;
         }
         setIsTruthUploading(true);
@@ -1544,6 +1586,10 @@ export default function App() {
                             onAdminTotalGbDraftChange={setAdminTotalGbDraft}
                             adminBatchCountDraft={adminBatchCountDraft}
                             onAdminBatchCountDraftChange={setAdminBatchCountDraft}
+                            adminVerifyTleSecondsDraft={adminVerifyTleSecondsDraft}
+                            onAdminVerifyTleSecondsDraftChange={setAdminVerifyTleSecondsDraft}
+                            adminMetricsTleSecondsDraft={adminMetricsTleSecondsDraft}
+                            onAdminMetricsTleSecondsDraftChange={setAdminMetricsTleSecondsDraft}
                             saveAdminUserSettings={saveAdminUserSettings}
                             isAdminSaving={isAdminSaving}
                             adminLogs={adminLogs}

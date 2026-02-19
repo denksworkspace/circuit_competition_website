@@ -4,6 +4,7 @@ import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { parseInputBenchFileName } from "./_lib/benchInputName.js";
 import { getAigStatsFromBenchText } from "./_lib/abc.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 
 const MAX_VERIFY_FILES = 100;
 
@@ -25,8 +26,9 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
-      select id
+      select id, abc_metrics_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -35,6 +37,7 @@ export default async function handler(req, res) {
         res.status(401).json({ error: "Invalid auth key." });
         return;
     }
+    const metricsTimeoutMs = Math.max(1, Number(authRes.rows[0].abc_metrics_timeout_seconds || 60)) * 1000;
 
     const results = [];
     for (const item of files) {
@@ -59,7 +62,7 @@ export default async function handler(req, res) {
             continue;
         }
 
-        const stats = await getAigStatsFromBenchText(circuitText);
+        const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs: metricsTimeoutMs });
         if (!stats.ok) {
             results.push({
                 fileName,
