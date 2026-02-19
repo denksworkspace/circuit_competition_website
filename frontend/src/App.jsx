@@ -42,9 +42,7 @@ import {
     runAdminBulkVerifyPoint,
     runAdminMetricsAuditPoint,
     requestUploadUrl,
-    requestUploadUrlDirect,
     requestTruthUploadUrl,
-    savePointDirect,
     savePoint,
     saveTruthTable,
     updateAdminUserUploadSettings,
@@ -129,7 +127,7 @@ export default function App() {
     const [uploadProgress, setUploadProgress] = useState(null);
     const fileInputRef = useRef(null);
     const [uploadLogText, setUploadLogText] = useState("");
-    const [useParamParser, setUseParamParser] = useState(true);
+    const [selectedParser, setSelectedParser] = useState("ABC");
     const [manualApplyRows, setManualApplyRows] = useState(() => []);
     const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
     const [isManualApplying, setIsManualApplying] = useState(false);
@@ -549,7 +547,7 @@ export default function App() {
         a.remove();
     }
 
-    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null, options = {}) {
+    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null) {
         const pointId = uid();
         const storedFileName = buildStoredFileName({
             benchmark: parsed.benchmark,
@@ -558,16 +556,7 @@ export default function App() {
             pointId,
             sender: currentCommand.name,
         });
-        const useDirectApi = Boolean(options?.useDirectApi);
-
-        const uploadMeta = useDirectApi
-            ? await requestUploadUrlDirect({
-                authKey: authKeyDraft,
-                fileName: storedFileName,
-                fileSize: sourceFile.size,
-                batchSize: benchFiles.length,
-            })
-            : await requestUploadUrl({
+        const uploadMeta = await requestUploadUrl({
             authKey: authKeyDraft,
             fileName: storedFileName,
             fileSize: sourceFile.size,
@@ -593,8 +582,7 @@ export default function App() {
             checkerVersion: verificationResult?.checkerVersion || null,
         };
 
-        const saveFn = useDirectApi ? savePointDirect : savePoint;
-        const savedPayload = await saveFn({
+        const savedPayload = await savePoint({
             ...point,
             authKey: authKeyDraft,
             fileSize: sourceFile.size,
@@ -627,8 +615,8 @@ export default function App() {
         setUploadLogText("");
 
         try {
-            const useDirectApi = selectedChecker === "none" && !useParamParser;
-            const needsCircuitText = useParamParser || selectedChecker === "ABC";
+            const parserEnabled = selectedParser === "ABC";
+            const needsCircuitText = parserEnabled || selectedChecker === "ABC";
             const preparedFiles = [];
             for (const file of benchFiles) {
                 const parsed = parseBenchFileName(file.name);
@@ -640,7 +628,7 @@ export default function App() {
             }
 
             const parserByFileName = new Map();
-            if (useParamParser) {
+            if (parserEnabled) {
                 const validationFiles = preparedFiles.map((item) => ({
                     fileName: item.file.name,
                     circuitText: item.circuitText,
@@ -688,7 +676,7 @@ export default function App() {
                     parsed: item.parsed,
                     changed: false,
                 };
-                if (useParamParser) {
+                if (parserEnabled) {
                     const parserRow = parserByFileName.get(item.file.name);
                     parserState = normalizeParserResultRow(parserRow, item.parsed);
                 }
@@ -717,7 +705,7 @@ export default function App() {
                 } else if (
                     selectedChecker === "ABC" &&
                     checkerVerdict === true &&
-                    (!useParamParser || parserState.kind === "pass" || parserState.kind === "pass-adjusted")
+                    (!parserEnabled || parserState.kind === "pass" || parserState.kind === "pass-adjusted")
                 ) {
                     finalStatus = "verified";
                 }
@@ -763,8 +751,7 @@ export default function App() {
                         row.candidate.file,
                         row.candidate.parsed,
                         description,
-                        row.candidate.verificationResult,
-                        { useDirectApi }
+                        row.candidate.verificationResult
                     );
                     savedPoints.push(saved);
                     logRows.push({
@@ -842,7 +829,6 @@ export default function App() {
             return;
         }
 
-        const useDirectApi = selectedChecker === "none" && !useParamParser;
         setIsManualApplying(true);
         setIsUploading(true);
         setUploadProgress({ done: 0, total: selected.length });
@@ -856,8 +842,7 @@ export default function App() {
                         row.candidate.file,
                         row.candidate.parsed,
                         String(row.candidate.description || "schema"),
-                        row.candidate.verificationResult,
-                        { useDirectApi }
+                        row.candidate.verificationResult
                     );
                     savedPoints.push(saved);
                     logRows.push({
@@ -1813,8 +1798,8 @@ export default function App() {
                         onDownloadUploadLog={downloadUploadLog}
                         selectedChecker={selectedChecker}
                         onSelectedCheckerChange={setSelectedChecker}
-                        useParamParser={useParamParser}
-                        onUseParamParserChange={setUseParamParser}
+                        selectedParser={selectedParser}
+                        onSelectedParserChange={setSelectedParser}
                     />
 
                     {isAdmin ? (
