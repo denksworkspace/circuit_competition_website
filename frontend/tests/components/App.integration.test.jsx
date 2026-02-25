@@ -50,6 +50,8 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
         "GET /api/points": () => Promise.resolve(jsonResponse(200, { points })),
         "GET /api/commands": () => Promise.resolve(jsonResponse(200, { commands })),
         "POST /api/auth": () => Promise.resolve(jsonResponse(authStatus, authBody)),
+        "GET /api/admin-users?authKey=key_ok&scope=all&limit=1000": () =>
+            Promise.resolve(jsonResponse(200, { actionLogs: [] })),
     };
 }
 
@@ -73,6 +75,16 @@ describe("App integration", () => {
         window.confirm = vi.fn(() => true);
     });
 
+    async function configureUploadSettings({ checker = "none", parser = "ABC" } = {}) {
+        fireEvent.click(screen.getByRole("button", { name: "Open upload settings" }));
+        fireEvent.change(screen.getByLabelText("checker"), {
+            target: { value: checker },
+        });
+        fireEvent.change(screen.getByLabelText("parser parameters"), {
+            target: { value: parser },
+        });
+    }
+
     it("logs in successfully with valid key", async () => {
         const routes = bootstrapRoutes({
             commands: [{ id: 1, name: "team1", color: "#111", role: "leader" }],
@@ -89,9 +101,9 @@ describe("App integration", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Enter" }));
 
-        expect(await screen.findByText("Bench points")).toBeInTheDocument();
-        expect(screen.getByText("team1")).toBeInTheDocument();
-        expect(screen.getByText("role: leader")).toBeInTheDocument();
+        expect(await screen.findByText("Circuit Control Platform")).toBeInTheDocument();
+        expect(screen.getByText(/team1!/)).toBeInTheDocument();
+        expect(screen.getByText("Hello,")).toBeInTheDocument();
         expect(localStorage.getItem("bench_auth_key")).toBe("key_ok");
     });
 
@@ -226,6 +238,7 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Enter" }));
 
         await screen.findByText("Add a point");
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
 
         fireEvent.change(screen.getByLabelText("description (max 200)"), {
             target: { value: "schema-test" },
@@ -281,6 +294,7 @@ describe("App integration", () => {
         });
         fireEvent.click(screen.getByRole("button", { name: "Enter" }));
         await screen.findByText("Add a point");
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
 
         const validFile = new File(["bench data"], "bench254_15_40.bench", { type: "text/plain" });
         fireEvent.change(screen.getByLabelText("file"), {
@@ -289,7 +303,9 @@ describe("App integration", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
-        expect(await screen.findByText(/area expected 40, actual 41/)).toBeInTheDocument();
+        expect(
+            await screen.findByLabelText("Add point with delay=15, area=40, verdict=failed to the chart?")
+        ).toBeInTheDocument();
         expect(calls).toEqual(["validate-upload"]);
     });
 
@@ -328,7 +344,8 @@ describe("App integration", () => {
             target: { value: "key_ok" },
         });
         fireEvent.click(screen.getByRole("button", { name: "Enter" }));
-        await screen.findByText("Admin: User settings");
+        await screen.findByText("Admin logs");
+        fireEvent.click(screen.getByRole("button", { name: "Open quota settings" }));
 
         fireEvent.change(screen.getByPlaceholderText("e.g. 7"), {
             target: { value: "7" },
