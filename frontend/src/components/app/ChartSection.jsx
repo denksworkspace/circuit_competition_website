@@ -49,14 +49,23 @@ export function ChartSection({
         <section className="card chartCard">
             <div className="cardHeader">
                 <div>
-                    <div className="cardTitle">Pareto curve</div>
-                    <div className="cardHint">
-                        Pareto frontier is computed from points visible by benchmark + status filters.
-                        Changing the view rectangle does not change the frontier - it only crops what part of
-                        it is visible.
+                    <div className="cardTitleRow">
+                        <div className="cardTitle">Pareto curve</div>
+                        <div className="helpTipWrap" tabIndex={0} aria-label="Pareto frontier help">
+                            <span className="helpTipIcon">?</span>
+                            <div className="helpTipPanel">
+                                <div className="cardHint">
+                                    Pareto frontier is computed from points visible by benchmark + status filters.
+                                </div>
+                                <div className="cardHint">
+                                    Changing the view rectangle does not change the frontier - it only crops what
+                                    part of it is visible.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div className="cardHint">
-                        Click any point on the chart to open actions: <b>Download</b>, <b>Test</b> (admin), and <b>Delete</b>.
+                        Click any point on the chart to open actions: <b>Download</b>, <b>Test</b>, and <b>Delete</b>.
                     </div>
                 </div>
 

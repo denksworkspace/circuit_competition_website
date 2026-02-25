@@ -1,6 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
-import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
+import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { runCecBenchTexts } from "./_lib/abc.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
@@ -54,10 +54,6 @@ export default async function handler(req, res) {
     }
 
     const actor = authRes.rows[0];
-    if (String(actor.role || "").toLowerCase() !== ROLE_ADMIN) {
-        res.status(403).json({ error: "Only admin can run CEC tests." });
-        return;
-    }
     const verifyTimeoutMs = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60)) * 1000;
 
     let referenceBenchText;

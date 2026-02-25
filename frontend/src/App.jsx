@@ -527,7 +527,7 @@ export default function App() {
 
     function canTestPoint(p) {
         if (!p || p.benchmark === "test") return false;
-        return Boolean(currentCommand?.role === ROLE_ADMIN);
+        return Boolean(currentCommand);
     }
 
     async function downloadCircuit(p) {
@@ -945,25 +945,31 @@ export default function App() {
     async function onTestPoint(point) {
         if (!canTestPoint(point)) return;
         setTestingPointId(point.id);
+        const canApplyStatus =
+            point.sender === currentCommand?.name || currentCommand?.role === ROLE_ADMIN;
         try {
             const result = await verifyPointCircuit({
                 authKey: authKeyDraft,
                 pointId: point.id,
-                applyStatus: true,
+                applyStatus: canApplyStatus,
                 checkerVersion: "ABC",
             });
-            setPoints((prev) =>
-                prev.map((row) =>
-                    row.id === point.id
-                        ? {
-                            ...row,
-                            status: result.status,
-                            checkerVersion: result.checkerVersion,
-                        }
-                        : row
-                )
-            );
-            window.alert(result.equivalent ? "CEC: equivalent. Status updated to verified." : "CEC: not equivalent. Status updated to failed.");
+            if (canApplyStatus) {
+                setPoints((prev) =>
+                    prev.map((row) =>
+                        row.id === point.id
+                            ? {
+                                ...row,
+                                status: result.status,
+                                checkerVersion: result.checkerVersion,
+                            }
+                            : row
+                    )
+                );
+                window.alert(result.equivalent ? "CEC: equivalent. Status updated to verified." : "CEC: not equivalent. Status updated to failed.");
+            } else {
+                window.alert(result.equivalent ? "CEC: equivalent. Status was not changed." : "CEC: not equivalent. Status was not changed.");
+            }
         } catch (error) {
             window.alert(error?.message || "Failed to run CEC.");
         } finally {

@@ -32,7 +32,6 @@ export function SentPointsSection({
                             <div className="row compactRow" key={p.id}>
                                 <div className="compactMain">
                                     <div className="compactTop">
-                                        <span className="pill subtle">id: {p.id}</span>
                                         <span className="pill">benchmark: {p.benchmark}</span>
                                         <span className="pill">
                                             <span className="dot" style={{ background: statusColor(p.status) }} />

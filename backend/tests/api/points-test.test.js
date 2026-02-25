@@ -38,15 +38,26 @@ describe("api/points-test", () => {
         vi.restoreAllMocks();
     });
 
-    it("rejects non-admin users", async () => {
+    it("runs cec for non-admin users too", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant" }] });
+        getTruthTableByBenchmark.mockResolvedValueOnce({
+            benchmark: "254",
+            fileName: "bench254.truth",
+            downloadUrl: "https://cdn.example/truth_tables/bench254.truth",
+        });
+        runCecBenchTexts.mockResolvedValueOnce({
+            ok: true,
+            equivalent: false,
+            output: "Networks are not equivalent.",
+        });
         const req = createMockReq({
             method: "POST",
             body: { authKey: "k", benchmark: "254", fileName: "f.bench", circuitText: "x" },
         });
         const res = createMockRes();
         await handler(req, res);
-        expect(res.statusCode).toBe(403);
+        expect(res.statusCode).toBe(200);
+        expect(res.body.equivalent).toBe(false);
     });
 
     it("runs cec for admin", async () => {

@@ -28,49 +28,43 @@ export function AddPointSection({
         <section className="card">
             <div className="cardHeader tight">
                 <div>
-                    <div className="cardTitle">Add a point</div>
-
-                    <div className="cardHint">
-                        <b>Expected file name pattern</b>:
-                    </div>
-
-                    <div className="cardHint">
-                        <span className="mono">
-                            bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"} or bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}.bench
-                        </span>
-                    </div>
-
-                    <div className="cardHint">
-                        Where:
-                        <ul className="hintList">
-                            <li>
-                                <span className="mono">{"{BENCH}"}</span> is an integer from <b>200</b> to <b>299</b>
-                            </li>
-                            <li>
-                                <span className="mono">{"{DELAY}"}</span> and <span className="mono">{"{AREA}"}</span> are integers (0..10^9)
-                            </li>
-                            <li>
-                                <span className="mono">description</span> is optional (up to <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
-                            </li>
-                            <li>input file name length {"<="} {MAX_INPUT_FILENAME_LEN}</li>
-                        </ul>
-                    </div>
-
-                    <div className="cardHint">
-                        Example input: <span className="mono">bench254_15_40</span>
-                    </div>
-
-                    <div className="cardHint">
-                        Stored file name is generated automatically:
-                        <span className="mono"> bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}_{"{COMMAND}"}_{"{POINT_ID}"}.bench</span>
-                    </div>
-
-                    <div className="cardHint">
-                        The latest added point is shown as a <b>diamond</b> on the chart.
-                    </div>
-
-                    <div className="cardHint">
-                        File is uploaded to S3. Per-file limit: {formatGb(maxSingleUploadBytes)} GB.
+                    <div className="cardTitleRow">
+                        <div className="cardTitle">Add a point</div>
+                        <div className="helpTipWrap" tabIndex={0} aria-label="Add point format help">
+                            <span className="helpTipIcon">?</span>
+                            <div className="helpTipPanel">
+                                <div className="cardHint"><b>Expected file name pattern:</b></div>
+                                <div className="cardHint mono">
+                                    bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"} or bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}.bench
+                                </div>
+                                <div className="cardHint">
+                                    Where:
+                                    <ul className="hintList">
+                                        <li>
+                                            <span className="mono">{"{BENCH}"}</span> is an integer from <b>200</b> to <b>299</b>
+                                        </li>
+                                        <li>
+                                            <span className="mono">{"{DELAY}"}</span> and <span className="mono">{"{AREA}"}</span> are integers (0..10^9)
+                                        </li>
+                                        <li>
+                                            <span className="mono">description</span> is optional (up to <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
+                                        </li>
+                                        <li>input file name length {"<="} {MAX_INPUT_FILENAME_LEN}</li>
+                                    </ul>
+                                </div>
+                                <div className="cardHint">Example input: <span className="mono">bench254_15_40</span></div>
+                                <div className="cardHint">
+                                    Stored file name is generated automatically:
+                                    <span className="mono"> bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}_{"{COMMAND}"}_{"{POINT_ID}"}.bench</span>
+                                </div>
+                                <div className="cardHint">
+                                    The latest added point is shown as a <b>diamond</b> on the chart.
+                                </div>
+                                <div className="cardHint">
+                                    File is uploaded to S3. Per-file limit: {formatGb(maxSingleUploadBytes)} GB.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div className="cardHint">
                         You can upload {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
