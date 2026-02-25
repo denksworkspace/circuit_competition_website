@@ -34,6 +34,7 @@ import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/t
 import {
     applyAdminPointStatuses,
     deletePoint,
+    fetchAdminActionLogs,
     fetchAdminUserById,
     fetchCommandByAuthKey,
     fetchCommands,
@@ -118,16 +119,27 @@ export default function App() {
         setSelectedCommands((prev) => prev.filter((x) => x !== name));
     }
 
+    function addSelectedAdminLogAction(action) {
+        setSelectedAdminLogActions((prev) => (prev.includes(action) ? prev : [...prev, action]));
+    }
+
+    function removeSelectedAdminLogAction(action) {
+        setSelectedAdminLogActions((prev) => prev.filter((x) => x !== action));
+    }
+
     // Upload
     const [benchFiles, setBenchFiles] = useState(() => []);
     const [descriptionDraft, setDescriptionDraft] = useState("");
-    const [selectedChecker, setSelectedChecker] = useState("none");
+    const [selectedChecker, setSelectedChecker] = useState("select");
     const [uploadError, setUploadError] = useState(" ");
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
     const fileInputRef = useRef(null);
     const [uploadLogText, setUploadLogText] = useState("");
-    const [selectedParser, setSelectedParser] = useState("ABC");
+    const [selectedParser, setSelectedParser] = useState("select");
+    const [checkerTleSecondsDraft, setCheckerTleSecondsDraft] = useState("60");
+    const [parserTleSecondsDraft, setParserTleSecondsDraft] = useState("60");
+    const [isUploadSettingsOpen, setIsUploadSettingsOpen] = useState(false);
     const [manualApplyRows, setManualApplyRows] = useState(() => []);
     const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
     const [isManualApplying, setIsManualApplying] = useState(false);
@@ -139,11 +151,17 @@ export default function App() {
     const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
     const remainingUploadBytes = Math.max(0, totalUploadQuotaBytes - uploadedBytesTotal);
     const maxMultiFileBatchCount = Math.max(1, Number(currentCommand?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
+    const verifyTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcVerifyTimeoutSeconds || 60));
+    const metricsTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcMetricsTimeoutSeconds || 60));
+    const uploadCountdownRef = useRef(null);
 
     const [adminUserIdDraft, setAdminUserIdDraft] = useState("");
     const [adminPanelError, setAdminPanelError] = useState("");
     const [adminUser, setAdminUser] = useState(null);
     const [adminLogs, setAdminLogs] = useState(() => []);
+    const [adminLogCommandQuery, setAdminLogCommandQuery] = useState("");
+    const [adminLogActionQuery, setAdminLogActionQuery] = useState("");
+    const [selectedAdminLogActions, setSelectedAdminLogActions] = useState(() => []);
     const [adminSingleGbDraft, setAdminSingleGbDraft] = useState("");
     const [adminTotalGbDraft, setAdminTotalGbDraft] = useState("");
     const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
@@ -151,6 +169,7 @@ export default function App() {
     const [adminMetricsTleSecondsDraft, setAdminMetricsTleSecondsDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
+    const [isAdminQuotaSettingsOpen, setIsAdminQuotaSettingsOpen] = useState(false);
     const [truthFiles, setTruthFiles] = useState(() => []);
     const truthFilesInputRef = useRef(null);
     const [isTruthUploading, setIsTruthUploading] = useState(false);
@@ -167,6 +186,7 @@ export default function App() {
     const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
     const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
+    const isAdmin = currentCommand?.role === ROLE_ADMIN;
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -403,6 +423,33 @@ export default function App() {
         return description;
     }
 
+    function parseCheckerTimeoutSeconds() {
+        return parsePosIntCapped(checkerTleSecondsDraft, verifyTimeoutQuotaSeconds);
+    }
+
+    function parseParserTimeoutSeconds() {
+        return parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
+    }
+
+    function stopUploadCountdown() {
+        if (uploadCountdownRef.current) {
+            clearInterval(uploadCountdownRef.current);
+            uploadCountdownRef.current = null;
+        }
+    }
+
+    function startUploadCountdown(seconds) {
+        stopUploadCountdown();
+        setUploadProgress((prev) => (prev ? { ...prev, secondsRemaining: seconds } : prev));
+        uploadCountdownRef.current = setInterval(() => {
+            setUploadProgress((prev) => {
+                if (!prev) return prev;
+                const nextSeconds = Math.max(0, Number(prev.secondsRemaining || 0) - 1);
+                return { ...prev, secondsRemaining: nextSeconds };
+            });
+        }, 1000);
+    }
+
     function parseTruthFileName(fileNameRaw) {
         const fileName = String(fileNameRaw || "").trim();
         const match = fileName.match(/^bench(2\d\d)\.truth$/i);
@@ -599,12 +646,26 @@ export default function App() {
 
     async function addPointFromFile(e) {
         e.preventDefault();
+        if (selectedChecker === "select" || selectedParser === "select") {
+            setUploadError("Please select checker and parser settings.");
+            setIsUploadSettingsOpen(true);
+            return;
+        }
         if (benchFiles.length === 0) return;
         if (benchFiles.length > maxMultiFileBatchCount) {
             setUploadError(`Too many files selected. Maximum is ${maxMultiFileBatchCount}.`);
             return;
         }
-
+        const checkerTimeoutSeconds = parseCheckerTimeoutSeconds();
+        const parserTimeoutSeconds = parseParserTimeoutSeconds();
+        if (selectedChecker === "ABC" && checkerTimeoutSeconds === null) {
+            setUploadError(`Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`);
+            return;
+        }
+        if (selectedParser === "ABC" && parserTimeoutSeconds === null) {
+            setUploadError(`Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`);
+            return;
+        }
         const description = normalizeDescriptionForSubmit();
         if (description.length > MAX_DESCRIPTION_LEN) {
             setUploadError(`Description is too long (max ${MAX_DESCRIPTION_LEN}).`);
@@ -612,12 +673,29 @@ export default function App() {
         }
 
         setIsUploading(true);
-        setUploadProgress({ done: 0, total: benchFiles.length });
+        setUploadProgress({
+            done: 0,
+            total: benchFiles.length,
+            verified: 0,
+            phase: "preparing",
+            currentFileName: "",
+            secondsRemaining: null,
+            transitionTarget: "next-circuit",
+        });
         setUploadLogText("");
 
         try {
             const parserEnabled = selectedParser === "ABC";
-            const needsCircuitText = parserEnabled || selectedChecker === "ABC";
+            const checkerEnabled = selectedChecker === "ABC";
+            const fileStepOrder = [];
+            if (parserEnabled) fileStepOrder.push("parser");
+            if (checkerEnabled) fileStepOrder.push("checker");
+            const resolveTransitionTarget = (currentStep) => {
+                const idx = fileStepOrder.indexOf(currentStep);
+                if (idx >= 0 && idx < fileStepOrder.length - 1) return "next-step";
+                return "next-circuit";
+            };
+            const needsCircuitText = parserEnabled || checkerEnabled;
             const preparedFiles = [];
             for (const file of benchFiles) {
                 const parsed = parseBenchFileName(file.name);
@@ -628,46 +706,8 @@ export default function App() {
                 preparedFiles.push({ file, parsed, circuitText });
             }
 
-            const parserByFileName = new Map();
-            if (parserEnabled) {
-                const validationFiles = preparedFiles.map((item) => ({
-                    fileName: item.file.name,
-                    circuitText: item.circuitText,
-                }));
-                try {
-                    const parserResult = await validateUploadCircuits({
-                        authKey: authKeyDraft,
-                        files: validationFiles,
-                    });
-                    const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
-                    if (parserRows.length === 0) {
-                        for (const item of preparedFiles) {
-                            parserByFileName.set(item.file.name, { ok: true, fileName: item.file.name });
-                        }
-                    } else {
-                        for (const row of parserRows) {
-                            parserByFileName.set(String(row.fileName || ""), row);
-                        }
-                    }
-                } catch (validationError) {
-                    const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
-                    if (detailRows.length > 0) {
-                        for (const row of detailRows) {
-                            parserByFileName.set(String(row.fileName || ""), row);
-                        }
-                    } else {
-                        for (const item of preparedFiles) {
-                            parserByFileName.set(item.file.name, {
-                                ok: false,
-                                reason: validationError?.message || "Render parser request failed.",
-                            });
-                        }
-                    }
-                }
-            }
-
-            const immediateRows = [];
-            const manualRows = [];
+            const autoRows = [];
+            const manualRowsDraft = [];
             const logRows = [];
 
             for (const item of preparedFiles) {
@@ -678,14 +718,61 @@ export default function App() {
                     changed: false,
                 };
                 if (parserEnabled) {
-                    const parserRow = parserByFileName.get(item.file.name);
-                    parserState = normalizeParserResultRow(parserRow, item.parsed);
+                    setUploadProgress((prev) =>
+                        prev
+                            ? {
+                                ...prev,
+                                phase: "parser",
+                                currentFileName: item.file.name,
+                                secondsRemaining: parserTimeoutSeconds,
+                                transitionTarget: resolveTransitionTarget("parser"),
+                            }
+                            : prev
+                    );
+                    startUploadCountdown(parserTimeoutSeconds);
+                    try {
+                        const parserResult = await validateUploadCircuits({
+                            authKey: authKeyDraft,
+                            files: [
+                                {
+                                    fileName: item.file.name,
+                                    circuitText: item.circuitText,
+                                },
+                            ],
+                            timeoutSeconds: parserTimeoutSeconds,
+                        });
+                        const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
+                        const parserRow = parserRows[0] || { ok: true, fileName: item.file.name };
+                        parserState = normalizeParserResultRow(parserRow, item.parsed);
+                    } catch (validationError) {
+                        const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
+                        const parserRow = detailRows[0] || {
+                            ok: false,
+                            fileName: item.file.name,
+                            reason: validationError?.message || "Render parser request failed.",
+                        };
+                        parserState = normalizeParserResultRow(parserRow, item.parsed);
+                    } finally {
+                        stopUploadCountdown();
+                    }
                 }
 
                 let checkerVerdict = null;
                 let checkerVersion = null;
-                if (selectedChecker === "ABC") {
+                if (checkerEnabled) {
                     checkerVersion = "ABC";
+                    setUploadProgress((prev) =>
+                        prev
+                            ? {
+                                ...prev,
+                                phase: "checker",
+                                currentFileName: item.file.name,
+                                secondsRemaining: checkerTimeoutSeconds,
+                                transitionTarget: resolveTransitionTarget("checker"),
+                            }
+                            : prev
+                    );
+                    startUploadCountdown(checkerTimeoutSeconds);
                     try {
                         const verified = await verifyPointCircuit({
                             authKey: authKeyDraft,
@@ -693,10 +780,13 @@ export default function App() {
                             circuitText: item.circuitText,
                             checkerVersion: "ABC",
                             applyStatus: false,
+                            timeoutSeconds: checkerTimeoutSeconds,
                         });
                         checkerVerdict = verified?.status === "verified";
                     } catch {
                         checkerVerdict = null;
+                    } finally {
+                        stopUploadCountdown();
                     }
                 }
 
@@ -722,59 +812,66 @@ export default function App() {
                     parserChanged: parserState.changed,
                 };
 
+                setUploadProgress((prev) => {
+                    if (!prev) return prev;
+                    const verifiedDelta = finalStatus === "verified" ? 1 : 0;
+                    return {
+                        ...prev,
+                        done: Math.min(prev.total, prev.done + 1),
+                        verified: Math.min(prev.total, Number(prev.verified || 0) + verifiedDelta),
+                    };
+                });
+
                 if (finalStatus !== "verified" || parserState.changed) {
-                    manualRows.push({
-                        key: `${item.file.name}:${item.file.size}:${manualRows.length}`,
+                    manualRowsDraft.push({
+                        key: `${item.file.name}:${item.file.size}:${manualRowsDraft.length}`,
                         checked: true,
                         delay: parserState.parsed.delay,
                         area: parserState.parsed.area,
                         verdict: finalStatus,
                         candidate,
                     });
-                    logRows.push({
-                        fileName: item.file.name,
-                        success: false,
-                        reason: parserState.reason || "Moved to manual apply.",
-                    });
                     continue;
                 }
 
-                immediateRows.push({
+                autoRows.push({
                     fileName: item.file.name,
                     candidate,
                 });
             }
 
             const savedPoints = [];
-            for (const row of immediateRows) {
+            for (const row of autoRows) {
+                const fileName = row.fileName || row?.candidate?.file?.name || "unknown";
+                setUploadProgress((prev) =>
+                    prev
+                        ? {
+                            ...prev,
+                            phase: "saving",
+                            currentFileName: fileName,
+                            secondsRemaining: null,
+                        }
+                        : prev
+                );
                 try {
-                    const saved = await createPointFromUploadedFile(
-                        row.candidate.file,
-                        row.candidate.parsed,
-                        description,
-                        row.candidate.verificationResult
-                    );
+                    const saved = await createPointFromUploadedFile(row.candidate.file, row.candidate.parsed, description, row.candidate.verificationResult);
                     savedPoints.push(saved);
                     logRows.push({
-                        fileName: row.fileName,
+                        fileName,
                         success: true,
                         reason: "Uploaded successfully.",
                     });
                 } catch (err) {
                     logRows.push({
-                        fileName: row.fileName,
+                        fileName,
                         success: false,
                         reason: err?.message || "Failed to upload point.",
                     });
                 }
-                setUploadProgress((prev) => {
-                    if (!prev) return prev;
-                    return { ...prev, done: prev.done + 1 };
-                });
             }
 
-            if (manualRows.length > 0) {
-                setManualApplyRows(manualRows);
+            if (manualRowsDraft.length > 0) {
+                setManualApplyRows(manualRowsDraft);
                 setIsManualApplyOpen(true);
             }
 
@@ -811,6 +908,7 @@ export default function App() {
         } catch (err) {
             setUploadError(err?.message || "Failed to upload point.");
         } finally {
+            stopUploadCountdown();
             setIsUploading(false);
             setUploadProgress(null);
         }
@@ -831,12 +929,8 @@ export default function App() {
         }
 
         setIsManualApplying(true);
-        setIsUploading(true);
-        setUploadProgress({ done: 0, total: selected.length });
-
-        const savedPoints = [];
-        const logRows = [];
         try {
+            const savedPoints = [];
             for (const row of selected) {
                 try {
                     const saved = await createPointFromUploadedFile(
@@ -846,22 +940,9 @@ export default function App() {
                         row.candidate.verificationResult
                     );
                     savedPoints.push(saved);
-                    logRows.push({
-                        fileName: row.candidate.file.name,
-                        success: true,
-                        reason: "Uploaded successfully (manual apply).",
-                    });
-                } catch (error) {
-                    logRows.push({
-                        fileName: row.candidate.file.name,
-                        success: false,
-                        reason: error?.message || "Failed to upload point.",
-                    });
+                } catch {
+                    // Ignore failed rows here; detailed upload errors are still surfaced via upload log in main flow.
                 }
-                setUploadProgress((prev) => {
-                    if (!prev) return prev;
-                    return { ...prev, done: prev.done + 1 };
-                });
             }
 
             if (savedPoints.length > 0) {
@@ -870,34 +951,17 @@ export default function App() {
                 setLastAddedId(latestSaved.id);
                 setBenchmarkFilter(String(latestSaved.benchmark));
             }
-
-            if (selected.length >= 2) {
-                const lines = logRows.map(
-                    (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
-                );
-                setUploadLogText(lines.join("\n"));
-            }
-
-            const failedCount = logRows.filter((row) => !row.success).length;
-            if (failedCount > 0) {
-                setUploadError(
-                    `Uploaded ${logRows.length - failedCount}/${logRows.length} files. Download log for details.`
-                );
-            } else {
-                setUploadError(" ");
-            }
+            setUploadError(" ");
             setIsManualApplyOpen(false);
             setManualApplyRows([]);
         } finally {
             setIsManualApplying(false);
-            setIsUploading(false);
-            setUploadProgress(null);
         }
     }
 
     function closeManualApplyModal() {
         if (!isManualApplyOpen) return;
-        const ok = window.confirm("Если закрыть окно, точки не будут добавлены. Продолжить?");
+        const ok = window.confirm("If you close this window, selected points will not be added to the current view. Continue?");
         if (!ok) return;
         setIsManualApplyOpen(false);
         setManualApplyRows([]);
@@ -1100,24 +1164,133 @@ export default function App() {
         parsePosIntCapped(delayMaxDraft, MAX_VALUE) !== null &&
         parsePosIntCapped(areaMaxDraft, MAX_VALUE) !== null;
 
-    const canAdd =
-        benchFiles.length > 0 &&
-        !isUploading &&
-        (() => {
-            if (benchFiles.length > maxMultiFileBatchCount) return false;
-            for (const file of benchFiles) {
-                const parsed = parseBenchFileName(file.name);
-                if (!parsed.ok) return false;
-                if (file.size > maxSingleUploadBytes) return false;
+    const uploadDisabledReason = (() => {
+        if (isUploading) return "Upload is already in progress.";
+        if (benchFiles.length === 0) return "No files selected.";
+        if (selectedChecker === "select" || selectedParser === "select") {
+            return "Please configure checker and parser in settings.";
+        }
+        if (selectedChecker === "ABC" && parseCheckerTimeoutSeconds() === null) {
+            return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
+        }
+        if (selectedParser === "ABC" && parseParserTimeoutSeconds() === null) {
+            return `Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`;
+        }
+        if (benchFiles.length > maxMultiFileBatchCount) {
+            return `Too many files selected. Maximum is ${maxMultiFileBatchCount}.`;
+        }
+        for (const file of benchFiles) {
+            const parsed = parseBenchFileName(file.name);
+            if (!parsed.ok) return parsed.error;
+            if (file.size > maxSingleUploadBytes) {
+                return `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`;
             }
-            if (benchFiles.length > 1) {
-                const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
-                if (batchBytes > remainingUploadBytes) return false;
+        }
+        if (benchFiles.length > 1) {
+            const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
+            if (batchBytes > remainingUploadBytes) {
+                return `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`;
             }
-            const description = normalizeDescriptionForSubmit();
-            if (description.length > MAX_DESCRIPTION_LEN) return false;
-            return true;
-        })();
+        }
+        const description = normalizeDescriptionForSubmit();
+        if (description.length > MAX_DESCRIPTION_LEN) {
+            return `Description is too long (max ${MAX_DESCRIPTION_LEN}).`;
+        }
+        return "";
+    })();
+
+    const canAdd = uploadDisabledReason === "";
+
+    useEffect(() => {
+        const suggestedChecker = String(verifyTimeoutQuotaSeconds);
+        setCheckerTleSecondsDraft((prev) => {
+            const parsed = Number(prev);
+            if (Number.isFinite(parsed) && parsed >= 1 && parsed <= verifyTimeoutQuotaSeconds) return prev;
+            return suggestedChecker;
+        });
+    }, [verifyTimeoutQuotaSeconds]);
+
+    useEffect(() => {
+        const suggestedParser = String(metricsTimeoutQuotaSeconds);
+        setParserTleSecondsDraft((prev) => {
+            const parsed = Number(prev);
+            if (Number.isFinite(parsed) && parsed >= 1 && parsed <= metricsTimeoutQuotaSeconds) return prev;
+            return suggestedParser;
+        });
+    }, [metricsTimeoutQuotaSeconds]);
+
+    useEffect(() => {
+        return () => {
+            stopUploadCountdown();
+        };
+    }, []);
+
+    const refreshAdminLogs = useCallback(async () => {
+        if (!isAdmin) return;
+        const commandNameById = new Map(commands.map((cmd) => [Number(cmd.id), String(cmd.name || "")]));
+        const normalizeLogRows = (rows) =>
+            rows.map((log) => {
+                const commandId = Number(log?.commandId);
+                const fallbackName = commandNameById.get(commandId) || "";
+                return {
+                    ...log,
+                    commandId,
+                    targetName: String(log?.targetName || fallbackName || ""),
+                };
+            });
+        try {
+            let globalLogs = [];
+            try {
+                const payload = await fetchAdminActionLogs({ authKey: authKeyDraft, limit: 1000 });
+                globalLogs = normalizeLogRows(Array.isArray(payload?.actionLogs) ? payload.actionLogs : []);
+            } catch (error) {
+                console.error(error);
+            }
+            if (globalLogs.length > 0) {
+                setAdminLogs(globalLogs);
+                return;
+            }
+
+            // Fallback for environments where global logs endpoint is unavailable:
+            // collect user-scoped logs and merge them.
+            if (!Array.isArray(commands) || commands.length === 0) {
+                setAdminLogs([]);
+                return;
+            }
+            const perUserPayloads = await Promise.all(
+                commands.map((cmd) => fetchAdminUserById({ authKey: authKeyDraft, userId: cmd.id }).catch(() => null))
+            );
+            const merged = [];
+            const seen = new Set();
+            for (const item of perUserPayloads) {
+                const logs = Array.isArray(item?.actionLogs) ? item.actionLogs : [];
+                for (const rawLog of normalizeLogRows(logs)) {
+                    const log = rawLog;
+                    const id = Number(log?.id);
+                    if (Number.isFinite(id) && seen.has(id)) continue;
+                    if (Number.isFinite(id)) seen.add(id);
+                    merged.push(log);
+                }
+            }
+            merged.sort((a, b) => {
+                const ta = Date.parse(String(a?.createdAt || "")) || 0;
+                const tb = Date.parse(String(b?.createdAt || "")) || 0;
+                return tb - ta;
+            });
+            setAdminLogs(merged);
+        } catch (error) {
+            console.error(error);
+            setAdminLogs([]);
+        }
+    }, [authKeyDraft, commands, isAdmin]);
+
+    useEffect(() => {
+        if (!isAdmin) {
+            setAdminLogs([]);
+            return;
+        }
+        refreshAdminLogs();
+    }, [isAdmin, refreshAdminLogs]);
 
     async function loadAdminUser() {
         if (!currentCommand || currentCommand.role !== ROLE_ADMIN) return;
@@ -1133,15 +1306,14 @@ export default function App() {
         try {
             const payload = await fetchAdminUserById({ authKey: authKeyDraft, userId });
             setAdminUser(payload.user);
-            setAdminLogs(payload.actionLogs);
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
             setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
             setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
             setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
+            refreshAdminLogs();
         } catch (error) {
             setAdminUser(null);
-            setAdminLogs([]);
             setAdminPanelError(error?.message || "Failed to load user.");
         } finally {
             setIsAdminLoading(false);
@@ -1163,12 +1335,12 @@ export default function App() {
                 abcMetricsTimeoutSeconds: adminMetricsTleSecondsDraft,
             });
             setAdminUser(payload.user);
-            setAdminLogs(payload.actionLogs);
             setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
             setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
             setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
             setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
             setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
+            refreshAdminLogs();
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to save settings.");
         } finally {
@@ -1637,6 +1809,29 @@ export default function App() {
         setSentPage(1);
     }, [myPoints.length]);
 
+    const selectedAdminLogActionSet = useMemo(() => new Set(selectedAdminLogActions), [selectedAdminLogActions]);
+    const availableAdminLogActions = useMemo(() => {
+        const actions = new Set();
+        for (const log of adminLogs) {
+            if (log?.action) actions.add(String(log.action));
+        }
+        return Array.from(actions).sort((a, b) => a.localeCompare(b));
+    }, [adminLogs]);
+    const filteredAdminLogs = useMemo(() => {
+        const query = adminLogCommandQuery.trim().toLowerCase();
+        if (!query && selectedAdminLogActionSet.size === 0) return adminLogs;
+        return adminLogs.filter((log) => {
+            const targetName = String(log?.targetName || "").toLowerCase();
+            if (query && !targetName.startsWith(query)) return false;
+            if (selectedAdminLogActionSet.size > 0 && !selectedAdminLogActionSet.has(String(log?.action || ""))) {
+                return false;
+            }
+            return true;
+        });
+    }, [adminLogs, adminLogCommandQuery, selectedAdminLogActionSet]);
+    const adminLogsPreview = useMemo(() => filteredAdminLogs.slice(0, 3), [filteredAdminLogs]);
+    const adminLogsHasMore = filteredAdminLogs.length > adminLogsPreview.length;
+
     useEffect(() => {
         if (!navigateNotice) return;
         const t = setTimeout(() => setNavigateNotice(""), 3200);
@@ -1678,7 +1873,6 @@ export default function App() {
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";
-    const isAdmin = currentCommand?.role === ROLE_ADMIN;
     const benchmarkLabel = benchmarkFilter === "test" ? "test" : String(benchmarkFilter);
     const truthTableOn =
         benchmarkFilter !== "test" &&
@@ -1688,18 +1882,26 @@ export default function App() {
         <div className="page">
             <header className="topbar">
                 <div className="brand">
-                    <div className="title">Bench points</div>
-                    <div className="subtitle">Upload .bench files → points are created automatically</div>
+                    <div className="title">Circuit Control Platform</div>
                 </div>
 
                 <div className="topbarRight">
-                    <div className="hello">
+                    <div className="hello helloWithMeta">
                         <span>Hello,</span>
-                        <b className="helloName">{currentCommand.name}</b>
-                        <span>!</span>
+                        <b className="helloName">{currentCommand.name}!</b>
+                        <div className="helloMetaCard">
+                            <div className="helloMetaRow">
+                                <span className="helloMetaLabel">Role</span>
+                                <span className="helloMetaValue">{getRoleLabel(currentCommand?.role)}</span>
+                            </div>
+                            <div className="helloMetaRow">
+                                <span className="helloMetaLabel">Color</span>
+                                <span className="helloMetaValue">
+                                    <span className="helloColorSwatch" style={{ background: currentCommand.color }} />
+                                </span>
+                            </div>
+                        </div>
                     </div>
-                    <div className="pill subtle">role: {getRoleLabel(currentCommand?.role)}</div>
-                    <span className="dot" style={{ background: currentCommand.color }} />
                     <div className="pill subtle">
                         Multi-file quota: {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
                     </div>
@@ -1807,6 +2009,15 @@ export default function App() {
                         onSelectedCheckerChange={setSelectedChecker}
                         selectedParser={selectedParser}
                         onSelectedParserChange={setSelectedParser}
+                        checkerTleSecondsDraft={checkerTleSecondsDraft}
+                        onCheckerTleSecondsDraftChange={setCheckerTleSecondsDraft}
+                        checkerTleMaxSeconds={verifyTimeoutQuotaSeconds}
+                        parserTleSecondsDraft={parserTleSecondsDraft}
+                        onParserTleSecondsDraftChange={setParserTleSecondsDraft}
+                        parserTleMaxSeconds={metricsTimeoutQuotaSeconds}
+                        isUploadSettingsOpen={isUploadSettingsOpen}
+                        onToggleUploadSettings={() => setIsUploadSettingsOpen((v) => !v)}
+                        uploadDisabledReason={uploadDisabledReason}
                     />
 
                     {isAdmin ? (
@@ -1830,7 +2041,20 @@ export default function App() {
                             onAdminMetricsTleSecondsDraftChange={setAdminMetricsTleSecondsDraft}
                             saveAdminUserSettings={saveAdminUserSettings}
                             isAdminSaving={isAdminSaving}
-                            adminLogs={adminLogs}
+                            isAdminQuotaSettingsOpen={isAdminQuotaSettingsOpen}
+                            onToggleAdminQuotaSettings={() => setIsAdminQuotaSettingsOpen((v) => !v)}
+                            adminLogCommandQuery={adminLogCommandQuery}
+                            onAdminLogCommandQueryChange={setAdminLogCommandQuery}
+                            adminLogActionQuery={adminLogActionQuery}
+                            onAdminLogActionQueryChange={setAdminLogActionQuery}
+                            availableAdminLogActions={availableAdminLogActions}
+                            addSelectedAdminLogAction={addSelectedAdminLogAction}
+                            selectedAdminLogActionSet={selectedAdminLogActionSet}
+                            selectedAdminLogActions={selectedAdminLogActions}
+                            removeSelectedAdminLogAction={removeSelectedAdminLogAction}
+                            adminLogPageItems={adminLogsPreview}
+                            adminLogsTotal={filteredAdminLogs.length}
+                            adminLogsHasMore={adminLogsHasMore}
                             truthFilesInputRef={truthFilesInputRef}
                             onTruthFilesChange={onTruthFilesChange}
                             uploadTruthTables={uploadTruthTables}

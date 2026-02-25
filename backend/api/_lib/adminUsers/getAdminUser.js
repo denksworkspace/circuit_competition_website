@@ -1,15 +1,23 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
-import { getActionLogsForCommand } from "../actionLogs.js";
+import { getActionLogs, getActionLogsForCommand } from "../actionLogs.js";
 import { authenticateAdmin, normalizeUserRow } from "./utils.js";
 
 export async function handleGetAdminUser(req, res) {
     const authKey = String(req.query?.authKey || "").trim();
     const userId = Number(req.query?.userId);
+    const scope = String(req.query?.scope || "").trim().toLowerCase();
+    const limit = Number(req.query?.limit);
 
     const admin = await authenticateAdmin(authKey);
     if (!admin) {
         res.status(403).json({ error: "Admin access required." });
+        return;
+    }
+
+    if (scope === "all") {
+        const actionLogs = await getActionLogs(limit);
+        res.status(200).json({ actionLogs });
         return;
     }
 

@@ -91,4 +91,27 @@ describe("api/points-validate-upload", () => {
         expect(res.body.ok).toBe(true);
         expect(res.body.files[0].ok).toBe(true);
     });
+
+    it("caps timeoutSeconds by user quota", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, abc_metrics_timeout_seconds: 7 }] });
+        getAigStatsFromBenchText.mockResolvedValueOnce({
+            ok: true,
+            area: 20,
+            depth: 10,
+        });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "ok",
+                timeoutSeconds: 15,
+                files: [{ fileName: "bench254_10_20.bench", circuitText: "x" }],
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(getAigStatsFromBenchText).toHaveBeenCalledWith("x", { timeoutMs: 7000 });
+    });
 });

@@ -14,6 +14,7 @@ export default async function handler(req, res) {
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
     const files = Array.isArray(body?.files) ? body.files : [];
+    const requestedTimeoutSecondsRaw = body?.timeoutSeconds;
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -37,7 +38,17 @@ export default async function handler(req, res) {
         res.status(401).json({ error: "Invalid auth key." });
         return;
     }
-    const metricsTimeoutMs = Math.max(1, Number(authRes.rows[0].abc_metrics_timeout_seconds || 60)) * 1000;
+    const metricsTimeoutLimitSeconds = Math.max(1, Number(authRes.rows[0].abc_metrics_timeout_seconds || 60));
+    let metricsTimeoutSeconds = metricsTimeoutLimitSeconds;
+    if (requestedTimeoutSecondsRaw !== undefined && requestedTimeoutSecondsRaw !== null && requestedTimeoutSecondsRaw !== "") {
+        const parsed = Number(requestedTimeoutSecondsRaw);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            res.status(400).json({ error: "Invalid timeoutSeconds. Expected a positive integer." });
+            return;
+        }
+        metricsTimeoutSeconds = Math.min(metricsTimeoutLimitSeconds, Math.floor(parsed));
+    }
+    const metricsTimeoutMs = metricsTimeoutSeconds * 1000;
 
     const results = [];
     for (const item of files) {

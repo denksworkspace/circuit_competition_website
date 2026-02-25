@@ -78,7 +78,7 @@
     background: #f3f4f6;
 }
 
-input {
+input:not([type="checkbox"]) {
     width: 100%;
     padding: 9px 10px;
     border-radius: 10px;
@@ -99,14 +99,23 @@ select {
 }
 
 select:focus,
-input:focus {
+input:not([type="checkbox"]):focus {
     border-color: #9ca3af;
     box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
 }
 
-input.bad {
+input:not([type="checkbox"]).bad {
     border-color: #ef4444;
     box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.10);
+}
+
+input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    accent-color: #111827;
+    box-shadow: none;
 }
 
 .btn {
@@ -152,6 +161,11 @@ input.bad {
 .btn.small {
     padding: 7px 9px;
     font-size: 12px;
+}
+
+.disabledHintWrap {
+    display: inline-block;
+    cursor: not-allowed;
 }
 
 .viewControls {

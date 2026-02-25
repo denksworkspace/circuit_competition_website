@@ -165,6 +165,16 @@
     min-width: 0;
 }
 
+.adminLogsList .compactRow {
+    justify-content: flex-start;
+    align-items: flex-start;
+    text-align: left;
+}
+
+.adminLogsList .compactMain {
+    width: 100%;
+}
+
 .mutedMono {
     color: var(--muted);
     max-width: 420px;

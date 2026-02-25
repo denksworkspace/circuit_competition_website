@@ -119,11 +119,11 @@ export async function savePointDirect(pointPayload) {
     };
 }
 
-export async function validateUploadCircuits({ authKey, files }) {
+export async function validateUploadCircuits({ authKey, files, timeoutSeconds }) {
     const response = await fetch(apiUrl("/api/points-validate-upload"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, files }),
+        body: JSON.stringify({ authKey, files, timeoutSeconds }),
     });
 
     const data = await parseJsonSafe(response);
@@ -162,7 +162,7 @@ export async function testPointCircuit({ authKey, benchmark, fileName, circuitTe
     };
 }
 
-export async function verifyPointCircuit({ authKey, benchmark, circuitText, pointId, applyStatus, checkerVersion }) {
+export async function verifyPointCircuit({ authKey, benchmark, circuitText, pointId, applyStatus, checkerVersion, timeoutSeconds }) {
     const response = await fetch(apiUrl("/api/points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -173,6 +173,7 @@ export async function verifyPointCircuit({ authKey, benchmark, circuitText, poin
             pointId,
             applyStatus,
             checkerVersion,
+            timeoutSeconds,
         }),
     });
 
@@ -330,6 +331,24 @@ export async function fetchAdminUserById({ authKey, userId }) {
 
     return {
         user: data?.user || null,
+        actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
+    };
+}
+
+export async function fetchAdminActionLogs({ authKey, limit = 500 }) {
+    const query = new URLSearchParams({
+        authKey: String(authKey || ""),
+        scope: "all",
+        limit: String(limit),
+    });
+
+    const response = await fetch(apiUrl(`/api/admin-users?${query.toString()}`));
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load action logs.");
+    }
+
+    return {
         actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
     };
 }

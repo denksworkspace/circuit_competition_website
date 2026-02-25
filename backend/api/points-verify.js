@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     const pointId = body?.pointId ? String(body.pointId) : null;
     const applyStatus = Boolean(body?.applyStatus);
     const checkerVersion = normalizeCheckerVersion(body?.checkerVersion);
+    const requestedTimeoutSecondsRaw = body?.timeoutSeconds;
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -52,7 +53,17 @@ export default async function handler(req, res) {
         return;
     }
     const actor = authRes.rows[0];
-    const verifyTimeoutMs = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60)) * 1000;
+    const verifyTimeoutLimitSeconds = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60));
+    let verifyTimeoutSeconds = verifyTimeoutLimitSeconds;
+    if (requestedTimeoutSecondsRaw !== undefined && requestedTimeoutSecondsRaw !== null && requestedTimeoutSecondsRaw !== "") {
+        const parsed = Number(requestedTimeoutSecondsRaw);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            res.status(400).json({ error: "Invalid timeoutSeconds. Expected a positive integer." });
+            return;
+        }
+        verifyTimeoutSeconds = Math.min(verifyTimeoutLimitSeconds, Math.floor(parsed));
+    }
+    const verifyTimeoutMs = verifyTimeoutSeconds * 1000;
 
     let pointRow = null;
     if (pointId) {

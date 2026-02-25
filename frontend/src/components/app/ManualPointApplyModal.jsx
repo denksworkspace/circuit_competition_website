@@ -28,7 +28,7 @@ export function ManualPointApplyModal({
                                 disabled={isApplying}
                             />
                             <span>
-                                Добавить точку с параметрами delay={row.delay}, area={row.area} с вердиктом {row.verdict}?
+                                Add point with delay={row.delay}, area={row.area}, verdict={row.verdict} to the chart?
                             </span>
                         </label>
                     ))}

@@ -23,10 +23,19 @@ export function AddPointSection({
     onSelectedCheckerChange,
     selectedParser,
     onSelectedParserChange,
+    checkerTleSecondsDraft,
+    onCheckerTleSecondsDraftChange,
+    checkerTleMaxSeconds,
+    parserTleSecondsDraft,
+    onParserTleSecondsDraftChange,
+    parserTleMaxSeconds,
+    isUploadSettingsOpen,
+    onToggleUploadSettings,
+    uploadDisabledReason,
 }) {
     return (
         <section className="card">
-            <div className="cardHeader tight">
+            <div className="cardHeader tight addPointHeader">
                 <div>
                     <div className="cardTitleRow">
                         <div className="cardTitle">Add a point</div>
@@ -49,7 +58,7 @@ export function AddPointSection({
                                         <li>
                                             <span className="mono">description</span> is optional (up to <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
                                         </li>
-                                        <li>input file name length {"<="} {MAX_INPUT_FILENAME_LEN}</li>
+                                        <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
                                     </ul>
                                 </div>
                                 <div className="cardHint">Example input: <span className="mono">bench254_15_40</span></div>
@@ -77,6 +86,17 @@ export function AddPointSection({
                         Multi-file upload limit: {maxMultiFileBatchCount} files per batch.
                     </div>
                 </div>
+                <button
+                    type="button"
+                    className="settingsGear"
+                    onClick={onToggleUploadSettings}
+                    aria-label="Open upload settings"
+                    title="Upload settings"
+                >
+                    <svg className="settingsGearSvg" viewBox="0 0 16 16" aria-hidden="true">
+                        <path fillRule="evenodd" clipRule="evenodd" d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.902 3.433 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.902-3.434-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319ZM8 10.93a2.93 2.93 0 1 0 0-5.86 2.93 2.93 0 0 0 0 5.86Z" />
+                    </svg>
+                </button>
             </div>
 
             <form className="form" onSubmit={addPointFromFile}>
@@ -101,32 +121,98 @@ export function AddPointSection({
                     />
                 </label>
 
-                <label className="field">
-                    <span>checker</span>
-                    <select value={selectedChecker} onChange={(e) => onSelectedCheckerChange(e.target.value)}>
-                        <option value="none">Do not verify (non-verified)</option>
-                        <option value="ABC">ABC</option>
-                    </select>
-                </label>
+                {isUploadSettingsOpen ? (
+                    <div className="settingsPanel">
+                        <label className="field">
+                            <span>checker</span>
+                            <select value={selectedChecker} onChange={(e) => onSelectedCheckerChange(e.target.value)}>
+                                <option value="select">Select</option>
+                                <option value="none">Do not verify (non-verified)</option>
+                                <option value="ABC">ABC</option>
+                            </select>
+                        </label>
 
-                <label className="field">
-                    <span>parser parameters</span>
-                    <select value={selectedParser} onChange={(e) => onSelectedParserChange(e.target.value)}>
-                        <option value="none">Do not parse (non-verified)</option>
-                        <option value="ABC">ABC</option>
-                    </select>
-                </label>
+                        <label className="field">
+                            <span>parser parameters</span>
+                            <select value={selectedParser} onChange={(e) => onSelectedParserChange(e.target.value)}>
+                                <option value="select">Select</option>
+                                <option value="none">Do not parse (non-verified)</option>
+                                <option value="ABC">ABC</option>
+                            </select>
+                        </label>
+
+                        <label className="field">
+                            <span>checker TLE (seconds, max {checkerTleMaxSeconds})</span>
+                            <input
+                                value={checkerTleSecondsDraft}
+                                onChange={(e) => onCheckerTleSecondsDraftChange(e.target.value)}
+                                placeholder="e.g. 10"
+                                inputMode="numeric"
+                            />
+                        </label>
+
+                        <label className="field">
+                            <span>parser TLE (seconds, max {parserTleMaxSeconds})</span>
+                            <input
+                                value={parserTleSecondsDraft}
+                                onChange={(e) => onParserTleSecondsDraftChange(e.target.value)}
+                                placeholder="e.g. 10"
+                                inputMode="numeric"
+                            />
+                        </label>
+
+                    </div>
+                ) : null}
 
                 {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
 
-                <button className="btn primary" type="submit" disabled={!canAdd}>
-                    {isUploading ? "Uploading..." : "Upload & create point"}
-                </button>
+                <span className={!canAdd ? "disabledHintWrap" : ""} title={!canAdd ? uploadDisabledReason : ""}>
+                    <button className="btn primary" type="submit" disabled={!canAdd}>
+                        {isUploading ? "Uploading..." : "Upload & create point"}
+                    </button>
+                </span>
 
-                {isUploading && uploadProgress && uploadProgress.total > 1 ? (
-                    <div className="cardHint">
-                        Processed {uploadProgress.done} / {uploadProgress.total} files
-                    </div>
+                {isUploading && uploadProgress ? (
+                    <>
+                        <div className="uploadProgressStats">
+                            <div className="cardHint">
+                                Processed {uploadProgress.done} / {uploadProgress.total} files
+                            </div>
+                            <div className="cardHint">
+                                Verified {Number(uploadProgress.verified || 0)} / {uploadProgress.total}
+                            </div>
+                        </div>
+                        {uploadProgress.phase === "preparing" ? (
+                            <div className="cardHint">
+                                Please wait, starting circuit upload may take up to a minute
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "parser" ? (
+                            <div className="cardHint">
+                                Parsing parameters for {uploadProgress.currentFileName || "current file"}...
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "checker" ? (
+                            <div className="cardHint">
+                                Running checker for {uploadProgress.currentFileName || "current file"}...
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "saving" ? (
+                            <div className="cardHint">
+                                Saving files and points...
+                            </div>
+                        ) : null}
+                        {(uploadProgress.phase === "parser" || uploadProgress.phase === "checker") &&
+                        Number.isFinite(uploadProgress.secondsRemaining) ? (
+                            <div className="cardHint">
+                                {uploadProgress.secondsRemaining > 0
+                                    ? `Time left: ${uploadProgress.secondsRemaining}`
+                                    : uploadProgress.transitionTarget === "next-step"
+                                        ? "Switching to the next step..."
+                                        : "Switching to the next circuit..."}
+                            </div>
+                        ) : null}
+                    </>
                 ) : null}
 
                 {uploadLogText ? (

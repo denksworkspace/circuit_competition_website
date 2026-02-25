@@ -25,6 +25,7 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
 }));
 vi.mock("../../api/_lib/actionLogs.js", () => ({
     addActionLog: vi.fn(),
+    getActionLogs: vi.fn(async () => [{ id: 9, action: "all" }]),
     getActionLogsForCommand: vi.fn(async () => [{ id: 1, action: "x" }]),
 }));
 
@@ -63,6 +64,15 @@ describe("api/admin-users handler", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.user.id).toBe(1);
+        expect(Array.isArray(res.body.actionLogs)).toBe(true);
+    });
+
+    it("GET scope=all returns global logs", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 99, role: "admin" }] });
+        const req = { method: "GET", query: { authKey: "k", scope: "all", limit: "50" } };
+        const res = createMockRes();
+        await handler(req, res);
+        expect(res.statusCode).toBe(200);
         expect(Array.isArray(res.body.actionLogs)).toBe(true);
     });
 

@@ -69,3 +69,36 @@ export async function getActionLogsForCommand(commandId, limit = 100) {
         createdAt: row.created_at,
     }));
 }
+
+export async function getActionLogs(limit = 300) {
+    await ensureActionLogsSchema();
+
+    const safeLimit = Math.min(2000, Math.max(1, Number(limit) || 300));
+    const { rows } = await sql`
+      select
+        l.id,
+        l.command_id,
+        l.actor_command_id,
+        l.action,
+        l.details,
+        l.created_at,
+        actor.name as actor_name,
+        target.name as target_name
+      from command_action_logs l
+      left join commands actor on actor.id = l.actor_command_id
+      left join commands target on target.id = l.command_id
+      order by l.created_at desc
+      limit ${safeLimit}
+    `;
+
+    return rows.map((row) => ({
+        id: Number(row.id),
+        commandId: Number(row.command_id),
+        actorCommandId: row.actor_command_id == null ? null : Number(row.actor_command_id),
+        actorName: row.actor_name || null,
+        targetName: row.target_name || null,
+        action: row.action,
+        details: row.details || null,
+        createdAt: row.created_at,
+    }));
+}

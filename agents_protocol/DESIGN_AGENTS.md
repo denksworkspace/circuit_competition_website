@@ -3,6 +3,7 @@
 ## Rules
 - Use ES modules and React function components.
 - Keep code/comments in English.
+- In user-facing UI copy, use mathematical symbols `≤` and `≥` instead of ASCII `<=` and `>=`.
 - Match repo formatting: 4-space indentation, semicolons, double quotes.
 - Naming:
   - components: `PascalCase`

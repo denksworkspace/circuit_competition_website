@@ -218,7 +218,7 @@ export function ChartSection({
 
                 <label className="field compact">
                     <span>
-                        delay max ({"<="} <TenPowNine />)
+                        delay max (≤ <TenPowNine />)
                     </span>
                     <input
                         value={delayMaxDraft}
@@ -231,7 +231,7 @@ export function ChartSection({
 
                 <label className="field compact">
                     <span>
-                        area max ({"<="} <TenPowNine />)
+                        area max (≤ <TenPowNine />)
                     </span>
                     <input
                         value={areaMaxDraft}
