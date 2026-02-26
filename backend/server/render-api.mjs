@@ -1,17 +1,52 @@
 import http from "node:http";
 import path from "node:path";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-
-// @vercel/postgres expects POSTGRES_URL. On non-Vercel hosts we often only have DATABASE_URL.
-if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
-    process.env.POSTGRES_URL = process.env.DATABASE_URL;
-}
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(serverDir, "../api");
+const repoRootDir = path.resolve(serverDir, "../..");
 const handlerCache = new Map();
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
+
+function stripQuotes(value) {
+    if (value.length < 2) return value;
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === "\"" && last === "\"") || (first === "'" && last === "'")) {
+        return value.slice(1, -1);
+    }
+    return value;
+}
+
+async function loadEnvFile(filePath) {
+    try {
+        const raw = await readFile(filePath, "utf8");
+        for (const line of raw.split(/\r?\n/)) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) continue;
+            const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+            if (!match) continue;
+            const key = match[1];
+            if (process.env[key] != null) continue;
+            process.env[key] = stripQuotes(match[2].trim());
+        }
+    } catch {
+        // Optional env file: skip silently when missing.
+    }
+}
+
+async function bootstrapEnv() {
+    await loadEnvFile(path.join(repoRootDir, ".env.local"));
+    await loadEnvFile(path.join(repoRootDir, ".env"));
+    await loadEnvFile(path.join(path.resolve(serverDir, ".."), ".env.local"));
+    await loadEnvFile(path.join(path.resolve(serverDir, ".."), ".env"));
+
+    // @vercel/postgres expects POSTGRES_URL. On non-Vercel hosts we often only have DATABASE_URL.
+    if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
+        process.env.POSTGRES_URL = process.env.DATABASE_URL;
+    }
+}
 
 function setCorsHeaders(res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -176,6 +211,8 @@ const server = http.createServer(async (req, res) => {
         }
     }
 });
+
+await bootstrapEnv();
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => {

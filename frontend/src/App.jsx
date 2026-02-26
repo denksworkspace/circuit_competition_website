@@ -1205,19 +1205,43 @@ export default function App() {
 
     function downloadBenchmarksExcel() {
         const rows = points.filter((p) => p.benchmark !== "test");
-        const header = ["Benchmark", "Delay", "Area", "Status", "CheckerVersion", "Sender"];
-        const lines = [header];
+        const maxDelay = rows.reduce((max, p) => {
+            const delay = Number(p.delay);
+            if (!Number.isFinite(delay)) return max;
+            return Math.max(max, Math.trunc(delay));
+        }, 0);
+
+        const minAreaByBenchDelay = new Map();
         for (const p of rows) {
-            const checkerVersion = p.status === "non-verified" ? "null" : (p.checkerVersion || "");
-            lines.push([
-                String(p.benchmark),
-                String(p.delay),
-                String(p.area),
-                String(p.status),
-                checkerVersion,
-                String(p.sender),
-            ]);
+            const bench = Number(p.benchmark);
+            const delay = Math.trunc(Number(p.delay));
+            const area = Number(p.area);
+            if (!Number.isInteger(bench) || bench < 200 || bench > 299) continue;
+            if (!Number.isInteger(delay) || delay < 1) continue;
+            if (!Number.isFinite(area)) continue;
+
+            const key = `${bench}:${delay}`;
+            const prev = minAreaByBenchDelay.get(key);
+            if (prev === undefined || area < prev) {
+                minAreaByBenchDelay.set(key, area);
+            }
         }
+
+        const header = ["bench/delay"];
+        for (let delay = 1; delay <= maxDelay; delay += 1) {
+            header.push(String(delay));
+        }
+
+        const lines = [header];
+        for (let bench = 200; bench <= 299; bench += 1) {
+            const row = [String(bench)];
+            for (let delay = 1; delay <= maxDelay; delay += 1) {
+                const value = minAreaByBenchDelay.get(`${bench}:${delay}`);
+                row.push(value === undefined ? "" : String(value));
+            }
+            lines.push(row);
+        }
+
         const csv = lines
             .map((row) =>
                 row
