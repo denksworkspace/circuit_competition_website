@@ -67,20 +67,32 @@ export function parseCecResultFromOutput(output) {
     };
 }
 
-export async function runAbcScript(script, { timeoutMs = DEFAULT_ABC_TIMEOUT_MS } = {}) {
+export async function runAbcScript(script, { timeoutMs = DEFAULT_ABC_TIMEOUT_MS, signal = null } = {}) {
     const abcBinary = String(process.env.ABC_BINARY || DEFAULT_ABC_BINARY).trim() || DEFAULT_ABC_BINARY;
     try {
-        const { stdout, stderr } = await execFileAsync(abcBinary, ["-c", script], {
+        const execOptions = {
             timeout: timeoutMs,
             killSignal: "SIGKILL",
             maxBuffer: 16 * 1024 * 1024,
-        });
+        };
+        if (signal && typeof signal === "object" && typeof signal.aborted === "boolean") {
+            execOptions.signal = signal;
+        }
+        const { stdout, stderr } = await execFileAsync(abcBinary, ["-c", script], execOptions);
         return {
             ok: true,
             output: `${stdout || ""}\n${stderr || ""}`.trim(),
         };
     } catch (error) {
         const errorOutput = `${error?.stdout || ""}\n${error?.stderr || ""}`.trim();
+        if (error?.name === "AbortError" || error?.code === "ABORT_ERR") {
+            return {
+                ok: false,
+                code: "ABC_ABORTED",
+                message: "ABC was aborted.",
+                output: errorOutput,
+            };
+        }
         if (error?.code === "ENOENT") {
             return {
                 ok: false,
@@ -121,10 +133,14 @@ async function withTempBenchFiles(fileMap, action) {
     }
 }
 
-export async function getAigStatsFromBenchText(circuitText, { timeoutMs = DEFAULT_ABC_TIMEOUT_MS } = {}) {
+export async function getAigStatsFromBenchText(
+    circuitText,
+    { timeoutMs = DEFAULT_ABC_TIMEOUT_MS, signal = null, onProgress = null } = {}
+) {
     return await withTempBenchFiles({ "input.bench": String(circuitText || "") }, async (files) => {
+        if (typeof onProgress === "function") onProgress("metrics");
         const script = `read_bench ${quoteAbcPath(files["input.bench"])}; strash; ps`;
-        const run = await runAbcScript(script, { timeoutMs });
+        const run = await runAbcScript(script, { timeoutMs, signal });
         if (!run.ok) return run;
 
         const stats = parseAigStatsFromOutput(run.output);
@@ -150,6 +166,8 @@ export async function runCecBenchTexts({
     candidateBenchText,
     timeoutMs = DEFAULT_ABC_TIMEOUT_MS,
     cecTimeoutSeconds = null,
+    onProgress = null,
+    signal = null,
 }) {
     return await withTempBenchFiles(
         {
@@ -162,20 +180,42 @@ export async function runCecBenchTexts({
                 ? Math.max(1, Math.floor(parsedCecTimeoutSeconds))
                 : Math.max(1, Math.floor(timeoutMs / 1000));
             const cecCommand = `cec -T ${effectiveCecTimeoutSeconds} -n`;
-            let script = "";
+            const report = (status) => {
+                if (typeof onProgress === "function") onProgress(status);
+            };
             if (looksLikeTruthTableText(referenceBenchText)) {
                 const truthAsBench = `${files["reference.raw"]}.bench`;
-                script = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; strash; write_bench ${quoteAbcPath(truthAsBench)}; ${cecCommand} ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
-            } else {
-                script = `${cecCommand} ${quoteAbcPath(files["reference.raw"])} ${quoteAbcPath(files["candidate.bench"])}`;
+                report("read_truth");
+                const prepareScript = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; strash; write_bench ${quoteAbcPath(truthAsBench)}`;
+                const prepared = await runAbcScript(prepareScript, { timeoutMs, signal });
+                if (!prepared.ok) return prepared;
+
+                report("cec");
+                const cecScript = `${cecCommand} ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
+                const checked = await runAbcScript(cecScript, { timeoutMs, signal });
+                if (!checked.ok) return checked;
+
+                const parsed = parseCecResultFromOutput(checked.output);
+                report("done");
+                return {
+                    ok: true,
+                    equivalent: parsed.equivalent,
+                    output: `${prepared.output}\n${checked.output}`.trim(),
+                    script: `${prepareScript}; ${cecScript}`,
+                };
             }
-            const run = await runAbcScript(script, { timeoutMs });
+
+            report("cec");
+            const script = `${cecCommand} ${quoteAbcPath(files["reference.raw"])} ${quoteAbcPath(files["candidate.bench"])}`;
+            const run = await runAbcScript(script, { timeoutMs, signal });
             if (!run.ok) return run;
             const parsed = parseCecResultFromOutput(run.output);
+            report("done");
             return {
                 ok: true,
                 equivalent: parsed.equivalent,
                 output: run.output,
+                script,
             };
         }
     );

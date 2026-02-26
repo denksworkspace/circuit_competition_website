@@ -10,6 +10,7 @@ import {
     normalizeCheckerVersion,
     verifyCircuitWithTruth,
 } from "./_lib/pointVerification.js";
+import { setVerifyProgress } from "./_lib/verifyProgress.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -21,7 +22,10 @@ export default async function handler(req, res) {
     const pointId = body?.pointId ? String(body.pointId) : null;
     const applyStatus = Boolean(body?.applyStatus);
     const checkerVersion = normalizeCheckerVersion(body?.checkerVersion);
+    const progressToken = String(body?.progressToken || "").trim();
     const requestedTimeoutSecondsRaw = body?.timeoutSeconds;
+    const report = (status, patch = {}) => setVerifyProgress(progressToken, { status, ...patch });
+    report("queued", { done: false, error: null });
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -42,6 +46,7 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    report("auth");
     const authRes = await sql`
       select id, role, name, abc_verify_timeout_seconds
       from commands
@@ -84,6 +89,7 @@ export default async function handler(req, res) {
             return;
         }
         if (!circuitText) {
+            report("download_point");
             const downloaded = await downloadPointCircuitText(String(pointRow.file_name || ""));
             if (!downloaded.ok) {
                 res.status(422).json({ error: downloaded.reason || "Failed to download point file." });
@@ -107,9 +113,12 @@ export default async function handler(req, res) {
         circuitText,
         timeoutMs: verifyTimeoutMs,
         timeoutSeconds: verifyTimeoutSeconds,
+        onProgress: (status) => report(status),
+        signal: req?.abortSignal || null,
     });
     if (!result.ok) {
-        const statusCode = result.code === "TRUTH_NOT_FOUND" ? 404 : 422;
+        report("error", { done: true, error: result.reason || result.code || "VERIFY_FAILED" });
+        const statusCode = result.code === "TRUTH_NOT_FOUND" ? 404 : (result.code === "ABC_ABORTED" ? 499 : 422);
         res.status(statusCode).json({
             error: result.reason,
             code: result.code || "VERIFY_FAILED",
@@ -139,5 +148,7 @@ export default async function handler(req, res) {
         equivalent: result.equivalent,
         status: nextStatus,
         checkerVersion,
+        script: String(result.script || ""),
     });
+    report("done", { done: true, error: null });
 }

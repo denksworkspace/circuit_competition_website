@@ -16,6 +16,7 @@ export function FindPointsSection({
     canTestPoint,
     onTestPoint,
     testingPointId,
+    testingPointLabel,
     canDeletePoint,
     onConfirmAndDeletePoint,
 }) {
@@ -79,9 +80,10 @@ export function FindPointsSection({
                             <button
                                 className="btn ghost small"
                                 onClick={() => onTestPoint(p)}
-                                disabled={testingPointId === p.id}
+                                title={testingPointId === p.id ? (testingPointLabel || "Testing...") : "Test"}
+                                style={testingPointId === p.id ? { color: "#6b7280" } : undefined}
                             >
-                                {testingPointId === p.id ? "Testing..." : "Test"}
+                                {testingPointId === p.id ? (testingPointLabel || "Testing...") : "Test"}
                             </button>
                         ) : null}
                         {canDeletePoint(p) ? (

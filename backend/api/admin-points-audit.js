@@ -4,6 +4,7 @@ import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { auditCircuitMetrics, downloadPointCircuitText } from "./_lib/pointVerification.js";
+import { setVerifyProgress } from "./_lib/verifyProgress.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -11,6 +12,9 @@ export default async function handler(req, res) {
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
     const pointId = body?.pointId ? String(body.pointId) : null;
+    const progressToken = String(body?.progressToken || "").trim();
+    const report = (status, patch = {}) => setVerifyProgress(progressToken, { status, ...patch });
+    report("queued", { done: false, error: null });
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
         return;
@@ -18,6 +22,7 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    report("auth");
     const authRes = await sql`
       select id, role, abc_metrics_timeout_seconds
       from commands
@@ -56,7 +61,8 @@ export default async function handler(req, res) {
         const fileName = String(point.file_name || "");
 
         try {
-            const downloaded = await downloadPointCircuitText(fileName);
+            report("download_point");
+            const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
             if (!downloaded.ok) {
                 mismatches.push({
                     pointId,
@@ -71,6 +77,8 @@ export default async function handler(req, res) {
                 area: Number(point.area),
                 circuitText: downloaded.circuitText,
                 timeoutMs: metricsTimeoutMs,
+                signal: req?.abortSignal || null,
+                onProgress: (status) => report(status),
             });
             if (!audited.ok) {
                 mismatches.push({
@@ -105,4 +113,5 @@ export default async function handler(req, res) {
         ok: true,
         mismatches,
     });
+    report("done", { done: true, error: null });
 }

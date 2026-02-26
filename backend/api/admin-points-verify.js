@@ -9,6 +9,7 @@ import {
     normalizeCheckerVersion,
     verifyCircuitWithTruth,
 } from "./_lib/pointVerification.js";
+import { setVerifyProgress } from "./_lib/verifyProgress.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -17,6 +18,9 @@ export default async function handler(req, res) {
     const authKey = String(body?.authKey || "").trim();
     const checkerVersion = normalizeCheckerVersion(body?.checkerVersion || CHECKER_ABC);
     const pointId = body?.pointId ? String(body.pointId) : null;
+    const progressToken = String(body?.progressToken || "").trim();
+    const report = (status, patch = {}) => setVerifyProgress(progressToken, { status, ...patch });
+    report("queued", { done: false, error: null });
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -29,6 +33,7 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    report("auth");
     const authRes = await sql`
       select id, role, abc_verify_timeout_seconds
       from commands
@@ -68,7 +73,8 @@ export default async function handler(req, res) {
         const fileName = String(point.file_name || "");
 
         try {
-            const downloaded = await downloadPointCircuitText(fileName);
+            report("download_point");
+            const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
             if (!downloaded.ok) {
                 log.push({
                     pointId,
@@ -86,6 +92,8 @@ export default async function handler(req, res) {
                 circuitText: downloaded.circuitText,
                 timeoutMs: verifyTimeoutMs,
                 timeoutSeconds: verifyTimeoutSeconds,
+                signal: req?.abortSignal || null,
+                onProgress: (status) => report(status),
             });
             if (!verified.ok) {
                 log.push({
@@ -126,4 +134,5 @@ export default async function handler(req, res) {
         checkerVersion,
         log,
     });
+    report("done", { done: true, error: null });
 }

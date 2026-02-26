@@ -7,6 +7,7 @@ export function PointActionModal({
     canTestPoint,
     onTestPoint,
     testingPointId,
+    testingPointLabel,
     canDeletePoint,
     confirmAndDeletePoint,
 }) {
@@ -29,9 +30,10 @@ export function PointActionModal({
                         <button
                             className="btn ghost small"
                             onClick={() => onTestPoint(actionPoint)}
-                            disabled={testingPointId === actionPoint.id}
+                            title={testingPointId === actionPoint.id ? (testingPointLabel || "Testing...") : "Test"}
+                            style={testingPointId === actionPoint.id ? { color: "#6b7280" } : undefined}
                         >
-                            {testingPointId === actionPoint.id ? "Testing..." : "Test"}
+                            {testingPointId === actionPoint.id ? (testingPointLabel || "Testing...") : "Test"}
                         </button>
                     ) : null}
                     {canDeletePoint(actionPoint) ? (

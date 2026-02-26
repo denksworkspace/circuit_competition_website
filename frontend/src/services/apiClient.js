@@ -1,10 +1,17 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "")
-    .trim()
-    .replace(/\/+$/, "");
-const directApiBaseUrl = String(import.meta.env.VITE_DIRECT_API_BASE_URL || "")
-    .trim()
-    .replace(/\/+$/, "");
+const forceRemoteApiInDev = String(import.meta.env.VITE_FORCE_REMOTE_API || "").trim() === "1";
+const useLocalApiInDev = Boolean(import.meta.env.DEV) && !forceRemoteApiInDev;
+
+const apiBaseUrl = useLocalApiInDev
+    ? ""
+    : String(import.meta.env.VITE_API_BASE_URL || "")
+        .trim()
+        .replace(/\/+$/, "");
+const directApiBaseUrl = useLocalApiInDev
+    ? ""
+    : String(import.meta.env.VITE_DIRECT_API_BASE_URL || "")
+        .trim()
+        .replace(/\/+$/, "");
 
 function apiUrl(path) {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -162,10 +169,21 @@ export async function testPointCircuit({ authKey, benchmark, fileName, circuitTe
     };
 }
 
-export async function verifyPointCircuit({ authKey, benchmark, circuitText, pointId, applyStatus, checkerVersion, timeoutSeconds }) {
+export async function verifyPointCircuit({
+    authKey,
+    benchmark,
+    circuitText,
+    pointId,
+    applyStatus,
+    checkerVersion,
+    timeoutSeconds,
+    signal,
+    progressToken,
+}) {
     const response = await fetch(apiUrl("/api/points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
             authKey,
             benchmark,
@@ -174,6 +192,7 @@ export async function verifyPointCircuit({ authKey, benchmark, circuitText, poin
             applyStatus,
             checkerVersion,
             timeoutSeconds,
+            progressToken,
         }),
     });
 
@@ -181,6 +200,18 @@ export async function verifyPointCircuit({ authKey, benchmark, circuitText, poin
     if (!response.ok) {
         const error = new Error(data?.error || "Failed to verify point.");
         error.code = data?.code || null;
+        throw error;
+    }
+    return data;
+}
+
+export async function fetchVerifyPointProgress({ token, signal }) {
+    const query = new URLSearchParams({ token: String(token || "") });
+    const response = await fetch(apiUrl(`/api/points-verify-progress?${query.toString()}`), { signal });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const error = new Error(data?.error || "Failed to fetch verify progress.");
+        error.code = response.status;
         throw error;
     }
     return data;
@@ -202,11 +233,12 @@ export async function runAdminBulkVerify({ authKey, checkerVersion }) {
     };
 }
 
-export async function runAdminBulkVerifyPoint({ authKey, checkerVersion, pointId }) {
+export async function runAdminBulkVerifyPoint({ authKey, checkerVersion, pointId, signal, progressToken }) {
     const response = await fetch(apiUrl("/api/admin-points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, checkerVersion, pointId }),
+        signal,
+        body: JSON.stringify({ authKey, checkerVersion, pointId, progressToken }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
@@ -244,11 +276,12 @@ export async function runAdminMetricsAudit({ authKey }) {
     };
 }
 
-export async function runAdminMetricsAuditPoint({ authKey, pointId }) {
+export async function runAdminMetricsAuditPoint({ authKey, pointId, signal, progressToken }) {
     const response = await fetch(apiUrl("/api/admin-points-audit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, pointId }),
+        signal,
+        body: JSON.stringify({ authKey, pointId, progressToken }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {

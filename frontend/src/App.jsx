@@ -48,6 +48,7 @@ import {
     saveTruthTable,
     updateAdminUserUploadSettings,
     validateUploadCircuits,
+    fetchVerifyPointProgress,
     verifyPointCircuit,
 } from "./services/apiClient.js";
 
@@ -146,6 +147,22 @@ export default function App() {
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
     const [testingPointId, setTestingPointId] = useState(null);
+    const [testingPointLabel, setTestingPointLabel] = useState("");
+    const testingPointTickerRef = useRef(null);
+    const testingAbortRef = useRef(null);
+    const testingProgressPollRef = useRef(null);
+
+    function mapVerifyProgressLabel(statusRaw, tleSeconds) {
+        const status = String(statusRaw || "").trim().toLowerCase();
+        if (status === "queued") return "Testing: queued";
+        if (status === "auth") return "Testing: auth";
+        if (status === "download_point") return "Testing: download point";
+        if (status === "read_truth") return "Testing: read_truth";
+        if (status === "cec") return `Testing: cec -T ${tleSeconds} -n`;
+        if (status === "done") return "Testing: done";
+        if (status === "error") return "Testing: failed";
+        return "Testing...";
+    }
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
     const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
@@ -186,6 +203,8 @@ export default function App() {
     const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
     const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
+    const bulkVerifyAbortRef = useRef(null);
+    const bulkMetricsAbortRef = useRef(null);
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
 
     // Filters (start in "test")
@@ -1022,7 +1041,39 @@ export default function App() {
 
     async function onTestPoint(point) {
         if (!canTestPoint(point)) return;
+        if (testingPointId && testingPointId === point.id && testingAbortRef.current) {
+            testingAbortRef.current.abort();
+            testingAbortRef.current = null;
+            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
+            testingPointTickerRef.current = null;
+            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
+            testingProgressPollRef.current = null;
+            setTestingPointLabel("");
+            setTestingPointId(null);
+            return;
+        }
+        if (testingAbortRef.current) {
+            testingAbortRef.current.abort();
+            testingAbortRef.current = null;
+        }
+        if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
+        testingPointTickerRef.current = null;
+        if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
+        testingProgressPollRef.current = null;
         setTestingPointId(point.id);
+        setTestingPointLabel("Testing: queued");
+        const controller = new AbortController();
+        testingAbortRef.current = controller;
+        const progressToken = uid();
+        testingProgressPollRef.current = setInterval(async () => {
+            if (controller.signal.aborted) return;
+            try {
+                const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                setTestingPointLabel(mapVerifyProgressLabel(progress?.status, verifyTimeoutQuotaSeconds));
+            } catch {
+                // ignore transient poll failures
+            }
+        }, 500);
         const canApplyStatus =
             point.sender === currentCommand?.name || currentCommand?.role === ROLE_ADMIN;
         try {
@@ -1031,7 +1082,11 @@ export default function App() {
                 pointId: point.id,
                 applyStatus: canApplyStatus,
                 checkerVersion: "ABC",
+                signal: controller.signal,
+                progressToken,
             });
+            const scriptText = String(result?.script || "").trim();
+            const commandInfo = isAdmin && scriptText ? `\n\nServer command:\n${scriptText}` : "";
             if (canApplyStatus) {
                 setPoints((prev) =>
                     prev.map((row) =>
@@ -1044,13 +1099,30 @@ export default function App() {
                             : row
                     )
                 );
-                window.alert(result.equivalent ? "CEC: equivalent. Status updated to verified." : "CEC: not equivalent. Status updated to failed.");
+                window.alert(
+                    result.equivalent
+                        ? `CEC: equivalent. Status updated to verified.${commandInfo}`
+                        : `CEC: not equivalent. Status updated to failed.${commandInfo}`
+                );
             } else {
-                window.alert(result.equivalent ? "CEC: equivalent. Status was not changed." : "CEC: not equivalent. Status was not changed.");
+                window.alert(
+                    result.equivalent
+                        ? `CEC: equivalent. Status was not changed.${commandInfo}`
+                        : `CEC: not equivalent. Status was not changed.${commandInfo}`
+                );
             }
         } catch (error) {
+            if (error?.name === "AbortError") return;
             window.alert(error?.message || "Failed to run CEC.");
         } finally {
+            if (testingAbortRef.current === controller) {
+                testingAbortRef.current = null;
+            }
+            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
+            testingPointTickerRef.current = null;
+            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
+            testingProgressPollRef.current = null;
+            setTestingPointLabel("");
             setTestingPointId(null);
         }
     }
@@ -1236,6 +1308,22 @@ export default function App() {
     useEffect(() => {
         return () => {
             stopUploadCountdown();
+            if (testingAbortRef.current) {
+                testingAbortRef.current.abort();
+                testingAbortRef.current = null;
+            }
+            if (bulkVerifyAbortRef.current) {
+                bulkVerifyAbortRef.current.abort();
+                bulkVerifyAbortRef.current = null;
+            }
+            if (bulkMetricsAbortRef.current) {
+                bulkMetricsAbortRef.current.abort();
+                bulkMetricsAbortRef.current = null;
+            }
+            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
+            testingPointTickerRef.current = null;
+            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
+            testingProgressPollRef.current = null;
         };
     }, []);
 
@@ -1608,27 +1696,78 @@ export default function App() {
         setIsTruthConflictModalOpen(false);
     }
 
-    function toTextLog(rows) {
-        return rows.map((row) => JSON.stringify(row)).join("\n");
+    function appendTextLog(setter, line) {
+        setter((prev) => (prev ? `${prev}\n${line}` : line));
+    }
+
+    function mapServerStepLabel(statusRaw, { verifySeconds = null } = {}) {
+        const status = String(statusRaw || "").toLowerCase();
+        if (status === "queued") return "queued";
+        if (status === "auth") return "auth";
+        if (status === "download_point") return "download point";
+        if (status === "read_truth") return "read_truth";
+        if (status === "cec") return verifySeconds ? `cec -T ${verifySeconds} -n` : "cec";
+        if (status === "metrics") return "read_bench; strash; ps";
+        if (status === "done") return "done";
+        if (status === "error") return "failed";
+        return status || "running";
     }
 
     async function runBulkVerifyAllPoints() {
+        if (bulkVerifyAbortRef.current) return;
+        const controller = new AbortController();
+        bulkVerifyAbortRef.current = controller;
         setIsBulkVerifyRunning(true);
         const targetPoints = points.filter((p) => p.benchmark !== "test");
         setBulkVerifyProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
+        setBulkVerifyLogText("");
         try {
             const rows = [];
             for (const point of targetPoints) {
-                const row = await runAdminBulkVerifyPoint({
-                    authKey: authKeyDraft,
-                    checkerVersion: "ABC",
-                    pointId: point.id,
-                });
+                if (controller.signal.aborted) break;
+                const progressToken = uid();
+                let pollTimer = null;
+                let lastStep = "";
+                const emitStep = (step) => {
+                    if (!step || step === lastStep) return;
+                    lastStep = step;
+                    appendTextLog(
+                        setBulkVerifyLogText,
+                        `file=${point.fileName}; success=false; reason=checker: ${mapServerStepLabel(step, { verifySeconds: verifyTimeoutQuotaSeconds })}`
+                    );
+                };
+                pollTimer = setInterval(async () => {
+                    try {
+                        const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                        emitStep(progress?.status);
+                    } catch {
+                        // Ignore polling errors while request is running.
+                    }
+                }, 450);
+                let row = null;
+                try {
+                    row = await runAdminBulkVerifyPoint({
+                        authKey: authKeyDraft,
+                        checkerVersion: "ABC",
+                        pointId: point.id,
+                        signal: controller.signal,
+                        progressToken,
+                    });
+                } finally {
+                    if (pollTimer) clearInterval(pollTimer);
+                }
                 if (row) rows.push(row);
+                appendTextLog(
+                    setBulkVerifyLogText,
+                    `file=${row?.fileName || point.fileName}; success=${row?.ok ? "true" : "false"}; reason=${row?.reason || "No result"}`
+                );
                 setBulkVerifyProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
             }
-            setBulkVerifyLogText(toTextLog(rows));
+            if (controller.signal.aborted) {
+                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+                return;
+            }
 
             const updates = rows
                 .filter((row) => row.ok && (row.recommendedStatus === "verified" || row.recommendedStatus === "failed"))
@@ -1648,35 +1787,104 @@ export default function App() {
             setBulkVerifyCandidates(updates);
             setIsBulkVerifyApplyModalOpen(true);
         } catch (error) {
+            if (error?.name === "AbortError") {
+                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+                return;
+            }
             setAdminPanelError(error?.message || "Failed to run bulk verification.");
         } finally {
+            if (bulkVerifyAbortRef.current === controller) {
+                bulkVerifyAbortRef.current = null;
+            }
             setIsBulkVerifyRunning(false);
             setBulkVerifyProgress(null);
         }
     }
 
     async function runBulkMetricsAudit() {
+        if (bulkMetricsAbortRef.current) return;
+        const controller = new AbortController();
+        bulkMetricsAbortRef.current = controller;
         setIsBulkMetricsAuditRunning(true);
         const targetPoints = points.filter((p) => p.benchmark !== "test");
         setBulkMetricsAuditProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
+        setBulkMetricsAuditLogText("");
         try {
             const mismatches = [];
             for (const point of targetPoints) {
-                const mismatch = await runAdminMetricsAuditPoint({
-                    authKey: authKeyDraft,
-                    pointId: point.id,
-                });
+                if (controller.signal.aborted) break;
+                const progressToken = uid();
+                let pollTimer = null;
+                let lastStep = "";
+                const emitStep = (step) => {
+                    if (!step || step === lastStep) return;
+                    lastStep = step;
+                    appendTextLog(
+                        setBulkMetricsAuditLogText,
+                        `file=${point.fileName}; success=false; reason=parser: ${mapServerStepLabel(step)}`
+                    );
+                };
+                pollTimer = setInterval(async () => {
+                    try {
+                        const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                        emitStep(progress?.status);
+                    } catch {
+                        // Ignore polling errors while request is running.
+                    }
+                }, 450);
+                let mismatch = null;
+                try {
+                    mismatch = await runAdminMetricsAuditPoint({
+                        authKey: authKeyDraft,
+                        pointId: point.id,
+                        signal: controller.signal,
+                        progressToken,
+                    });
+                } finally {
+                    if (pollTimer) clearInterval(pollTimer);
+                }
                 if (mismatch) mismatches.push(mismatch);
+                appendTextLog(
+                    setBulkMetricsAuditLogText,
+                    mismatch
+                        ? `file=${mismatch.fileName || point.fileName}; success=false; reason=${mismatch.reason || "Metric mismatch"}`
+                        : `file=${point.fileName}; success=true; reason=Metrics matched.`
+                );
                 setBulkMetricsAuditProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
             }
-            setBulkMetricsAuditLogText(toTextLog(mismatches));
+            if (controller.signal.aborted) {
+                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+                return;
+            }
+            if (mismatches.length === 0) {
+                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=true; reason=No mismatches.");
+            }
         } catch (error) {
+            if (error?.name === "AbortError") {
+                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+                return;
+            }
             setAdminPanelError(error?.message || "Failed to run metrics audit.");
         } finally {
+            if (bulkMetricsAbortRef.current === controller) {
+                bulkMetricsAbortRef.current = null;
+            }
             setIsBulkMetricsAuditRunning(false);
             setBulkMetricsAuditProgress(null);
         }
+    }
+
+    function stopBulkVerifyAllPoints() {
+        if (!bulkVerifyAbortRef.current) return;
+        bulkVerifyAbortRef.current.abort();
+        bulkVerifyAbortRef.current = null;
+    }
+
+    function stopBulkMetricsAudit() {
+        if (!bulkMetricsAbortRef.current) return;
+        bulkMetricsAbortRef.current.abort();
+        bulkMetricsAbortRef.current = null;
     }
 
     function setBulkVerifyCandidateChecked(pointId, checked) {
@@ -2085,11 +2293,13 @@ export default function App() {
                             applyTruthConflicts={applyTruthConflicts}
                             closeTruthConflictModal={closeTruthConflictModal}
                             runBulkVerifyAllPoints={runBulkVerifyAllPoints}
+                            stopBulkVerifyAllPoints={stopBulkVerifyAllPoints}
                             isBulkVerifyRunning={isBulkVerifyRunning}
                             bulkVerifyProgress={bulkVerifyProgress}
                             bulkVerifyLogText={bulkVerifyLogText}
                             onDownloadBulkVerifyLog={downloadBulkVerifyLog}
                             runBulkMetricsAudit={runBulkMetricsAudit}
+                            stopBulkMetricsAudit={stopBulkMetricsAudit}
                             isBulkMetricsAuditRunning={isBulkMetricsAuditRunning}
                             bulkMetricsAuditProgress={bulkMetricsAuditProgress}
                             bulkMetricsAuditLogText={bulkMetricsAuditLogText}
@@ -2117,6 +2327,7 @@ export default function App() {
                         canTestPoint={canTestPoint}
                         onTestPoint={onTestPoint}
                         testingPointId={testingPointId}
+                        testingPointLabel={testingPointLabel}
                         canDeletePoint={canDeletePoint}
                         onConfirmAndDeletePoint={confirmAndDeletePoint}
                     />
@@ -2131,6 +2342,7 @@ export default function App() {
                 canTestPoint={canTestPoint}
                 onTestPoint={onTestPoint}
                 testingPointId={testingPointId}
+                testingPointLabel={testingPointLabel}
                 canDeletePoint={canDeletePoint}
                 confirmAndDeletePoint={confirmAndDeletePoint}
             />

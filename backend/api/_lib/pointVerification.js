@@ -12,7 +12,7 @@ export function normalizeCheckerVersion(rawChecker) {
     return CHECKER_NONE;
 }
 
-export async function downloadPointCircuitText(fileName) {
+export async function downloadPointCircuitText(fileName, { signal = null } = {}) {
     const downloadUrl = buildDownloadUrl(fileName);
     if (!downloadUrl) {
         return {
@@ -20,7 +20,7 @@ export async function downloadPointCircuitText(fileName) {
             reason: "Download URL is not configured.",
         };
     }
-    const response = await fetch(downloadUrl);
+    const response = await fetch(downloadUrl, signal ? { signal } : undefined);
     if (!response.ok) {
         return {
             ok: false,
@@ -33,7 +33,14 @@ export async function downloadPointCircuitText(fileName) {
     };
 }
 
-export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs, timeoutSeconds = null }) {
+export async function verifyCircuitWithTruth({
+    benchmark,
+    circuitText,
+    timeoutMs,
+    timeoutSeconds = null,
+    onProgress = null,
+    signal = null,
+}) {
     const truth = await getTruthTableByBenchmark(benchmark);
     if (!truth || !truth.downloadUrl) {
         return {
@@ -57,6 +64,8 @@ export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs
         candidateBenchText: circuitText,
         timeoutMs,
         cecTimeoutSeconds: timeoutSeconds,
+        onProgress,
+        signal,
     });
     if (!cec.ok) {
         return {
@@ -69,11 +78,12 @@ export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs
         ok: true,
         equivalent: cec.equivalent,
         output: cec.output,
+        script: cec.script || "",
     };
 }
 
-export async function auditCircuitMetrics({ delay, area, circuitText, timeoutMs }) {
-    const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs });
+export async function auditCircuitMetrics({ delay, area, circuitText, timeoutMs, signal = null, onProgress = null }) {
+    const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs, signal, onProgress });
     if (!stats.ok) {
         return {
             ok: false,

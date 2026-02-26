@@ -49,11 +49,13 @@ export function AdminSettingsSection({
     applyTruthConflicts,
     closeTruthConflictModal,
     runBulkVerifyAllPoints,
+    stopBulkVerifyAllPoints,
     isBulkVerifyRunning,
     bulkVerifyProgress,
     bulkVerifyLogText,
     onDownloadBulkVerifyLog,
     runBulkMetricsAudit,
+    stopBulkMetricsAudit,
     isBulkMetricsAuditRunning,
     bulkMetricsAuditProgress,
     bulkMetricsAuditLogText,
@@ -211,15 +213,23 @@ export function AdminSettingsSection({
                                 >
                                     {isBulkVerifyRunning ? "Checking all points..." : "Check all points (CEC)"}
                                 </button>
+                                {isBulkVerifyRunning ? (
+                                    <button className="btn danger" type="button" onClick={stopBulkVerifyAllPoints}>
+                                        Stop CEC
+                                    </button>
+                                ) : null}
                                 {isBulkVerifyRunning && bulkVerifyProgress ? (
                                     <div className="cardHint">
                                         Processed {bulkVerifyProgress.done} / {bulkVerifyProgress.total} points
                                     </div>
                                 ) : null}
                                 {bulkVerifyLogText ? (
-                                    <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
-                                        Download CEC log
-                                    </button>
+                                    <>
+                                        <div className="cardHint mono mutedMono">{bulkVerifyLogText}</div>
+                                        <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
+                                            Download CEC log
+                                        </button>
+                                    </>
                                 ) : null}
 
                                 <button
@@ -230,15 +240,23 @@ export function AdminSettingsSection({
                                 >
                                     {isBulkMetricsAuditRunning ? "Auditing..." : "Audit all point metrics (ABC)"}
                                 </button>
+                                {isBulkMetricsAuditRunning ? (
+                                    <button className="btn danger" type="button" onClick={stopBulkMetricsAudit}>
+                                        Stop Audit
+                                    </button>
+                                ) : null}
                                 {isBulkMetricsAuditRunning && bulkMetricsAuditProgress ? (
                                     <div className="cardHint">
                                         Processed {bulkMetricsAuditProgress.done} / {bulkMetricsAuditProgress.total} points
                                     </div>
                                 ) : null}
                                 {bulkMetricsAuditLogText ? (
-                                    <button className="btn ghost" type="button" onClick={onDownloadBulkMetricsAuditLog}>
-                                        Download metrics audit log
-                                    </button>
+                                    <>
+                                        <div className="cardHint mono mutedMono">{bulkMetricsAuditLogText}</div>
+                                        <button className="btn ghost" type="button" onClick={onDownloadBulkMetricsAuditLog}>
+                                            Download metrics audit log
+                                        </button>
+                                    </>
                                 ) : null}
                             </>
                         ) : null}

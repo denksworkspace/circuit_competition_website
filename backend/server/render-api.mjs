@@ -107,6 +107,15 @@ function augmentResponse(res) {
 const server = http.createServer(async (req, res) => {
     try {
         setCorsHeaders(res);
+        const requestAbortController = new AbortController();
+        req.on("aborted", () => {
+            requestAbortController.abort();
+        });
+        res.on("close", () => {
+            // If the response stream closes before the response is ended,
+            // the client disconnected and ongoing work should be aborted.
+            if (!res.writableEnded) requestAbortController.abort();
+        });
 
         if (!req.url) {
             res.statusCode = 400;
@@ -143,6 +152,7 @@ const server = http.createServer(async (req, res) => {
 
         const reqAny = req;
         reqAny.query = Object.fromEntries(url.searchParams.entries());
+        reqAny.abortSignal = requestAbortController.signal;
 
         if (req.method && ["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
             try {
