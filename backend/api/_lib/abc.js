@@ -159,7 +159,7 @@ export async function runCecBenchTexts({
             let script = "";
             if (looksLikeTruthTableText(referenceBenchText)) {
                 const truthAsBench = `${files["reference.raw"]}.bench`;
-                script = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; write_bench ${quoteAbcPath(truthAsBench)}; cec -n ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
+                script = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; strash; write_bench ${quoteAbcPath(truthAsBench)}; cec -n ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
             } else {
                 script = `cec -n ${quoteAbcPath(files["reference.raw"])} ${quoteAbcPath(files["candidate.bench"])}`;
             }
