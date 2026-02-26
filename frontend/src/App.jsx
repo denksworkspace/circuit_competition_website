@@ -500,6 +500,27 @@ export default function App() {
                 changed: false,
             };
         }
+        const expectedDelay = Number(row?.expected?.delay);
+        const expectedArea = Number(row?.expected?.area);
+        const actualDelay = Number(row?.actual?.delay);
+        const actualArea = Number(row?.actual?.area);
+        const hasExpected = Number.isFinite(expectedDelay) && Number.isFinite(expectedArea);
+        const hasActual = Number.isFinite(actualDelay) && Number.isFinite(actualArea);
+        const isParetoBetterOrEqual = hasExpected && hasActual && actualDelay <= expectedDelay && actualArea <= expectedArea;
+
+        if (row.ok && isParetoBetterOrEqual && (Boolean(row?.adjusted) || actualDelay !== expectedDelay || actualArea !== expectedArea)) {
+            return {
+                kind: "pass-adjusted",
+                reason: row.reason || `Parser adjusted metrics to delay=${actualDelay}, area=${actualArea}.`,
+                parsed: {
+                    ...fallbackParsed,
+                    delay: actualDelay,
+                    area: actualArea,
+                },
+                changed: actualDelay !== fallbackParsed.delay || actualArea !== fallbackParsed.area,
+            };
+        }
+
         if (row.ok) {
             return {
                 kind: "pass",
@@ -508,13 +529,6 @@ export default function App() {
                 changed: false,
             };
         }
-
-        const expectedDelay = Number(row?.expected?.delay);
-        const expectedArea = Number(row?.expected?.area);
-        const actualDelay = Number(row?.actual?.delay);
-        const actualArea = Number(row?.actual?.area);
-        const hasExpected = Number.isFinite(expectedDelay) && Number.isFinite(expectedArea);
-        const hasActual = Number.isFinite(actualDelay) && Number.isFinite(actualArea);
 
         if (hasExpected && hasActual && actualDelay <= expectedDelay && actualArea <= expectedArea) {
             return {
@@ -822,7 +836,7 @@ export default function App() {
                     };
                 });
 
-                if (finalStatus !== "verified" || parserState.changed) {
+                if (finalStatus !== "verified") {
                     manualRowsDraft.push({
                         key: `${item.file.name}:${item.file.size}:${manualRowsDraft.length}`,
                         checked: true,

@@ -33,7 +33,7 @@ export async function downloadPointCircuitText(fileName) {
     };
 }
 
-export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs }) {
+export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs, timeoutSeconds = null }) {
     const truth = await getTruthTableByBenchmark(benchmark);
     if (!truth || !truth.downloadUrl) {
         return {
@@ -56,6 +56,7 @@ export async function verifyCircuitWithTruth({ benchmark, circuitText, timeoutMs
         referenceBenchText: truthText,
         candidateBenchText: circuitText,
         timeoutMs,
+        cecTimeoutSeconds: timeoutSeconds,
     });
     if (!cec.ok) {
         return {

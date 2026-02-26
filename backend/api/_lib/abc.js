@@ -149,6 +149,7 @@ export async function runCecBenchTexts({
     referenceBenchText,
     candidateBenchText,
     timeoutMs = DEFAULT_ABC_TIMEOUT_MS,
+    cecTimeoutSeconds = null,
 }) {
     return await withTempBenchFiles(
         {
@@ -156,12 +157,17 @@ export async function runCecBenchTexts({
             "candidate.bench": String(candidateBenchText || ""),
         },
         async (files) => {
+            const parsedCecTimeoutSeconds = Number(cecTimeoutSeconds);
+            const effectiveCecTimeoutSeconds = Number.isFinite(parsedCecTimeoutSeconds) && parsedCecTimeoutSeconds > 0
+                ? Math.max(1, Math.floor(parsedCecTimeoutSeconds))
+                : Math.max(1, Math.floor(timeoutMs / 1000));
+            const cecCommand = `cec -T ${effectiveCecTimeoutSeconds} -n`;
             let script = "";
             if (looksLikeTruthTableText(referenceBenchText)) {
                 const truthAsBench = `${files["reference.raw"]}.bench`;
-                script = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; strash; write_bench ${quoteAbcPath(truthAsBench)}; cec -n ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
+                script = `read_truth -x -f ${quoteAbcPath(files["reference.raw"])}; strash; write_bench ${quoteAbcPath(truthAsBench)}; ${cecCommand} ${quoteAbcPath(truthAsBench)} ${quoteAbcPath(files["candidate.bench"])}`;
             } else {
-                script = `cec -n ${quoteAbcPath(files["reference.raw"])} ${quoteAbcPath(files["candidate.bench"])}`;
+                script = `${cecCommand} ${quoteAbcPath(files["reference.raw"])} ${quoteAbcPath(files["candidate.bench"])}`;
             }
             const run = await runAbcScript(script, { timeoutMs });
             if (!run.ok) return run;

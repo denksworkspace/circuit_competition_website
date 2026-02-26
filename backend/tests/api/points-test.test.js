@@ -58,6 +58,11 @@ describe("api/points-test", () => {
         await handler(req, res);
         expect(res.statusCode).toBe(200);
         expect(res.body.equivalent).toBe(false);
+        expect(runCecBenchTexts).toHaveBeenCalledWith(
+            expect.objectContaining({
+                cecTimeoutSeconds: 60,
+            })
+        );
     });
 
     it("runs cec for admin", async () => {
@@ -82,5 +87,10 @@ describe("api/points-test", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.equivalent).toBe(true);
+        expect(runCecBenchTexts).toHaveBeenCalledWith(
+            expect.objectContaining({
+                cecTimeoutSeconds: 60,
+            })
+        );
     });
 });

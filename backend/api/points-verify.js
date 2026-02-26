@@ -106,6 +106,7 @@ export default async function handler(req, res) {
         benchmark,
         circuitText,
         timeoutMs: verifyTimeoutMs,
+        timeoutSeconds: verifyTimeoutSeconds,
     });
     if (!result.ok) {
         const statusCode = result.code === "TRUTH_NOT_FOUND" ? 404 : 422;

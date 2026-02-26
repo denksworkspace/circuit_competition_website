@@ -43,7 +43,8 @@ export default async function handler(req, res) {
         res.status(403).json({ error: "Only admin can run bulk verification." });
         return;
     }
-    const verifyTimeoutMs = Math.max(1, Number(authRes.rows[0].abc_verify_timeout_seconds || 60)) * 1000;
+    const verifyTimeoutSeconds = Math.max(1, Number(authRes.rows[0].abc_verify_timeout_seconds || 60));
+    const verifyTimeoutMs = verifyTimeoutSeconds * 1000;
 
     const pointsRes = pointId
         ? await sql`
@@ -84,6 +85,7 @@ export default async function handler(req, res) {
                 benchmark,
                 circuitText: downloaded.circuitText,
                 timeoutMs: verifyTimeoutMs,
+                timeoutSeconds: verifyTimeoutSeconds,
             });
             if (!verified.ok) {
                 log.push({

@@ -45,5 +45,11 @@ describe("api/admin-points-verify", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.log[0].recommendedStatus).toBe("failed");
+        expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
+            expect.objectContaining({
+                timeoutMs: 60000,
+                timeoutSeconds: 60,
+            })
+        );
     });
 });

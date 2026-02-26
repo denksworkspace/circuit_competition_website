@@ -86,6 +86,7 @@ describe("api/points-verify", () => {
         expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
             expect.objectContaining({
                 timeoutMs: 9000,
+                timeoutSeconds: 9,
             })
         );
     });

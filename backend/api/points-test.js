@@ -54,7 +54,8 @@ export default async function handler(req, res) {
     }
 
     const actor = authRes.rows[0];
-    const verifyTimeoutMs = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60)) * 1000;
+    const verifyTimeoutSeconds = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60));
+    const verifyTimeoutMs = verifyTimeoutSeconds * 1000;
 
     let referenceBenchText;
     try {
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
         referenceBenchText,
         candidateBenchText: circuitText,
         timeoutMs: verifyTimeoutMs,
+        cecTimeoutSeconds: verifyTimeoutSeconds,
     });
     if (!cec.ok) {
         const statusCode = cec.code === "ABC_NOT_FOUND" ? 503 : 422;

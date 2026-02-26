@@ -91,6 +91,21 @@ export default async function handler(req, res) {
             mismatches.push(`delay expected ${parsed.delay}, actual ${stats.depth}`);
         }
 
+        const isParetoBetterOrEqual = stats.area <= parsed.area && stats.depth <= parsed.delay;
+        if (mismatches.length > 0 && isParetoBetterOrEqual) {
+            const normalizedFileName = `bench${parsed.benchmark}_${stats.depth}_${stats.area}.bench`;
+            results.push({
+                fileName,
+                ok: true,
+                adjusted: true,
+                reason: `Metric adjusted to area=${stats.area}, delay=${stats.depth}.`,
+                expected: { area: parsed.area, delay: parsed.delay },
+                actual: { area: stats.area, delay: stats.depth },
+                normalizedFileName,
+            });
+            continue;
+        }
+
         if (mismatches.length > 0) {
             results.push({
                 fileName,
