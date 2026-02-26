@@ -92,6 +92,31 @@ describe("api/points-validate-upload", () => {
         expect(res.body.files[0].ok).toBe(true);
     });
 
+    it("accepts ex prefix and normalizes file name to bench", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1 }] });
+        getAigStatsFromBenchText.mockResolvedValueOnce({
+            ok: true,
+            area: 20,
+            depth: 10,
+        });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "ok",
+                files: [{ fileName: "ex254_10_20.bench", circuitText: "x" }],
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.files[0]).toMatchObject({
+            ok: true,
+            fileName: "bench254_10_20.bench",
+        });
+    });
+
     it("accepts pareto-better metrics and returns normalized filename", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 1 }] });
         getAigStatsFromBenchText.mockResolvedValueOnce({

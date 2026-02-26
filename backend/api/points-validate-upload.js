@@ -72,11 +72,12 @@ export default async function handler(req, res) {
             });
             continue;
         }
+        const normalizedInputFileName = parsed.fileName;
 
         const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs: metricsTimeoutMs });
         if (!stats.ok) {
             results.push({
-                fileName,
+                fileName: normalizedInputFileName,
                 ok: false,
                 reason: stats.message || "Failed to compute metrics with ABC.",
             });
@@ -95,7 +96,7 @@ export default async function handler(req, res) {
         if (mismatches.length > 0 && isParetoBetterOrEqual) {
             const normalizedFileName = `bench${parsed.benchmark}_${stats.depth}_${stats.area}.bench`;
             results.push({
-                fileName,
+                fileName: normalizedInputFileName,
                 ok: true,
                 adjusted: true,
                 reason: `Metric adjusted to area=${stats.area}, delay=${stats.depth}.`,
@@ -108,7 +109,7 @@ export default async function handler(req, res) {
 
         if (mismatches.length > 0) {
             results.push({
-                fileName,
+                fileName: normalizedInputFileName,
                 ok: false,
                 reason: `Metric mismatch: ${mismatches.join("; ")}`,
                 expected: { area: parsed.area, delay: parsed.delay },
@@ -118,7 +119,7 @@ export default async function handler(req, res) {
         }
 
         results.push({
-            fileName,
+            fileName: normalizedInputFileName,
             ok: true,
             expected: { area: parsed.area, delay: parsed.delay },
             actual: { area: stats.area, delay: stats.depth },

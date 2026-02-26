@@ -44,7 +44,7 @@ export function AddPointSection({
                             <div className="helpTipPanel">
                                 <div className="cardHint"><b>Expected file name pattern:</b></div>
                                 <div className="cardHint mono">
-                                    bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"} or bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}.bench
+                                    bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}.bench or ex{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}.bench
                                 </div>
                                 <div className="cardHint">
                                     Where:
@@ -61,7 +61,7 @@ export function AddPointSection({
                                         <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
                                     </ul>
                                 </div>
-                                <div className="cardHint">Example input: <span className="mono">bench254_15_40</span></div>
+                                <div className="cardHint">Example input: <span className="mono">bench254_15_40.bench</span></div>
                                 <div className="cardHint">
                                     Stored file name is generated automatically:
                                     <span className="mono"> bench{"{BENCH}"}_{"{DELAY}"}_{"{AREA}"}_{"{COMMAND}"}_{"{POINT_ID}"}.bench</span>

@@ -119,13 +119,13 @@ export function parseBenchFileName(fileNameRaw) {
     if (!match) {
         return {
             ok: false,
-            error: "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>[.bench]",
+            error: "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>.bench or ex{200..299}_<delay>_<area>.bench",
         };
     }
 
-    const benchmark = Number(match[1]);
-    const delay = Number(match[2]);
-    const area = Number(match[3]);
+    const benchmark = Number(match[2]);
+    const delay = Number(match[3]);
+    const area = Number(match[4]);
 
     if (!Number.isSafeInteger(benchmark) || benchmark < 200 || benchmark > 299) {
         return { ok: false, error: "Benchmark must be in [200..299]." };
@@ -142,6 +142,7 @@ export function parseBenchFileName(fileNameRaw) {
         benchmark,
         delay,
         area,
+        normalizedFileName: `bench${benchmark}_${delay}_${area}.bench`,
     };
 }
 

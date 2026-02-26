@@ -95,11 +95,25 @@ describe("pointUtils", () => {
     });
 
     it("parseBenchFileName validates format and bounds", () => {
-        expect(parseBenchFileName("bench200_0_0")).toEqual({ ok: true, benchmark: 200, delay: 0, area: 0 });
+        expect(parseBenchFileName("bench200_0_0.bench")).toEqual({
+            ok: true,
+            benchmark: 200,
+            delay: 0,
+            area: 0,
+            normalizedFileName: "bench200_0_0.bench",
+        });
         expect(parseBenchFileName("bench299_100_100.bench").ok).toBe(true);
+        expect(parseBenchFileName("ex254_10_20.bench")).toEqual({
+            ok: true,
+            benchmark: 254,
+            delay: 10,
+            area: 20,
+            normalizedFileName: "bench254_10_20.bench",
+        });
 
         expect(parseBenchFileName(" ").ok).toBe(false);
         expect(parseBenchFileName("bench199_1_1").ok).toBe(false);
+        expect(parseBenchFileName("bench200_0_0").ok).toBe(false);
         expect(parseBenchFileName("bench300_1_1").ok).toBe(false);
         expect(parseBenchFileName("bench200_-1_1").ok).toBe(false);
         expect(parseBenchFileName("bench200_1_1000000001").ok).toBe(false);

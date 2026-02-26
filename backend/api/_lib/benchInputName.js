@@ -1,6 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 
-const BENCH_INPUT_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)(?:\.bench)?$/i;
+const BENCH_INPUT_NAME_RE = /^(bench|ex)(2\d\d)_(\d+)_(\d+)\.bench$/i;
 const MAX_VALUE = 1_000_000_000;
 
 export function parseInputBenchFileName(fileNameRaw) {
@@ -13,13 +13,13 @@ export function parseInputBenchFileName(fileNameRaw) {
     if (!match) {
         return {
             ok: false,
-            error: "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>[.bench]",
+            error: "Invalid file name pattern. Expected: bench{200..299}_<delay>_<area>.bench or ex{200..299}_<delay>_<area>.bench",
         };
     }
 
-    const benchmark = Number(match[1]);
-    const delay = Number(match[2]);
-    const area = Number(match[3]);
+    const benchmark = Number(match[2]);
+    const delay = Number(match[3]);
+    const area = Number(match[4]);
 
     if (!Number.isSafeInteger(benchmark) || benchmark < 200 || benchmark > 299) {
         return { ok: false, error: "Benchmark must be in range 200..299." };
@@ -36,6 +36,6 @@ export function parseInputBenchFileName(fileNameRaw) {
         benchmark,
         delay,
         area,
-        fileName,
+        fileName: `bench${benchmark}_${delay}_${area}.bench`,
     };
 }

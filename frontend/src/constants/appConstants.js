@@ -11,7 +11,7 @@ export const ROLE_ADMIN = "admin";
 export const ROLE_LEADER = "leader";
 export const ROLE_PARTICIPANT = "participant";
 
-export const BENCH_INPUT_NAME_RE = /^bench(2\d\d)_(\d+)_(\d+)(?:\.bench)?$/;
+export const BENCH_INPUT_NAME_RE = /^(bench|ex)(2\d\d)_(\d+)_(\d+)\.bench$/i;
 
 export const DELETE_PREVIEW_LIMIT = 3;
 

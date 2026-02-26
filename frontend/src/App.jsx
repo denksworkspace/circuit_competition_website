@@ -744,6 +744,7 @@ export default function App() {
             const logRows = [];
 
             for (const item of preparedFiles) {
+                const normalizedInputFileName = item.parsed.normalizedFileName || item.file.name;
                 let parserState = {
                     kind: "skipped",
                     reason: "Parser is disabled.",
@@ -756,7 +757,7 @@ export default function App() {
                             ? {
                                 ...prev,
                                 phase: "parser",
-                                currentFileName: item.file.name,
+                                currentFileName: normalizedInputFileName,
                                 secondsRemaining: parserTimeoutSeconds,
                                 transitionTarget: resolveTransitionTarget("parser"),
                             }
@@ -768,20 +769,20 @@ export default function App() {
                             authKey: authKeyDraft,
                             files: [
                                 {
-                                    fileName: item.file.name,
+                                    fileName: normalizedInputFileName,
                                     circuitText: item.circuitText,
                                 },
                             ],
                             timeoutSeconds: parserTimeoutSeconds,
                         });
                         const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
-                        const parserRow = parserRows[0] || { ok: true, fileName: item.file.name };
+                        const parserRow = parserRows[0] || { ok: true, fileName: normalizedInputFileName };
                         parserState = normalizeParserResultRow(parserRow, item.parsed);
                     } catch (validationError) {
                         const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
                         const parserRow = detailRows[0] || {
                             ok: false,
-                            fileName: item.file.name,
+                            fileName: normalizedInputFileName,
                             reason: validationError?.message || "Render parser request failed.",
                         };
                         parserState = normalizeParserResultRow(parserRow, item.parsed);
@@ -799,7 +800,7 @@ export default function App() {
                             ? {
                                 ...prev,
                                 phase: "checker",
-                                currentFileName: item.file.name,
+                                currentFileName: normalizedInputFileName,
                                 secondsRemaining: checkerTimeoutSeconds,
                                 transitionTarget: resolveTransitionTarget("checker"),
                             }
@@ -868,7 +869,7 @@ export default function App() {
                 }
 
                 autoRows.push({
-                    fileName: item.file.name,
+                    fileName: normalizedInputFileName,
                     candidate,
                 });
             }
