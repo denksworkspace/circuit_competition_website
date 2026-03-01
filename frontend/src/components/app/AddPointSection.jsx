@@ -21,6 +21,7 @@ export function AddPointSection({
     onDownloadUploadLog,
     selectedChecker,
     onSelectedCheckerChange,
+    canUseFastHex,
     selectedParser,
     onSelectedParserChange,
     checkerTleSecondsDraft,
@@ -129,7 +130,7 @@ export function AddPointSection({
                                 <option value="select">Select</option>
                                 <option value="none">Do not verify (non-verified)</option>
                                 <option value="ABC">ABC</option>
-                                <option value="ABC_FAST_HEX">ABC fast hex</option>
+                                {canUseFastHex ? <option value="ABC_FAST_HEX">ABC fast hex</option> : null}
                             </select>
                         </label>
 

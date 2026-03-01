@@ -51,14 +51,18 @@ export function AdminSettingsSection({
     runBulkVerifyAllPoints,
     selectedBulkVerifyChecker,
     onSelectedBulkVerifyCheckerChange,
+    bulkVerifyIncludeVerified,
+    onBulkVerifyIncludeVerifiedChange,
     stopBulkVerifyAllPoints,
     isBulkVerifyRunning,
+    bulkVerifyCurrentFileName,
     bulkVerifyProgress,
     bulkVerifyLogText,
     onDownloadBulkVerifyLog,
     runBulkMetricsAudit,
     stopBulkMetricsAudit,
     isBulkMetricsAuditRunning,
+    bulkMetricsAuditCurrentFileName,
     bulkMetricsAuditProgress,
     bulkMetricsAuditLogText,
     onDownloadBulkMetricsAuditLog,
@@ -217,6 +221,16 @@ export function AdminSettingsSection({
                                         <option value="ABC_FAST_HEX">ABC fast hex</option>
                                     </select>
                                 </label>
+                                <label className="field">
+                                    <span className="mono">
+                                        <input
+                                            type="checkbox"
+                                            checked={bulkVerifyIncludeVerified}
+                                            onChange={(e) => onBulkVerifyIncludeVerifiedChange(e.target.checked)}
+                                        />
+                                        {" "}Include points with status verified
+                                    </span>
+                                </label>
                                 <button
                                     className="btn ghost"
                                     type="button"
@@ -235,9 +249,13 @@ export function AdminSettingsSection({
                                         Processed {bulkVerifyProgress.done} / {bulkVerifyProgress.total} points
                                     </div>
                                 ) : null}
+                                {isBulkVerifyRunning && bulkVerifyCurrentFileName ? (
+                                    <div className="cardHint">
+                                        Current file: <span className="mono">{bulkVerifyCurrentFileName}</span>
+                                    </div>
+                                ) : null}
                                 {bulkVerifyLogText ? (
                                     <>
-                                        <div className="cardHint mono mutedMono">{bulkVerifyLogText}</div>
                                         <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
                                             Download bulk-check log
                                         </button>
@@ -262,9 +280,13 @@ export function AdminSettingsSection({
                                         Processed {bulkMetricsAuditProgress.done} / {bulkMetricsAuditProgress.total} points
                                     </div>
                                 ) : null}
+                                {isBulkMetricsAuditRunning && bulkMetricsAuditCurrentFileName ? (
+                                    <div className="cardHint">
+                                        Current file: <span className="mono">{bulkMetricsAuditCurrentFileName}</span>
+                                    </div>
+                                ) : null}
                                 {bulkMetricsAuditLogText ? (
                                     <>
-                                        <div className="cardHint mono mutedMono">{bulkMetricsAuditLogText}</div>
                                         <button className="btn ghost" type="button" onClick={onDownloadBulkMetricsAuditLog}>
                                             Download metrics audit log
                                         </button>

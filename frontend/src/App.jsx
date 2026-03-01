@@ -205,8 +205,11 @@ export default function App() {
     const [isTruthConflictModalOpen, setIsTruthConflictModalOpen] = useState(false);
     const [isBulkVerifyRunning, setIsBulkVerifyRunning] = useState(false);
     const [selectedBulkVerifyChecker, setSelectedBulkVerifyChecker] = useState(DEFAULT_CHECKER_VERSION);
+    const [bulkVerifyIncludeVerified, setBulkVerifyIncludeVerified] = useState(true);
+    const [bulkVerifyCurrentFileName, setBulkVerifyCurrentFileName] = useState("");
     const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
     const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
+    const [bulkMetricsAuditCurrentFileName, setBulkMetricsAuditCurrentFileName] = useState("");
     const [bulkMetricsAuditLogText, setBulkMetricsAuditLogText] = useState("");
     const [bulkVerifyProgress, setBulkVerifyProgress] = useState(null);
     const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
@@ -215,6 +218,13 @@ export default function App() {
     const bulkVerifyAbortRef = useRef(null);
     const bulkMetricsAbortRef = useRef(null);
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
+    const canUseFastHex = isAdmin;
+
+    const normalizeCheckerForActor = (checkerRaw) => {
+        const checker = String(checkerRaw || "").trim();
+        if (checker === CHECKER_ABC_FAST_HEX && !canUseFastHex) return CHECKER_ABC;
+        return checker;
+    };
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -700,7 +710,8 @@ export default function App() {
         }
         const checkerTimeoutSeconds = parseCheckerTimeoutSeconds();
         const parserTimeoutSeconds = parseParserTimeoutSeconds();
-        if (ENABLED_CHECKERS.has(selectedChecker) && checkerTimeoutSeconds === null) {
+        const checkerSelection = normalizeCheckerForActor(selectedChecker);
+        if (ENABLED_CHECKERS.has(checkerSelection) && checkerTimeoutSeconds === null) {
             setUploadError(`Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`);
             return;
         }
@@ -728,7 +739,7 @@ export default function App() {
 
         try {
             const parserEnabled = selectedParser === "ABC";
-            const checkerEnabled = ENABLED_CHECKERS.has(selectedChecker);
+            const checkerEnabled = ENABLED_CHECKERS.has(checkerSelection);
             const fileStepOrder = [];
             if (parserEnabled) fileStepOrder.push("parser");
             if (checkerEnabled) fileStepOrder.push("checker");
@@ -803,7 +814,7 @@ export default function App() {
                 let checkerVerdict = null;
                 let checkerVersion = null;
                 if (checkerEnabled) {
-                    checkerVersion = selectedChecker;
+                    checkerVersion = checkerSelection;
                     setUploadProgress((prev) =>
                         prev
                             ? {
@@ -821,7 +832,7 @@ export default function App() {
                             authKey: authKeyDraft,
                             benchmark: parserState.parsed.benchmark,
                             circuitText: item.circuitText,
-                            checkerVersion: selectedChecker,
+                            checkerVersion: checkerSelection,
                             applyStatus: false,
                             timeoutSeconds: checkerTimeoutSeconds,
                         });
@@ -1086,7 +1097,8 @@ export default function App() {
         }, 500);
         const canApplyStatus =
             point.sender === currentCommand?.name || currentCommand?.role === ROLE_ADMIN;
-        const checkerVersion = ENABLED_CHECKERS.has(checkerVersionRaw) ? checkerVersionRaw : DEFAULT_CHECKER_VERSION;
+        const normalizedChecker = normalizeCheckerForActor(checkerVersionRaw);
+        const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker) ? normalizedChecker : DEFAULT_CHECKER_VERSION;
         try {
             const result = await verifyPointCircuit({
                 authKey: authKeyDraft,
@@ -1291,7 +1303,8 @@ export default function App() {
         if (selectedChecker === "select" || selectedParser === "select") {
             return "Please configure checker and parser in settings.";
         }
-        if (ENABLED_CHECKERS.has(selectedChecker) && parseCheckerTimeoutSeconds() === null) {
+        const checkerSelection = normalizeCheckerForActor(selectedChecker);
+        if (ENABLED_CHECKERS.has(checkerSelection) && parseCheckerTimeoutSeconds() === null) {
             return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
         }
         if (selectedParser === "ABC" && parseParserTimeoutSeconds() === null) {
@@ -1339,6 +1352,13 @@ export default function App() {
             return suggestedParser;
         });
     }, [metricsTimeoutQuotaSeconds]);
+
+    useEffect(() => {
+        if (canUseFastHex) return;
+        setSelectedChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
+        setSelectedTestChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
+        setSelectedBulkVerifyChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
+    }, [canUseFastHex]);
 
     useEffect(() => {
         return () => {
@@ -1735,67 +1755,35 @@ export default function App() {
         setter((prev) => (prev ? `${prev}\n${line}` : line));
     }
 
-    function mapServerStepLabel(statusRaw, { verifySeconds = null } = {}) {
-        const status = String(statusRaw || "").toLowerCase();
-        if (status === "queued") return "queued";
-        if (status === "auth") return "auth";
-        if (status === "download_point") return "download point";
-        if (status === "read_truth") return "read_truth";
-        if (status === "cec") return verifySeconds ? `cec -T ${verifySeconds} -n` : "cec";
-        if (status === "truth_to_hex") return "truth -> hex";
-        if (status === "bench_to_hex") return "bench -> hex";
-        if (status === "hex_compare") return "hex compare";
-        if (status === "metrics") return "read_bench; strash; ps";
-        if (status === "done") return "done";
-        if (status === "error") return "failed";
-        return status || "running";
-    }
-
     async function runBulkVerifyAllPoints(checkerVersionRaw = selectedBulkVerifyChecker) {
         if (bulkVerifyAbortRef.current) return;
-        const checkerVersion = ENABLED_CHECKERS.has(checkerVersionRaw) ? checkerVersionRaw : DEFAULT_CHECKER_VERSION;
+        const normalizedChecker = normalizeCheckerForActor(checkerVersionRaw);
+        const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker) ? normalizedChecker : DEFAULT_CHECKER_VERSION;
         const controller = new AbortController();
         bulkVerifyAbortRef.current = controller;
         setIsBulkVerifyRunning(true);
-        const targetPoints = points.filter((p) => p.benchmark !== "test");
+        const targetPoints = points.filter((p) => {
+            if (p.benchmark === "test") return false;
+            if (bulkVerifyIncludeVerified) return true;
+            return String(p.status || "").toLowerCase() !== "verified";
+        });
         setBulkVerifyProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
         setBulkVerifyLogText("");
+        setBulkVerifyCurrentFileName("");
         try {
             const rows = [];
             for (const point of targetPoints) {
                 if (controller.signal.aborted) break;
-                const progressToken = uid();
-                let pollTimer = null;
-                let lastStep = "";
-                const emitStep = (step) => {
-                    if (!step || step === lastStep) return;
-                    lastStep = step;
-                    appendTextLog(
-                        setBulkVerifyLogText,
-                        `file=${point.fileName}; success=false; reason=checker: ${mapServerStepLabel(step, { verifySeconds: verifyTimeoutQuotaSeconds })}`
-                    );
-                };
-                pollTimer = setInterval(async () => {
-                    try {
-                        const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
-                        emitStep(progress?.status);
-                    } catch {
-                        // Ignore polling errors while request is running.
-                    }
-                }, 450);
+                setBulkVerifyCurrentFileName(point.fileName || "");
                 let row = null;
-                try {
-                    row = await runAdminBulkVerifyPoint({
-                        authKey: authKeyDraft,
-                        checkerVersion,
-                        pointId: point.id,
-                        signal: controller.signal,
-                        progressToken,
-                    });
-                } finally {
-                    if (pollTimer) clearInterval(pollTimer);
-                }
+                row = await runAdminBulkVerifyPoint({
+                    authKey: authKeyDraft,
+                    checkerVersion,
+                    pointId: point.id,
+                    signal: controller.signal,
+                    progressToken: uid(),
+                });
                 if (row) rows.push(row);
                 appendTextLog(
                     setBulkVerifyLogText,
@@ -1837,6 +1825,7 @@ export default function App() {
             }
             setIsBulkVerifyRunning(false);
             setBulkVerifyProgress(null);
+            setBulkVerifyCurrentFileName("");
         }
     }
 
@@ -1849,40 +1838,19 @@ export default function App() {
         setBulkMetricsAuditProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
         setBulkMetricsAuditLogText("");
+        setBulkMetricsAuditCurrentFileName("");
         try {
             const mismatches = [];
             for (const point of targetPoints) {
                 if (controller.signal.aborted) break;
-                const progressToken = uid();
-                let pollTimer = null;
-                let lastStep = "";
-                const emitStep = (step) => {
-                    if (!step || step === lastStep) return;
-                    lastStep = step;
-                    appendTextLog(
-                        setBulkMetricsAuditLogText,
-                        `file=${point.fileName}; success=false; reason=parser: ${mapServerStepLabel(step)}`
-                    );
-                };
-                pollTimer = setInterval(async () => {
-                    try {
-                        const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
-                        emitStep(progress?.status);
-                    } catch {
-                        // Ignore polling errors while request is running.
-                    }
-                }, 450);
+                setBulkMetricsAuditCurrentFileName(point.fileName || "");
                 let mismatch = null;
-                try {
-                    mismatch = await runAdminMetricsAuditPoint({
-                        authKey: authKeyDraft,
-                        pointId: point.id,
-                        signal: controller.signal,
-                        progressToken,
-                    });
-                } finally {
-                    if (pollTimer) clearInterval(pollTimer);
-                }
+                mismatch = await runAdminMetricsAuditPoint({
+                    authKey: authKeyDraft,
+                    pointId: point.id,
+                    signal: controller.signal,
+                    progressToken: uid(),
+                });
                 if (mismatch) mismatches.push(mismatch);
                 appendTextLog(
                     setBulkMetricsAuditLogText,
@@ -1911,6 +1879,7 @@ export default function App() {
             }
             setIsBulkMetricsAuditRunning(false);
             setBulkMetricsAuditProgress(null);
+            setBulkMetricsAuditCurrentFileName("");
         }
     }
 
@@ -1954,8 +1923,9 @@ export default function App() {
         setIsBulkVerifyRunning(true);
         setAdminPanelError("");
         try {
-            const checkerVersion = ENABLED_CHECKERS.has(selectedBulkVerifyChecker)
-                ? selectedBulkVerifyChecker
+            const normalizedChecker = normalizeCheckerForActor(selectedBulkVerifyChecker);
+            const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker)
+                ? normalizedChecker
                 : DEFAULT_CHECKER_VERSION;
             await applyAdminPointStatuses({
                 authKey: authKeyDraft,
@@ -2271,6 +2241,7 @@ export default function App() {
                         onDownloadUploadLog={downloadUploadLog}
                         selectedChecker={selectedChecker}
                         onSelectedCheckerChange={setSelectedChecker}
+                        canUseFastHex={canUseFastHex}
                         selectedParser={selectedParser}
                         onSelectedParserChange={setSelectedParser}
                         checkerTleSecondsDraft={checkerTleSecondsDraft}
@@ -2337,14 +2308,18 @@ export default function App() {
                             runBulkVerifyAllPoints={runBulkVerifyAllPoints}
                             selectedBulkVerifyChecker={selectedBulkVerifyChecker}
                             onSelectedBulkVerifyCheckerChange={setSelectedBulkVerifyChecker}
+                            bulkVerifyIncludeVerified={bulkVerifyIncludeVerified}
+                            onBulkVerifyIncludeVerifiedChange={setBulkVerifyIncludeVerified}
                             stopBulkVerifyAllPoints={stopBulkVerifyAllPoints}
                             isBulkVerifyRunning={isBulkVerifyRunning}
+                            bulkVerifyCurrentFileName={bulkVerifyCurrentFileName}
                             bulkVerifyProgress={bulkVerifyProgress}
                             bulkVerifyLogText={bulkVerifyLogText}
                             onDownloadBulkVerifyLog={downloadBulkVerifyLog}
                             runBulkMetricsAudit={runBulkMetricsAudit}
                             stopBulkMetricsAudit={stopBulkMetricsAudit}
                             isBulkMetricsAuditRunning={isBulkMetricsAuditRunning}
+                            bulkMetricsAuditCurrentFileName={bulkMetricsAuditCurrentFileName}
                             bulkMetricsAuditProgress={bulkMetricsAuditProgress}
                             bulkMetricsAuditLogText={bulkMetricsAuditLogText}
                             onDownloadBulkMetricsAuditLog={downloadBulkMetricsAuditLog}
@@ -2372,6 +2347,7 @@ export default function App() {
                         onTestPoint={onTestPoint}
                         selectedTestChecker={selectedTestChecker}
                         onSelectedTestCheckerChange={setSelectedTestChecker}
+                        canUseFastHex={canUseFastHex}
                         testingPointId={testingPointId}
                         testingPointLabel={testingPointLabel}
                         canDeletePoint={canDeletePoint}
@@ -2389,6 +2365,7 @@ export default function App() {
                 onTestPoint={onTestPoint}
                 selectedTestChecker={selectedTestChecker}
                 onSelectedTestCheckerChange={setSelectedTestChecker}
+                canUseFastHex={canUseFastHex}
                 testingPointId={testingPointId}
                 testingPointLabel={testingPointLabel}
                 canDeletePoint={canDeletePoint}

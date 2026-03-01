@@ -59,6 +59,11 @@ export default async function handler(req, res) {
         return;
     }
     const actor = authRes.rows[0];
+    const isActorAdmin = String(actor.role || "").toLowerCase() === ROLE_ADMIN;
+    if (checkerVersion === CHECKER_ABC_FAST_HEX && !isActorAdmin) {
+        res.status(403).json({ error: "ABC fast hex checker is available for admin only." });
+        return;
+    }
     const verifyTimeoutLimitSeconds = Math.max(1, Number(actor.abc_verify_timeout_seconds || 60));
     let verifyTimeoutSeconds = verifyTimeoutLimitSeconds;
     if (requestedTimeoutSecondsRaw !== undefined && requestedTimeoutSecondsRaw !== null && requestedTimeoutSecondsRaw !== "") {
@@ -131,7 +136,7 @@ export default async function handler(req, res) {
     const nextStatus = result.equivalent ? "verified" : "failed";
     if (applyStatus && pointId) {
         const point = pointRow || { sender: null };
-        const isAdmin = String(actor.role || "").toLowerCase() === ROLE_ADMIN;
+        const isAdmin = isActorAdmin;
         const isOwner = String(point.sender || "") === String(actor.name || "");
         if (!isAdmin && !isOwner) {
             res.status(403).json({ error: "Cannot update status for another command point." });

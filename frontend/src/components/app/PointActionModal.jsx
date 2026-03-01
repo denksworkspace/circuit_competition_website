@@ -8,6 +8,7 @@ export function PointActionModal({
     onTestPoint,
     selectedTestChecker,
     onSelectedTestCheckerChange,
+    canUseFastHex,
     testingPointId,
     testingPointLabel,
     canDeletePoint,
@@ -23,7 +24,7 @@ export function PointActionModal({
                 <div className="pointModalActions">
                     <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
                         <option value="ABC">ABC</option>
-                        <option value="ABC_FAST_HEX">ABC fast hex</option>
+                        {canUseFastHex ? <option value="ABC_FAST_HEX">ABC fast hex</option> : null}
                     </select>
                     <button
                         className="btn ghost small"

@@ -92,8 +92,28 @@ describe("api/points-verify", () => {
         );
     });
 
-    it("accepts fast hex checker", async () => {
+    it("rejects fast hex checker for non-admin", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant", name: "u1", abc_verify_timeout_seconds: 9 }] });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                benchmark: "254",
+                circuitText: "x",
+                checkerVersion: "ABC_FAST_HEX",
+                timeoutSeconds: 5,
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(403);
+        expect(verifyCircuitWithTruth).not.toHaveBeenCalled();
+    });
+
+    it("accepts fast hex checker for admin", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin", name: "admin1", abc_verify_timeout_seconds: 9 }] });
         verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: false });
 
         const req = createMockReq({

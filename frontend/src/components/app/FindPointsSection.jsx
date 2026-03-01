@@ -17,6 +17,7 @@ export function FindPointsSection({
     onTestPoint,
     selectedTestChecker,
     onSelectedTestCheckerChange,
+    canUseFastHex,
     testingPointId,
     testingPointLabel,
     canDeletePoint,
@@ -46,7 +47,7 @@ export function FindPointsSection({
                     <span>test checker</span>
                     <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
                         <option value="ABC">ABC</option>
-                        <option value="ABC_FAST_HEX">ABC fast hex</option>
+                        {canUseFastHex ? <option value="ABC_FAST_HEX">ABC fast hex</option> : null}
                     </select>
                 </label>
             </div>
