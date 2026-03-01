@@ -53,6 +53,10 @@ import {
 } from "./services/apiClient.js";
 
 const MAX_TRUTH_BATCH_FILES = 100;
+const CHECKER_ABC = "ABC";
+const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
+const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
+const ENABLED_CHECKERS = new Set([CHECKER_ABC, CHECKER_ABC_FAST_HEX]);
 
 export default function App() {
     function bytesToGb(bytes) {
@@ -146,6 +150,7 @@ export default function App() {
     const [isManualApplying, setIsManualApplying] = useState(false);
     const [navigateNotice, setNavigateNotice] = useState("");
     const [actionPoint, setActionPoint] = useState(null);
+    const [selectedTestChecker, setSelectedTestChecker] = useState(DEFAULT_CHECKER_VERSION);
     const [testingPointId, setTestingPointId] = useState(null);
     const [testingPointLabel, setTestingPointLabel] = useState("");
     const testingPointTickerRef = useRef(null);
@@ -159,6 +164,9 @@ export default function App() {
         if (status === "download_point") return "Testing: download point";
         if (status === "read_truth") return "Testing: read_truth";
         if (status === "cec") return `Testing: cec -T ${tleSeconds} -n`;
+        if (status === "truth_to_hex") return "Testing: truth -> hex";
+        if (status === "bench_to_hex") return "Testing: bench -> hex";
+        if (status === "hex_compare") return "Testing: hex compare";
         if (status === "done") return "Testing: done";
         if (status === "error") return "Testing: failed";
         return "Testing...";
@@ -196,6 +204,7 @@ export default function App() {
     const [truthConflicts, setTruthConflicts] = useState(() => []);
     const [isTruthConflictModalOpen, setIsTruthConflictModalOpen] = useState(false);
     const [isBulkVerifyRunning, setIsBulkVerifyRunning] = useState(false);
+    const [selectedBulkVerifyChecker, setSelectedBulkVerifyChecker] = useState(DEFAULT_CHECKER_VERSION);
     const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
     const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
     const [bulkMetricsAuditLogText, setBulkMetricsAuditLogText] = useState("");
@@ -691,7 +700,7 @@ export default function App() {
         }
         const checkerTimeoutSeconds = parseCheckerTimeoutSeconds();
         const parserTimeoutSeconds = parseParserTimeoutSeconds();
-        if (selectedChecker === "ABC" && checkerTimeoutSeconds === null) {
+        if (ENABLED_CHECKERS.has(selectedChecker) && checkerTimeoutSeconds === null) {
             setUploadError(`Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`);
             return;
         }
@@ -719,7 +728,7 @@ export default function App() {
 
         try {
             const parserEnabled = selectedParser === "ABC";
-            const checkerEnabled = selectedChecker === "ABC";
+            const checkerEnabled = ENABLED_CHECKERS.has(selectedChecker);
             const fileStepOrder = [];
             if (parserEnabled) fileStepOrder.push("parser");
             if (checkerEnabled) fileStepOrder.push("checker");
@@ -794,7 +803,7 @@ export default function App() {
                 let checkerVerdict = null;
                 let checkerVersion = null;
                 if (checkerEnabled) {
-                    checkerVersion = "ABC";
+                    checkerVersion = selectedChecker;
                     setUploadProgress((prev) =>
                         prev
                             ? {
@@ -812,7 +821,7 @@ export default function App() {
                             authKey: authKeyDraft,
                             benchmark: parserState.parsed.benchmark,
                             circuitText: item.circuitText,
-                            checkerVersion: "ABC",
+                            checkerVersion: selectedChecker,
                             applyStatus: false,
                             timeoutSeconds: checkerTimeoutSeconds,
                         });
@@ -828,7 +837,7 @@ export default function App() {
                 if (parserState.kind === "failed" || checkerVerdict === false) {
                     finalStatus = "failed";
                 } else if (
-                    selectedChecker === "ABC" &&
+                    checkerEnabled &&
                     checkerVerdict === true &&
                     (!parserEnabled || parserState.kind === "pass" || parserState.kind === "pass-adjusted")
                 ) {
@@ -1040,7 +1049,7 @@ export default function App() {
         return await deletePointById(pointId);
     }
 
-    async function onTestPoint(point) {
+    async function onTestPoint(point, checkerVersionRaw = selectedTestChecker) {
         if (!canTestPoint(point)) return;
         if (testingPointId && testingPointId === point.id && testingAbortRef.current) {
             testingAbortRef.current.abort();
@@ -1077,12 +1086,13 @@ export default function App() {
         }, 500);
         const canApplyStatus =
             point.sender === currentCommand?.name || currentCommand?.role === ROLE_ADMIN;
+        const checkerVersion = ENABLED_CHECKERS.has(checkerVersionRaw) ? checkerVersionRaw : DEFAULT_CHECKER_VERSION;
         try {
             const result = await verifyPointCircuit({
                 authKey: authKeyDraft,
                 pointId: point.id,
                 applyStatus: canApplyStatus,
-                checkerVersion: "ABC",
+                checkerVersion,
                 signal: controller.signal,
                 progressToken,
             });
@@ -1102,19 +1112,19 @@ export default function App() {
                 );
                 window.alert(
                     result.equivalent
-                        ? `CEC: equivalent. Status updated to verified.${commandInfo}`
-                        : `CEC: not equivalent. Status updated to failed.${commandInfo}`
+                        ? `Checker: equivalent. Status updated to verified.${commandInfo}`
+                        : `Checker: not equivalent. Status updated to failed.${commandInfo}`
                 );
             } else {
                 window.alert(
                     result.equivalent
-                        ? `CEC: equivalent. Status was not changed.${commandInfo}`
-                        : `CEC: not equivalent. Status was not changed.${commandInfo}`
+                        ? `Checker: equivalent. Status was not changed.${commandInfo}`
+                        : `Checker: not equivalent. Status was not changed.${commandInfo}`
                 );
             }
         } catch (error) {
             if (error?.name === "AbortError") return;
-            window.alert(error?.message || "Failed to run CEC.");
+            window.alert(error?.message || "Failed to run checker.");
         } finally {
             if (testingAbortRef.current === controller) {
                 testingAbortRef.current = null;
@@ -1281,7 +1291,7 @@ export default function App() {
         if (selectedChecker === "select" || selectedParser === "select") {
             return "Please configure checker and parser in settings.";
         }
-        if (selectedChecker === "ABC" && parseCheckerTimeoutSeconds() === null) {
+        if (ENABLED_CHECKERS.has(selectedChecker) && parseCheckerTimeoutSeconds() === null) {
             return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
         }
         if (selectedParser === "ABC" && parseParserTimeoutSeconds() === null) {
@@ -1732,14 +1742,18 @@ export default function App() {
         if (status === "download_point") return "download point";
         if (status === "read_truth") return "read_truth";
         if (status === "cec") return verifySeconds ? `cec -T ${verifySeconds} -n` : "cec";
+        if (status === "truth_to_hex") return "truth -> hex";
+        if (status === "bench_to_hex") return "bench -> hex";
+        if (status === "hex_compare") return "hex compare";
         if (status === "metrics") return "read_bench; strash; ps";
         if (status === "done") return "done";
         if (status === "error") return "failed";
         return status || "running";
     }
 
-    async function runBulkVerifyAllPoints() {
+    async function runBulkVerifyAllPoints(checkerVersionRaw = selectedBulkVerifyChecker) {
         if (bulkVerifyAbortRef.current) return;
+        const checkerVersion = ENABLED_CHECKERS.has(checkerVersionRaw) ? checkerVersionRaw : DEFAULT_CHECKER_VERSION;
         const controller = new AbortController();
         bulkVerifyAbortRef.current = controller;
         setIsBulkVerifyRunning(true);
@@ -1774,7 +1788,7 @@ export default function App() {
                 try {
                     row = await runAdminBulkVerifyPoint({
                         authKey: authKeyDraft,
-                        checkerVersion: "ABC",
+                        checkerVersion,
                         pointId: point.id,
                         signal: controller.signal,
                         progressToken,
@@ -1940,10 +1954,13 @@ export default function App() {
         setIsBulkVerifyRunning(true);
         setAdminPanelError("");
         try {
+            const checkerVersion = ENABLED_CHECKERS.has(selectedBulkVerifyChecker)
+                ? selectedBulkVerifyChecker
+                : DEFAULT_CHECKER_VERSION;
             await applyAdminPointStatuses({
                 authKey: authKeyDraft,
                 updates,
-                checkerVersion: "ABC",
+                checkerVersion,
             });
             const freshPoints = await fetchPoints();
             setPoints(freshPoints);
@@ -1989,7 +2006,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `bulk-cec-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        a.download = `bulk-check-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -2318,6 +2335,8 @@ export default function App() {
                             applyTruthConflicts={applyTruthConflicts}
                             closeTruthConflictModal={closeTruthConflictModal}
                             runBulkVerifyAllPoints={runBulkVerifyAllPoints}
+                            selectedBulkVerifyChecker={selectedBulkVerifyChecker}
+                            onSelectedBulkVerifyCheckerChange={setSelectedBulkVerifyChecker}
                             stopBulkVerifyAllPoints={stopBulkVerifyAllPoints}
                             isBulkVerifyRunning={isBulkVerifyRunning}
                             bulkVerifyProgress={bulkVerifyProgress}
@@ -2351,6 +2370,8 @@ export default function App() {
                         getPointDownloadUrl={getPointDownloadUrl}
                         canTestPoint={canTestPoint}
                         onTestPoint={onTestPoint}
+                        selectedTestChecker={selectedTestChecker}
+                        onSelectedTestCheckerChange={setSelectedTestChecker}
                         testingPointId={testingPointId}
                         testingPointLabel={testingPointLabel}
                         canDeletePoint={canDeletePoint}
@@ -2366,6 +2387,8 @@ export default function App() {
                 getPointDownloadUrl={getPointDownloadUrl}
                 canTestPoint={canTestPoint}
                 onTestPoint={onTestPoint}
+                selectedTestChecker={selectedTestChecker}
+                onSelectedTestCheckerChange={setSelectedTestChecker}
                 testingPointId={testingPointId}
                 testingPointLabel={testingPointLabel}
                 canDeletePoint={canDeletePoint}

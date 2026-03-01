@@ -6,6 +6,8 @@ export function PointActionModal({
     getPointDownloadUrl,
     canTestPoint,
     onTestPoint,
+    selectedTestChecker,
+    onSelectedTestCheckerChange,
     testingPointId,
     testingPointLabel,
     canDeletePoint,
@@ -19,6 +21,10 @@ export function PointActionModal({
                 <div className="pointModalTitle">Point actions</div>
                 <div className="pointModalFile mono">{actionPoint.fileName}</div>
                 <div className="pointModalActions">
+                    <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
+                        <option value="ABC">ABC</option>
+                        <option value="ABC_FAST_HEX">ABC fast hex</option>
+                    </select>
                     <button
                         className="btn ghost small"
                         onClick={() => onDownloadCircuit(actionPoint)}
@@ -29,7 +35,7 @@ export function PointActionModal({
                     {canTestPoint(actionPoint) ? (
                         <button
                             className="btn ghost small"
-                            onClick={() => onTestPoint(actionPoint)}
+                            onClick={() => onTestPoint(actionPoint, selectedTestChecker)}
                             title={testingPointId === actionPoint.id ? (testingPointLabel || "Testing...") : "Test"}
                             style={testingPointId === actionPoint.id ? { color: "#6b7280" } : undefined}
                         >

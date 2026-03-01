@@ -47,8 +47,29 @@ describe("api/admin-points-verify", () => {
         expect(res.body.log[0].recommendedStatus).toBe("failed");
         expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
             expect.objectContaining({
+                checkerVersion: "ABC",
                 timeoutMs: 60000,
                 timeoutSeconds: 60,
+            })
+        );
+    });
+
+    it("accepts fast hex checker for bulk verification", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ id: "p1", benchmark: "254", file_name: "bench254_1_2_u1_x.bench" }],
+        });
+        downloadPointCircuitText.mockResolvedValueOnce({ ok: true, circuitText: "candidate" });
+        verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: true });
+
+        const req = createMockReq({ method: "POST", body: { authKey: "k", checkerVersion: "ABC_FAST_HEX" } });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
+            expect.objectContaining({
+                checkerVersion: "ABC_FAST_HEX",
             })
         );
     });

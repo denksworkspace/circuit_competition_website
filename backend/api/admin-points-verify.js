@@ -5,6 +5,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import {
     CHECKER_ABC,
+    CHECKER_ABC_FAST_HEX,
     downloadPointCircuitText,
     normalizeCheckerVersion,
     verifyCircuitWithTruth,
@@ -26,7 +27,7 @@ export default async function handler(req, res) {
         res.status(401).json({ error: "Missing auth key." });
         return;
     }
-    if (checkerVersion !== CHECKER_ABC) {
+    if (checkerVersion !== CHECKER_ABC && checkerVersion !== CHECKER_ABC_FAST_HEX) {
         res.status(400).json({ error: "Unsupported checker for bulk verification." });
         return;
     }
@@ -90,6 +91,7 @@ export default async function handler(req, res) {
             const verified = await verifyCircuitWithTruth({
                 benchmark,
                 circuitText: downloaded.circuitText,
+                checkerVersion,
                 timeoutMs: verifyTimeoutMs,
                 timeoutSeconds: verifyTimeoutSeconds,
                 signal: req?.abortSignal || null,

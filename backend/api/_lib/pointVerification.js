@@ -1,14 +1,16 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { buildDownloadUrl } from "./points.js";
 import { getTruthTableByBenchmark } from "./truthTables.js";
-import { getAigStatsFromBenchText, runCecBenchTexts } from "./abc.js";
+import { getAigStatsFromBenchText, runCecBenchTexts, runFastHexBenchTexts } from "./abc.js";
 
 export const CHECKER_NONE = "none";
 export const CHECKER_ABC = "ABC";
+export const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
 
 export function normalizeCheckerVersion(rawChecker) {
     const checker = String(rawChecker || "").trim().toUpperCase();
     if (checker === CHECKER_ABC) return CHECKER_ABC;
+    if (checker === CHECKER_ABC_FAST_HEX) return CHECKER_ABC_FAST_HEX;
     return CHECKER_NONE;
 }
 
@@ -36,6 +38,7 @@ export async function downloadPointCircuitText(fileName, { signal = null } = {})
 export async function verifyCircuitWithTruth({
     benchmark,
     circuitText,
+    checkerVersion = CHECKER_ABC,
     timeoutMs,
     timeoutSeconds = null,
     onProgress = null,
@@ -59,26 +62,34 @@ export async function verifyCircuitWithTruth({
         };
     }
     const truthText = await truthRes.text();
-    const cec = await runCecBenchTexts({
-        referenceBenchText: truthText,
-        candidateBenchText: circuitText,
-        timeoutMs,
-        cecTimeoutSeconds: timeoutSeconds,
-        onProgress,
-        signal,
-    });
-    if (!cec.ok) {
+    const run = checkerVersion === CHECKER_ABC_FAST_HEX
+        ? await runFastHexBenchTexts({
+            referenceTruthText: truthText,
+            candidateBenchText: circuitText,
+            timeoutMs,
+            onProgress,
+            signal,
+        })
+        : await runCecBenchTexts({
+            referenceBenchText: truthText,
+            candidateBenchText: circuitText,
+            timeoutMs,
+            cecTimeoutSeconds: timeoutSeconds,
+            onProgress,
+            signal,
+        });
+    if (!run.ok) {
         return {
             ok: false,
-            code: cec.code || "CEC_FAILED",
-            reason: cec.message || "CEC failed.",
+            code: run.code || (checkerVersion === CHECKER_ABC_FAST_HEX ? "FAST_HEX_FAILED" : "CEC_FAILED"),
+            reason: run.message || (checkerVersion === CHECKER_ABC_FAST_HEX ? "Fast HEX check failed." : "CEC failed."),
         };
     }
     return {
         ok: true,
-        equivalent: cec.equivalent,
-        output: cec.output,
-        script: cec.script || "",
+        equivalent: run.equivalent,
+        output: run.output,
+        script: run.script || "",
     };
 }
 

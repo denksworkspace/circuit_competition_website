@@ -15,6 +15,8 @@ export function FindPointsSection({
     getPointDownloadUrl,
     canTestPoint,
     onTestPoint,
+    selectedTestChecker,
+    onSelectedTestCheckerChange,
     testingPointId,
     testingPointLabel,
     canDeletePoint,
@@ -39,6 +41,13 @@ export function FindPointsSection({
                         onChange={(e) => onDeletePrefixChange(e.target.value)}
                         placeholder="e.g. bench256_123"
                     />
+                </label>
+                <label className="field">
+                    <span>test checker</span>
+                    <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
+                        <option value="ABC">ABC</option>
+                        <option value="ABC_FAST_HEX">ABC fast hex</option>
+                    </select>
                 </label>
             </div>
 
@@ -79,7 +88,7 @@ export function FindPointsSection({
                         {canTestPoint(p) ? (
                             <button
                                 className="btn ghost small"
-                                onClick={() => onTestPoint(p)}
+                                onClick={() => onTestPoint(p, selectedTestChecker)}
                                 title={testingPointId === p.id ? (testingPointLabel || "Testing...") : "Test"}
                                 style={testingPointId === p.id ? { color: "#6b7280" } : undefined}
                             >

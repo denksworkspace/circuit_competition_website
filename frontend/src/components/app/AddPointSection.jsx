@@ -129,6 +129,7 @@ export function AddPointSection({
                                 <option value="select">Select</option>
                                 <option value="none">Do not verify (non-verified)</option>
                                 <option value="ABC">ABC</option>
+                                <option value="ABC_FAST_HEX">ABC fast hex</option>
                             </select>
                         </label>
 

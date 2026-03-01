@@ -85,8 +85,36 @@ describe("api/points-verify", () => {
         expect(res.statusCode).toBe(200);
         expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
             expect.objectContaining({
+                checkerVersion: "ABC",
                 timeoutMs: 9000,
                 timeoutSeconds: 9,
+            })
+        );
+    });
+
+    it("accepts fast hex checker", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant", name: "u1", abc_verify_timeout_seconds: 9 }] });
+        verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: false });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                benchmark: "254",
+                circuitText: "x",
+                checkerVersion: "ABC_FAST_HEX",
+                timeoutSeconds: 5,
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(verifyCircuitWithTruth).toHaveBeenCalledWith(
+            expect.objectContaining({
+                checkerVersion: "ABC_FAST_HEX",
+                timeoutMs: 5000,
+                timeoutSeconds: 5,
             })
         );
     });

@@ -5,6 +5,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import {
     CHECKER_ABC,
+    CHECKER_ABC_FAST_HEX,
     CHECKER_NONE,
     downloadPointCircuitText,
     normalizeCheckerVersion,
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "Checker is not selected." });
         return;
     }
-    if (checkerVersion !== CHECKER_ABC) {
+    if (checkerVersion !== CHECKER_ABC && checkerVersion !== CHECKER_ABC_FAST_HEX) {
         res.status(400).json({ error: "Unsupported checker." });
         return;
     }
@@ -111,6 +112,7 @@ export default async function handler(req, res) {
     const result = await verifyCircuitWithTruth({
         benchmark,
         circuitText,
+        checkerVersion,
         timeoutMs: verifyTimeoutMs,
         timeoutSeconds: verifyTimeoutSeconds,
         onProgress: (status) => report(status),

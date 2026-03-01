@@ -40,6 +40,15 @@ function looksLikeTruthTableText(source) {
     return true;
 }
 
+function normalizeHexTruthText(source) {
+    return String(source || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase();
+}
+
 export function parseAigStatsFromOutput(output) {
     const merged = String(output || "");
 
@@ -216,6 +225,77 @@ export async function runCecBenchTexts({
                 equivalent: parsed.equivalent,
                 output: run.output,
                 script,
+            };
+        }
+    );
+}
+
+export async function runFastHexBenchTexts({
+    referenceTruthText,
+    candidateBenchText,
+    timeoutMs = DEFAULT_ABC_TIMEOUT_MS,
+    onProgress = null,
+    signal = null,
+}) {
+    return await withTempBenchFiles(
+        {
+            "reference.truth": String(referenceTruthText || ""),
+            "candidate.bench": String(candidateBenchText || ""),
+        },
+        async (files) => {
+            if (!looksLikeTruthTableText(referenceTruthText)) {
+                return {
+                    ok: false,
+                    code: "TRUTH_FORMAT_UNSUPPORTED",
+                    message: "Truth input must be a binary truth-table text.",
+                    output: "",
+                };
+            }
+
+            const report = (status) => {
+                if (typeof onProgress === "function") onProgress(status);
+            };
+
+            const referenceHexPath = `${files["reference.truth"]}.hex`;
+            const candidateHexPath = `${files["candidate.bench"]}.hex`;
+
+            report("truth_to_hex");
+            const truthScript = `read_truth -x -f ${quoteAbcPath(files["reference.truth"])}; strash; &get; &write_truth ${quoteAbcPath(referenceHexPath)}`;
+            const truthRun = await runAbcScript(truthScript, { timeoutMs, signal });
+            if (!truthRun.ok) return truthRun;
+
+            report("bench_to_hex");
+            const benchScript = `read_bench ${quoteAbcPath(files["candidate.bench"])}; strash; &get; &write_truth ${quoteAbcPath(candidateHexPath)}`;
+            const benchRun = await runAbcScript(benchScript, { timeoutMs, signal });
+            if (!benchRun.ok) return benchRun;
+
+            const [referenceHexRaw, candidateHexRaw] = await Promise.all([
+                fs.readFile(referenceHexPath, "utf8"),
+                fs.readFile(candidateHexPath, "utf8"),
+            ]);
+            const referenceHex = normalizeHexTruthText(referenceHexRaw);
+            const candidateHex = normalizeHexTruthText(candidateHexRaw);
+            if (!referenceHex || !candidateHex) {
+                return {
+                    ok: false,
+                    code: "ABC_PARSE_ERROR",
+                    message: "Failed to derive hex truth tables from ABC output.",
+                    output: `${truthRun.output}\n${benchRun.output}`.trim(),
+                    script: `${truthScript}; ${benchScript}`,
+                };
+            }
+
+            report("hex_compare");
+            const equivalent = referenceHex === candidateHex;
+            report("done");
+
+            return {
+                ok: true,
+                equivalent,
+                referenceHex,
+                candidateHex,
+                output: `${truthRun.output}\n${benchRun.output}`.trim(),
+                script: `${truthScript}; ${benchScript}; [hex-compare]`,
             };
         }
     );

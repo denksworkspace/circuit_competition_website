@@ -37,4 +37,23 @@ describe("api/admin-points-apply", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.applied).toBe(1);
     });
+
+    it("accepts fast hex checker for applied statuses", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin" }] });
+        sql.mockResolvedValueOnce({ rows: [] });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                checkerVersion: "ABC_FAST_HEX",
+                updates: [{ pointId: "p2", status: "failed" }],
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.applied).toBe(1);
+    });
 });

@@ -2,7 +2,7 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
-import { CHECKER_ABC, normalizeCheckerVersion } from "./_lib/pointVerification.js";
+import { CHECKER_ABC, CHECKER_ABC_FAST_HEX, normalizeCheckerVersion } from "./_lib/pointVerification.js";
 
 const ALLOWED_STATUS = new Set(["verified", "failed", "non-verified"]);
 
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
         res.status(401).json({ error: "Missing auth key." });
         return;
     }
-    if (checkerVersion !== CHECKER_ABC) {
+    if (checkerVersion !== CHECKER_ABC && checkerVersion !== CHECKER_ABC_FAST_HEX) {
         res.status(400).json({ error: "Unsupported checker." });
         return;
     }

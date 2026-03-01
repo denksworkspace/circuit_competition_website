@@ -49,6 +49,8 @@ export function AdminSettingsSection({
     applyTruthConflicts,
     closeTruthConflictModal,
     runBulkVerifyAllPoints,
+    selectedBulkVerifyChecker,
+    onSelectedBulkVerifyCheckerChange,
     stopBulkVerifyAllPoints,
     isBulkVerifyRunning,
     bulkVerifyProgress,
@@ -205,17 +207,27 @@ export function AdminSettingsSection({
                                 ) : null}
 
                                 <div className="cardHint">Admin: bulk checks</div>
+                                <label className="field">
+                                    <span>bulk checker</span>
+                                    <select
+                                        value={selectedBulkVerifyChecker}
+                                        onChange={(e) => onSelectedBulkVerifyCheckerChange(e.target.value)}
+                                    >
+                                        <option value="ABC">ABC</option>
+                                        <option value="ABC_FAST_HEX">ABC fast hex</option>
+                                    </select>
+                                </label>
                                 <button
                                     className="btn ghost"
                                     type="button"
-                                    onClick={runBulkVerifyAllPoints}
+                                    onClick={() => runBulkVerifyAllPoints(selectedBulkVerifyChecker)}
                                     disabled={isBulkVerifyRunning}
                                 >
-                                    {isBulkVerifyRunning ? "Checking all points..." : "Check all points (CEC)"}
+                                    {isBulkVerifyRunning ? "Checking all points..." : "Check all points"}
                                 </button>
                                 {isBulkVerifyRunning ? (
                                     <button className="btn danger" type="button" onClick={stopBulkVerifyAllPoints}>
-                                        Stop CEC
+                                        Stop check
                                     </button>
                                 ) : null}
                                 {isBulkVerifyRunning && bulkVerifyProgress ? (
@@ -227,7 +239,7 @@ export function AdminSettingsSection({
                                     <>
                                         <div className="cardHint mono mutedMono">{bulkVerifyLogText}</div>
                                         <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
-                                            Download CEC log
+                                            Download bulk-check log
                                         </button>
                                     </>
                                 ) : null}
