@@ -163,6 +163,12 @@ input[type="checkbox"] {
     font-size: 12px;
 }
 
+.buttonRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
 .disabledHintWrap {
     display: inline-block;
     cursor: not-allowed;

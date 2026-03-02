@@ -3,7 +3,14 @@ export function AdminSettingsSection({
     adminUserIdDraft,
     onAdminUserIdDraftChange,
     loadAdminUser,
+    downloadAllSchemesZip,
+    downloadDatabaseExport,
     isAdminLoading,
+    isAdminSchemesExporting,
+    isAdminDbExporting,
+    adminSchemesExportProgress,
+    adminDbExportProgress,
+    adminExportError,
     adminPanelError,
     adminUser,
     formatGb,
@@ -110,6 +117,42 @@ export function AdminSettingsSection({
                         <button className="btn ghost" type="button" onClick={loadAdminUser} disabled={isAdminLoading}>
                             {isAdminLoading ? "Loading..." : "Load user"}
                         </button>
+
+                        <div className="buttonRow">
+                            <button
+                                className="btn ghost"
+                                type="button"
+                                onClick={downloadAllSchemesZip}
+                                disabled={isAdminDbExporting}
+                            >
+                                {isAdminSchemesExporting
+                                    ? `Stop schemes export (${Number(adminSchemesExportProgress?.done || 0)}/${Number(adminSchemesExportProgress?.total || 0)})`
+                                    : "Export schemes (.zip)"}
+                            </button>
+                            <button
+                                className="btn ghost"
+                                type="button"
+                                onClick={downloadDatabaseExport}
+                                disabled={isAdminSchemesExporting}
+                            >
+                                {isAdminDbExporting
+                                    ? `Stop database export (${Number(adminDbExportProgress?.done || 0)}/${Number(adminDbExportProgress?.total || 0)})`
+                                    : "Export database"}
+                            </button>
+                        </div>
+                        {isAdminSchemesExporting ? (
+                            <div className="cardHint">
+                                Schemes: {Number(adminSchemesExportProgress?.done || 0)} / {Number(adminSchemesExportProgress?.total || 0)} files
+                                {" "}({String(adminSchemesExportProgress?.status || "queued")})
+                            </div>
+                        ) : null}
+                        {isAdminDbExporting ? (
+                            <div className="cardHint">
+                                Database: {Number(adminDbExportProgress?.done || 0)} / {Number(adminDbExportProgress?.total || 0)} tables
+                                {" "}({String(adminDbExportProgress?.status || "queued")})
+                            </div>
+                        ) : null}
+                        {adminExportError ? <div className="error">{adminExportError}</div> : null}
 
                         {adminPanelError ? <div className="error">{adminPanelError}</div> : null}
 

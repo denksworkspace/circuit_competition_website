@@ -34,11 +34,14 @@ import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/t
 import {
     applyAdminPointStatuses,
     deletePoint,
+    exportAdminDatabase,
+    exportAdminSchemesZip,
     fetchAdminActionLogs,
     fetchAdminUserById,
     fetchCommandByAuthKey,
     fetchCommands,
     fetchPoints,
+    fetchAdminExportProgress,
     planTruthTablesUpload,
     runAdminBulkVerifyPoint,
     runAdminMetricsAuditPoint,
@@ -194,6 +197,11 @@ export default function App() {
     const [adminMetricsTleSecondsDraft, setAdminMetricsTleSecondsDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
+    const [isAdminSchemesExporting, setIsAdminSchemesExporting] = useState(false);
+    const [isAdminDbExporting, setIsAdminDbExporting] = useState(false);
+    const [adminSchemesExportProgress, setAdminSchemesExportProgress] = useState(null);
+    const [adminDbExportProgress, setAdminDbExportProgress] = useState(null);
+    const [adminExportError, setAdminExportError] = useState("");
     const [isAdminQuotaSettingsOpen, setIsAdminQuotaSettingsOpen] = useState(false);
     const [truthFiles, setTruthFiles] = useState(() => []);
     const truthFilesInputRef = useRef(null);
@@ -217,8 +225,21 @@ export default function App() {
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
     const bulkVerifyAbortRef = useRef(null);
     const bulkMetricsAbortRef = useRef(null);
+    const adminSchemesExportAbortRef = useRef(null);
+    const adminDbExportAbortRef = useRef(null);
+    const adminSchemesExportPollRef = useRef(null);
+    const adminDbExportPollRef = useRef(null);
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
     const canUseFastHex = isAdmin;
+
+    useEffect(() => {
+        return () => {
+            if (adminSchemesExportPollRef.current) clearInterval(adminSchemesExportPollRef.current);
+            if (adminDbExportPollRef.current) clearInterval(adminDbExportPollRef.current);
+            if (adminSchemesExportAbortRef.current) adminSchemesExportAbortRef.current.abort();
+            if (adminDbExportAbortRef.current) adminDbExportAbortRef.current.abort();
+        };
+    }, []);
 
     const normalizeCheckerForActor = (checkerRaw) => {
         const checker = String(checkerRaw || "").trim();
@@ -1254,6 +1275,7 @@ export default function App() {
         for (let delay = 1; delay <= maxDelay; delay += 1) {
             header.push(String(delay));
         }
+        header.push("pareto_points");
 
         const lines = [header];
         for (let bench = 200; bench <= 299; bench += 1) {
@@ -1262,6 +1284,19 @@ export default function App() {
                 const value = minAreaByBenchDelay.get(`${bench}:${delay}`);
                 row.push(value === undefined ? "" : String(value));
             }
+
+            const benchPoints = rows
+                .filter((p) => Number(p.benchmark) === bench)
+                .map((p) => ({
+                    delay: Number(p.delay),
+                    area: Number(p.area),
+                }))
+                .filter((p) => Number.isFinite(p.delay) && Number.isFinite(p.area));
+            const paretoPoints = computeParetoFrontOriginal(benchPoints)
+                .map((p) => `(${Math.trunc(p.delay)}, ${Math.trunc(p.area)})`)
+                .join(", ");
+            row.push(paretoPoints);
+
             lines.push(row);
         }
 
@@ -1502,6 +1537,139 @@ export default function App() {
             setAdminPanelError(error?.message || "Failed to save settings.");
         } finally {
             setIsAdminSaving(false);
+        }
+    }
+
+    function downloadBlobFile(blob, fileName) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function stopAdminExportProgressPoll(which) {
+        const ref = which === "schemes" ? adminSchemesExportPollRef : adminDbExportPollRef;
+        if (!ref.current) return;
+        clearInterval(ref.current);
+        ref.current = null;
+    }
+
+    function startAdminExportProgressPoll({ token, signal, which }) {
+        const setProgress = which === "schemes" ? setAdminSchemesExportProgress : setAdminDbExportProgress;
+        stopAdminExportProgressPoll(which);
+        const poll = async () => {
+            if (signal.aborted) return;
+            try {
+                const progress = await fetchAdminExportProgress({ token, signal });
+                setProgress(progress);
+                if (progress?.doneFlag) {
+                    stopAdminExportProgressPoll(which);
+                }
+            } catch {
+                // Keep polling; transient failures are expected while export starts.
+            }
+        };
+        refForWhich(which).current = setInterval(poll, 500);
+        poll();
+    }
+
+    function refForWhich(which) {
+        return which === "schemes" ? adminSchemesExportPollRef : adminDbExportPollRef;
+    }
+
+    function stopAdminSchemesExport() {
+        if (!adminSchemesExportAbortRef.current) return;
+        adminSchemesExportAbortRef.current.abort();
+        adminSchemesExportAbortRef.current = null;
+    }
+
+    function stopAdminDbExport() {
+        if (!adminDbExportAbortRef.current) return;
+        adminDbExportAbortRef.current.abort();
+        adminDbExportAbortRef.current = null;
+    }
+
+    async function downloadAllSchemesZip() {
+        if (!authKeyDraft.trim()) return;
+        if (isAdminSchemesExporting) {
+            stopAdminSchemesExport();
+            return;
+        }
+        setAdminExportError("");
+        setAdminSchemesExportProgress({
+            status: "queued",
+            done: 0,
+            total: 0,
+            unit: "files",
+        });
+        setIsAdminSchemesExporting(true);
+        const controller = new AbortController();
+        adminSchemesExportAbortRef.current = controller;
+        const progressToken = uid();
+        startAdminExportProgressPoll({ token: progressToken, signal: controller.signal, which: "schemes" });
+        try {
+            const { blob, fileName } = await exportAdminSchemesZip({
+                authKey: authKeyDraft,
+                progressToken,
+                signal: controller.signal,
+            });
+            downloadBlobFile(blob, fileName || "schemes-export.zip");
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                setAdminExportError("Schemes export cancelled.");
+                return;
+            }
+            setAdminExportError(error?.message || "Failed to export schemes archive.");
+        } finally {
+            if (adminSchemesExportAbortRef.current === controller) {
+                adminSchemesExportAbortRef.current = null;
+            }
+            stopAdminExportProgressPoll("schemes");
+            setIsAdminSchemesExporting(false);
+        }
+    }
+
+    async function downloadDatabaseExport() {
+        if (!authKeyDraft.trim()) return;
+        if (isAdminDbExporting) {
+            stopAdminDbExport();
+            return;
+        }
+        setAdminExportError("");
+        setAdminDbExportProgress({
+            status: "queued",
+            done: 0,
+            total: 0,
+            unit: "tables",
+        });
+        setIsAdminDbExporting(true);
+        const controller = new AbortController();
+        adminDbExportAbortRef.current = controller;
+        const progressToken = uid();
+        startAdminExportProgressPoll({ token: progressToken, signal: controller.signal, which: "db" });
+        try {
+            const { blob, fileName } = await exportAdminDatabase({
+                authKey: authKeyDraft,
+                progressToken,
+                signal: controller.signal,
+            });
+            downloadBlobFile(blob, fileName || "database-export.sql");
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                setAdminExportError("Database export cancelled.");
+                return;
+            }
+            setAdminExportError(error?.message || "Failed to export database.");
+        } finally {
+            if (adminDbExportAbortRef.current === controller) {
+                adminDbExportAbortRef.current = null;
+            }
+            stopAdminExportProgressPoll("db");
+            setIsAdminDbExporting(false);
         }
     }
 
@@ -2260,7 +2428,14 @@ export default function App() {
                             adminUserIdDraft={adminUserIdDraft}
                             onAdminUserIdDraftChange={setAdminUserIdDraft}
                             loadAdminUser={loadAdminUser}
+                            downloadAllSchemesZip={downloadAllSchemesZip}
+                            downloadDatabaseExport={downloadDatabaseExport}
                             isAdminLoading={isAdminLoading}
+                            isAdminSchemesExporting={isAdminSchemesExporting}
+                            isAdminDbExporting={isAdminDbExporting}
+                            adminSchemesExportProgress={adminSchemesExportProgress}
+                            adminDbExportProgress={adminDbExportProgress}
+                            adminExportError={adminExportError}
                             adminPanelError={adminPanelError}
                             adminUser={adminUser}
                             formatGb={formatGb}

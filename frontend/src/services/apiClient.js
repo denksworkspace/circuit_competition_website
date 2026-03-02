@@ -29,6 +29,36 @@ async function parseJsonSafe(response) {
     return response.json().catch(() => null);
 }
 
+function parseAttachmentName(contentDispositionRaw, fallbackName) {
+    const contentDisposition = String(contentDispositionRaw || "");
+    const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch?.[1]) {
+        try {
+            return decodeURIComponent(utfMatch[1]);
+        } catch {
+            // Fallback to other parsing below.
+        }
+    }
+    const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+    if (plainMatch?.[1]) return plainMatch[1];
+    return fallbackName;
+}
+
+async function fetchDownloadFile(path, { authKey, fallbackName, progressToken = "", signal = undefined }) {
+    const query = new URLSearchParams({ authKey: String(authKey || "") });
+    if (String(progressToken || "").trim()) {
+        query.set("progressToken", String(progressToken).trim());
+    }
+    const response = await fetch(apiUrl(`${path}?${query.toString()}`), { signal });
+    if (!response.ok) {
+        const data = await parseJsonSafe(response);
+        throw new Error(data?.error || "Download failed.");
+    }
+    const blob = await response.blob();
+    const fileName = parseAttachmentName(response.headers.get("Content-Disposition"), fallbackName);
+    return { blob, fileName };
+}
+
 export async function fetchCommands() {
     const response = await fetch(apiUrl("/api/commands"));
     const data = await parseJsonSafe(response);
@@ -418,4 +448,34 @@ export async function updateAdminUserUploadSettings({
         user: data?.user || null,
         actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
     };
+}
+
+export async function exportAdminSchemesZip({ authKey, progressToken = "", signal = undefined }) {
+    return fetchDownloadFile("/api/admin-export-schemes-zip", {
+        authKey,
+        progressToken,
+        signal,
+        fallbackName: "schemes-export.zip",
+    });
+}
+
+export async function exportAdminDatabase({ authKey, progressToken = "", signal = undefined }) {
+    return fetchDownloadFile("/api/admin-export-db", {
+        authKey,
+        progressToken,
+        signal,
+        fallbackName: "database-export.sql",
+    });
+}
+
+export async function fetchAdminExportProgress({ token, signal }) {
+    const query = new URLSearchParams({ token: String(token || "") });
+    const response = await fetch(apiUrl(`/api/admin-export-progress?${query.toString()}`), { signal });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const error = new Error(data?.error || "Failed to fetch export progress.");
+        error.code = response.status;
+        throw error;
+    }
+    return data;
 }
