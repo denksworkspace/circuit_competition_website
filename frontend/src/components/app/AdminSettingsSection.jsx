@@ -143,7 +143,7 @@ export function AdminSettingsSection({
                         {isAdminSchemesExporting ? (
                             <div className="cardHint">
                                 Schemes: {Number(adminSchemesExportProgress?.done || 0)} / {Number(adminSchemesExportProgress?.total || 0)} files
-                                {" "}({String(adminSchemesExportProgress?.status || "queued")})
+                                {" "}({String(adminSchemesExportProgress?.status || "queued")}, scope: {String(adminSchemesExportProgress?.scope || "all")})
                             </div>
                         ) : null}
                         {isAdminDbExporting ? (

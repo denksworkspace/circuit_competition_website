@@ -44,10 +44,16 @@ function parseAttachmentName(contentDispositionRaw, fallbackName) {
     return fallbackName;
 }
 
-async function fetchDownloadFile(path, { authKey, fallbackName, progressToken = "", signal = undefined }) {
+async function fetchDownloadFile(path, { authKey, fallbackName, progressToken = "", signal = undefined, queryParams = null }) {
     const query = new URLSearchParams({ authKey: String(authKey || "") });
     if (String(progressToken || "").trim()) {
         query.set("progressToken", String(progressToken).trim());
+    }
+    if (queryParams && typeof queryParams === "object") {
+        for (const [key, value] of Object.entries(queryParams)) {
+            if (value == null) continue;
+            query.set(String(key), String(value));
+        }
     }
     const response = await fetch(apiUrl(`${path}?${query.toString()}`), { signal });
     if (!response.ok) {
@@ -450,11 +456,12 @@ export async function updateAdminUserUploadSettings({
     };
 }
 
-export async function exportAdminSchemesZip({ authKey, progressToken = "", signal = undefined }) {
+export async function exportAdminSchemesZip({ authKey, progressToken = "", signal = undefined, scope = "all" }) {
     return fetchDownloadFile("/api/admin-export-schemes-zip", {
         authKey,
         progressToken,
         signal,
+        queryParams: { scope },
         fallbackName: "schemes-export.zip",
     });
 }

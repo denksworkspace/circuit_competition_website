@@ -1599,12 +1599,21 @@ export default function App() {
             stopAdminSchemesExport();
             return;
         }
+        const scopeInput = window.prompt("Schemes export mode: enter 'all' or 'pareto'.", "all");
+        if (scopeInput == null) return;
+        const normalizedScope = String(scopeInput || "").trim().toLowerCase();
+        const exportScope = normalizedScope === "pareto" ? "pareto" : (normalizedScope === "all" ? "all" : null);
+        if (!exportScope) {
+            setAdminExportError("Invalid mode. Use 'all' or 'pareto'.");
+            return;
+        }
         setAdminExportError("");
         setAdminSchemesExportProgress({
             status: "queued",
             done: 0,
             total: 0,
             unit: "files",
+            scope: exportScope,
         });
         setIsAdminSchemesExporting(true);
         const controller = new AbortController();
@@ -1616,6 +1625,7 @@ export default function App() {
                 authKey: authKeyDraft,
                 progressToken,
                 signal: controller.signal,
+                scope: exportScope,
             });
             downloadBlobFile(blob, fileName || "schemes-export.zip");
         } catch (error) {

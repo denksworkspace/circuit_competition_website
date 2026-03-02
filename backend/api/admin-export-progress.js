@@ -22,6 +22,7 @@ export default async function handler(req, res) {
         type: String(row.type || "export"),
         status: String(row.status || "queued"),
         unit: String(row.unit || "items"),
+        scope: row.scope ? String(row.scope) : null,
         done: Math.max(0, Number(row.done || 0)),
         total: Math.max(0, Number(row.total || 0)),
         doneFlag: Boolean(row.doneFlag),

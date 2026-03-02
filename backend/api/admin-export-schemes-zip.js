@@ -39,11 +39,50 @@ function buildPointZipPath(fileNameRaw) {
     return `points/bench${parsed.benchmark}/${fileName}`;
 }
 
+function normalizeExportScope(rawScope) {
+    const scope = String(rawScope || "").trim().toLowerCase();
+    return scope === "pareto" ? "pareto" : "all";
+}
+
+function selectParetoRows(rowsRaw) {
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    const rowsByBenchmark = new Map();
+    for (const row of rows) {
+        const benchmark = String(row?.benchmark || "").trim();
+        const delay = Number(row?.delay);
+        const area = Number(row?.area);
+        if (!benchmark || !Number.isFinite(delay) || !Number.isFinite(area)) continue;
+        if (!rowsByBenchmark.has(benchmark)) rowsByBenchmark.set(benchmark, []);
+        rowsByBenchmark.get(benchmark).push({
+            row,
+            delay: Math.trunc(delay),
+            area: Number(area),
+        });
+    }
+
+    const selected = [];
+    for (const bucket of rowsByBenchmark.values()) {
+        bucket.sort((a, b) => {
+            if (a.delay !== b.delay) return a.delay - b.delay;
+            return a.area - b.area;
+        });
+        let bestArea = Infinity;
+        for (const item of bucket) {
+            if (item.area < bestArea) {
+                selected.push(item.row);
+                bestArea = item.area;
+            }
+        }
+    }
+    return selected;
+}
+
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["GET"])) return;
 
     const authKey = String(req?.query?.authKey || "").trim();
     const progressToken = String(req?.query?.progressToken || "").trim();
+    const exportScope = normalizeExportScope(req?.query?.scope);
     if (!authKey) {
         res.status(400).json({ error: "Missing auth key." });
         return;
@@ -59,14 +98,17 @@ export default async function handler(req, res) {
 
     try {
         const pointsRes = await sql`
-          select file_name
+          select benchmark, delay, area, file_name
           from points
           where file_name is not null
             and btrim(file_name) <> ''
           order by id asc
         `;
 
-        const pointFiles = pointsRes.rows
+        const selectedRows = exportScope === "pareto"
+            ? selectParetoRows(pointsRes.rows)
+            : pointsRes.rows;
+        const pointFiles = selectedRows
             .map((row) => String(row.file_name || "").trim())
             .filter(Boolean)
             .slice(0, MAX_TOTAL_FILES);
@@ -77,6 +119,7 @@ export default async function handler(req, res) {
             type: "schemes_zip",
             status: "downloading_files",
             unit: "files",
+            scope: exportScope,
             done: processedFiles,
             total: totalFiles,
             doneFlag: false,
@@ -156,6 +199,7 @@ export default async function handler(req, res) {
             mode: {
                 local: isLocalExportRequest(req),
                 downloadConcurrency,
+                scope: exportScope,
             },
         };
         zipEntries.push({
