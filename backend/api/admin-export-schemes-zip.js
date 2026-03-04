@@ -1,5 +1,7 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { rejectMethod } from "./_lib/http.js";
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { buildDownloadUrl, parseStoredBenchFileName } from "./_lib/points.js";
@@ -8,6 +10,7 @@ import { buildZipBuffer } from "./_lib/zip.js";
 import { setExportProgress } from "./_lib/exportProgress.js";
 
 const MAX_TOTAL_FILES = 5000;
+const LOCAL_EXPORT_TRACK_ROOT = path.join(process.cwd(), ".local-exported-points");
 
 function buildFileName() {
     return `schemes-export-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
@@ -42,6 +45,47 @@ function buildPointZipPath(fileNameRaw) {
 function normalizeExportScope(rawScope) {
     const scope = String(rawScope || "").trim().toLowerCase();
     return scope === "pareto" ? "pareto" : "all";
+}
+
+function normalizeVerdictScope(rawScope) {
+    const scope = String(rawScope || "").trim().toLowerCase();
+    return scope === "all" ? "all" : "verify";
+}
+
+function isVerifyStatus(statusRaw) {
+    const status = String(statusRaw || "").trim().toLowerCase();
+    return status === "verify" || status === "verified";
+}
+
+async function listAlreadyExportedFiles(scope) {
+    const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
+    try {
+        const names = await fs.readdir(scopeDir, { withFileTypes: true });
+        const result = new Set();
+        for (const item of names) {
+            if (!item.isFile()) continue;
+            const fileName = String(item.name || "").trim();
+            if (fileName) result.add(fileName);
+        }
+        return result;
+    } catch {
+        return new Set();
+    }
+}
+
+async function saveLocalExportedFiles(scope, filesRaw) {
+    const files = Array.isArray(filesRaw) ? filesRaw : [];
+    if (files.length === 0) return;
+    const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
+    await fs.mkdir(scopeDir, { recursive: true });
+    await Promise.all(
+        files.map((item) =>
+            fs.writeFile(
+                path.join(scopeDir, sanitizeFileNamePart(item?.fileName)),
+                Buffer.isBuffer(item?.fileBuffer) ? item.fileBuffer : Buffer.alloc(0)
+            )
+        )
+    );
 }
 
 function selectParetoRows(rowsRaw) {
@@ -83,6 +127,7 @@ export default async function handler(req, res) {
     const authKey = String(req?.query?.authKey || "").trim();
     const progressToken = String(req?.query?.progressToken || "").trim();
     const exportScope = normalizeExportScope(req?.query?.scope);
+    const verdictScope = normalizeVerdictScope(req?.query?.verdictScope);
     if (!authKey) {
         res.status(400).json({ error: "Missing auth key." });
         return;
@@ -98,20 +143,30 @@ export default async function handler(req, res) {
 
     try {
         const pointsRes = await sql`
-          select benchmark, delay, area, file_name
+          select benchmark, delay, area, file_name, status
           from points
           where file_name is not null
             and btrim(file_name) <> ''
           order by id asc
         `;
 
+        const rowsByVerdict = verdictScope === "all"
+            ? pointsRes.rows
+            : pointsRes.rows.filter((row) => isVerifyStatus(row?.status));
         const selectedRows = exportScope === "pareto"
-            ? selectParetoRows(pointsRes.rows)
-            : pointsRes.rows;
-        const pointFiles = selectedRows
+            ? selectParetoRows(rowsByVerdict)
+            : rowsByVerdict;
+        const selectedFiles = selectedRows
             .map((row) => String(row.file_name || "").trim())
-            .filter(Boolean)
+            .filter(Boolean);
+        const localExportMode = isLocalExportRequest(req);
+        const alreadyExportedFiles = localExportMode
+            ? await listAlreadyExportedFiles(exportScope)
+            : new Set();
+        const filteredFiles = selectedFiles.filter((fileName) => !alreadyExportedFiles.has(fileName));
+        const pointFiles = [...new Set(filteredFiles)]
             .slice(0, MAX_TOTAL_FILES);
+        const skippedAlreadyExported = selectedFiles.length - filteredFiles.length;
 
         const totalFiles = pointFiles.length;
         let processedFiles = 0;
@@ -120,15 +175,16 @@ export default async function handler(req, res) {
             status: "downloading_files",
             unit: "files",
             scope: exportScope,
+            verdictScope,
             done: processedFiles,
             total: totalFiles,
             doneFlag: false,
             error: null,
         });
 
-        const zipEntries = [];
+        const downloadedFiles = [];
         const errors = [];
-        const downloadConcurrency = isLocalExportRequest(req) ? 8 : 1;
+        const downloadConcurrency = localExportMode ? 8 : 1;
 
         async function processPointFile(fileName) {
             if (req?.abortSignal?.aborted) {
@@ -150,9 +206,10 @@ export default async function handler(req, res) {
             }
             return {
                 ok: true,
-                entry: {
+                item: {
+                    fileName,
                     name: buildPointZipPath(fileName),
-                    data: fileBuffer,
+                    fileBuffer,
                 },
             };
         }
@@ -166,8 +223,8 @@ export default async function handler(req, res) {
                     const fileName = pointFiles[idx];
                     const result = await processPointFile(fileName);
                     if (result?.aborted) return;
-                    if (result?.ok && result.entry) {
-                        zipEntries.push(result.entry);
+                    if (result?.ok && result.item) {
+                        downloadedFiles.push(result.item);
                     } else if (result?.error) {
                         errors.push(result.error);
                     }
@@ -194,19 +251,49 @@ export default async function handler(req, res) {
             included: {
                 points: pointFiles.length,
             },
-            archivedEntries: zipEntries.length,
+            skippedAlreadyExported,
+            archivedEntries: downloadedFiles.length,
             errors,
             mode: {
-                local: isLocalExportRequest(req),
+                local: localExportMode,
                 downloadConcurrency,
                 scope: exportScope,
+                verdictScope,
             },
         };
+        if (localExportMode) {
+            setExportProgress(progressToken, {
+                status: "saving_files",
+                done: processedFiles,
+                total: totalFiles,
+            });
+            await saveLocalExportedFiles(exportScope, downloadedFiles);
+            await fs.writeFile(
+                path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope, "manifest.json"),
+                `${JSON.stringify(manifest, null, 2)}\n`,
+                "utf8"
+            );
+            setExportProgress(progressToken, {
+                status: "done",
+                doneFlag: true,
+                done: processedFiles,
+                total: totalFiles,
+            });
+            res.status(200).json({
+                ok: true,
+                mode: "local_files",
+                exportDir: path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope),
+                savedFiles: downloadedFiles.length,
+                skippedAlreadyExported,
+                errors,
+            });
+            return;
+        }
+        const zipEntries = downloadedFiles.map((item) => ({ name: item.name, data: item.fileBuffer }));
         zipEntries.push({
             name: "manifest.json",
             data: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
         });
-
         const fileName = buildFileName();
         setExportProgress(progressToken, {
             status: "building_zip",

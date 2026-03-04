@@ -202,6 +202,9 @@ export default function App() {
     const [adminSchemesExportProgress, setAdminSchemesExportProgress] = useState(null);
     const [adminDbExportProgress, setAdminDbExportProgress] = useState(null);
     const [adminExportError, setAdminExportError] = useState("");
+    const [adminSchemesExportScope, setAdminSchemesExportScope] = useState("all");
+    const [adminSchemesVerdictScope, setAdminSchemesVerdictScope] = useState("verify");
+    const [isAdminSchemesExportModalOpen, setIsAdminSchemesExportModalOpen] = useState(false);
     const [isAdminQuotaSettingsOpen, setIsAdminQuotaSettingsOpen] = useState(false);
     const [truthFiles, setTruthFiles] = useState(() => []);
     const truthFilesInputRef = useRef(null);
@@ -1599,14 +1602,15 @@ export default function App() {
             stopAdminSchemesExport();
             return;
         }
-        const scopeInput = window.prompt("Schemes export mode: enter 'all' or 'pareto'.", "all");
-        if (scopeInput == null) return;
-        const normalizedScope = String(scopeInput || "").trim().toLowerCase();
-        const exportScope = normalizedScope === "pareto" ? "pareto" : (normalizedScope === "all" ? "all" : null);
-        if (!exportScope) {
-            setAdminExportError("Invalid mode. Use 'all' or 'pareto'.");
-            return;
-        }
+        setAdminExportError("");
+        setIsAdminSchemesExportModalOpen(true);
+    }
+
+    async function startAdminSchemesExportFromModal() {
+        if (!authKeyDraft.trim()) return;
+        if (isAdminSchemesExporting) return;
+        const exportScope = adminSchemesExportScope === "pareto" ? "pareto" : "all";
+        const verdictScope = adminSchemesVerdictScope === "all" ? "all" : "verify";
         setAdminExportError("");
         setAdminSchemesExportProgress({
             status: "queued",
@@ -1614,20 +1618,32 @@ export default function App() {
             total: 0,
             unit: "files",
             scope: exportScope,
+            verdictScope,
         });
         setIsAdminSchemesExporting(true);
+        setIsAdminSchemesExportModalOpen(false);
         const controller = new AbortController();
         adminSchemesExportAbortRef.current = controller;
         const progressToken = uid();
         startAdminExportProgressPoll({ token: progressToken, signal: controller.signal, which: "schemes" });
         try {
-            const { blob, fileName } = await exportAdminSchemesZip({
+            const result = await exportAdminSchemesZip({
                 authKey: authKeyDraft,
                 progressToken,
                 signal: controller.signal,
                 scope: exportScope,
+                verdictScope,
             });
-            downloadBlobFile(blob, fileName || "schemes-export.zip");
+            if (result?.mode === "zip") {
+                downloadBlobFile(result.blob, result.fileName || "schemes-export.zip");
+            } else {
+                const saved = Number(result?.savedFiles || 0);
+                const skipped = Number(result?.skippedAlreadyExported || 0);
+                const exportDir = String(result?.exportDir || "");
+                window.alert(
+                    `Saved files: ${saved}\nSkipped (already exported): ${skipped}\nFolder: ${exportDir || "(unknown)"}`
+                );
+            }
         } catch (error) {
             if (error?.name === "AbortError") {
                 setAdminExportError("Schemes export cancelled.");
@@ -2439,6 +2455,13 @@ export default function App() {
                             onAdminUserIdDraftChange={setAdminUserIdDraft}
                             loadAdminUser={loadAdminUser}
                             downloadAllSchemesZip={downloadAllSchemesZip}
+                            adminSchemesExportScope={adminSchemesExportScope}
+                            onAdminSchemesExportScopeChange={setAdminSchemesExportScope}
+                            adminSchemesVerdictScope={adminSchemesVerdictScope}
+                            onAdminSchemesVerdictScopeChange={setAdminSchemesVerdictScope}
+                            isAdminSchemesExportModalOpen={isAdminSchemesExportModalOpen}
+                            closeAdminSchemesExportModal={() => setIsAdminSchemesExportModalOpen(false)}
+                            startAdminSchemesExportFromModal={startAdminSchemesExportFromModal}
                             downloadDatabaseExport={downloadDatabaseExport}
                             isAdminLoading={isAdminLoading}
                             isAdminSchemesExporting={isAdminSchemesExporting}

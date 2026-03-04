@@ -88,5 +88,6 @@ export default async function handler(req, res) {
         benchmark,
         fileName,
         output: cec.output.slice(-1500),
+        script: String(cec.script || ""),
     });
 }

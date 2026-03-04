@@ -4,6 +4,13 @@ export function AdminSettingsSection({
     onAdminUserIdDraftChange,
     loadAdminUser,
     downloadAllSchemesZip,
+    adminSchemesExportScope,
+    onAdminSchemesExportScopeChange,
+    adminSchemesVerdictScope,
+    onAdminSchemesVerdictScopeChange,
+    isAdminSchemesExportModalOpen,
+    closeAdminSchemesExportModal,
+    startAdminSchemesExportFromModal,
     downloadDatabaseExport,
     isAdminLoading,
     isAdminSchemesExporting,
@@ -509,6 +516,40 @@ export function AdminSettingsSection({
                                 Apply selected
                             </button>
                             <button className="btn small" type="button" onClick={closeBulkVerifyApplyModal}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {isAdminSchemesExportModalOpen ? (
+                <div className="pointModalBackdrop" onClick={closeAdminSchemesExportModal}>
+                    <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
+                        <div className="pointModalTitle">Schemes export options</div>
+                        <div className="truthConflictList">
+                            <label className="truthConflictItem">
+                                <input
+                                    type="checkbox"
+                                    checked={adminSchemesExportScope === "pareto"}
+                                    onChange={(e) => onAdminSchemesExportScopeChange(e.target.checked ? "pareto" : "all")}
+                                />
+                                <span>Pareto only (unchecked = all points)</span>
+                            </label>
+                            <label className="truthConflictItem">
+                                <input
+                                    type="checkbox"
+                                    checked={adminSchemesVerdictScope === "all"}
+                                    onChange={(e) => onAdminSchemesVerdictScopeChange(e.target.checked ? "all" : "verify")}
+                                />
+                                <span>Include all verdicts (unchecked = only verify)</span>
+                            </label>
+                        </div>
+                        <div className="pointModalActions">
+                            <button className="btn primary small" type="button" onClick={startAdminSchemesExportFromModal}>
+                                Start export
+                            </button>
+                            <button className="btn small" type="button" onClick={closeAdminSchemesExportModal}>
                                 Close
                             </button>
                         </div>

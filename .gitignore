@@ -31,3 +31,8 @@ dist-ssr
 .env*.local
 
 abc/
+
+# Local runtime/state artifacts
+.local-exported-points/
+*.history
+.agents/
