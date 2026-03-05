@@ -199,11 +199,25 @@ describe("api/points handler", () => {
         expect(res.statusCode).toBe(413);
     });
 
-    it("POST returns 409 for duplicate benchmark/delay/area", async () => {
+    it("POST allows duplicate benchmark/delay/area for the same user", async () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [{ id: "exists" }] });
+        sql.mockResolvedValueOnce({
+            rows: [
+                {
+                    id: "p1",
+                    benchmark: "254",
+                    delay: "1",
+                    area: "2",
+                    description: "schema",
+                    sender: "team",
+                    file_name: "file.bench",
+                    status: "non-verified",
+                    checker_version: null,
+                },
+            ],
+        });
 
         const req = createMockReq({
             method: "POST",
@@ -220,14 +234,13 @@ describe("api/points handler", () => {
         });
         const res = createMockRes();
         await handler(req, res);
-        expect(res.statusCode).toBe(409);
+        expect(res.statusCode).toBe(201);
     });
 
     it("POST handles duplicate insert errors", async () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
         sql.mockRejectedValueOnce(new Error("duplicate key value violates unique constraint"));
 
         const req = createMockReq({
@@ -252,7 +265,6 @@ describe("api/points handler", () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
         sql.mockResolvedValueOnce({ rows: [{ uploaded_bytes_total: 0, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, max_single_upload_bytes: 500 * 1024 * 1024, role: "leader" }] });
         sql.mockResolvedValueOnce({
             rows: [
@@ -294,7 +306,6 @@ describe("api/points handler", () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, name: "team", role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
         sql.mockResolvedValueOnce({
             rows: [
                 {

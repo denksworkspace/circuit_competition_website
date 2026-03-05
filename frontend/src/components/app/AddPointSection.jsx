@@ -15,10 +15,13 @@ export function AddPointSection({
     descriptionDraft,
     onDescriptionDraftChange,
     uploadError,
+    uploadVerdictNote,
     isUploading,
+    isUploadStopping,
     uploadProgress,
     uploadLogText,
     onDownloadUploadLog,
+    onStopUpload,
     selectedChecker,
     onSelectedCheckerChange,
     canUseFastHex,
@@ -167,12 +170,18 @@ export function AddPointSection({
                 ) : null}
 
                 {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
+                {uploadVerdictNote.trim() ? <div className="cardHint">{uploadVerdictNote}</div> : null}
 
                 <span className={!canAdd ? "disabledHintWrap" : ""} title={!canAdd ? uploadDisabledReason : ""}>
                     <button className="btn primary" type="submit" disabled={!canAdd}>
                         {isUploading ? "Uploading..." : "Upload & create point"}
                     </button>
                 </span>
+                {isUploading ? (
+                    <button className="btn danger" type="button" onClick={onStopUpload} disabled={isUploadStopping}>
+                        {isUploadStopping ? "Stopping..." : "Stop upload"}
+                    </button>
+                ) : null}
 
                 {isUploading && uploadProgress ? (
                     <>

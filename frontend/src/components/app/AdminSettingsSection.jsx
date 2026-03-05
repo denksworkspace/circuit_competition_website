@@ -80,6 +80,26 @@ export function AdminSettingsSection({
     bulkMetricsAuditProgress,
     bulkMetricsAuditLogText,
     onDownloadBulkMetricsAuditLog,
+    runBulkIdenticalAudit,
+    stopBulkIdenticalAudit,
+    isBulkIdenticalAuditRunning,
+    bulkIdenticalAuditSummary,
+    bulkIdenticalAuditLogText,
+    bulkIdenticalAuditProgress,
+    bulkIdenticalAuditCurrentFileName,
+    onDownloadBulkIdenticalAuditLog,
+    bulkIdenticalGroups,
+    bulkIdenticalPickerGroupId,
+    isBulkIdenticalApplyModalOpen,
+    isBulkIdenticalApplying,
+    setBulkIdenticalGroupChecked,
+    openBulkIdenticalGroupPicker,
+    closeBulkIdenticalGroupPicker,
+    setBulkIdenticalGroupKeepPoint,
+    selectAllBulkIdenticalGroups,
+    clearAllBulkIdenticalGroups,
+    applySelectedBulkIdenticalGroups,
+    closeBulkIdenticalApplyModal,
     bulkVerifyCandidates,
     isBulkVerifyApplyModalOpen,
     setBulkVerifyCandidateChecked,
@@ -342,6 +362,40 @@ export function AdminSettingsSection({
                                         </button>
                                     </>
                                 ) : null}
+
+                                <button
+                                    className="btn ghost"
+                                    type="button"
+                                    onClick={runBulkIdenticalAudit}
+                                    disabled={isBulkIdenticalAuditRunning || isBulkIdenticalApplying}
+                                >
+                                    {isBulkIdenticalAuditRunning ? "Auditing identical files..." : "Audit identical files"}
+                                </button>
+                                {isBulkIdenticalAuditRunning ? (
+                                    <button className="btn danger" type="button" onClick={stopBulkIdenticalAudit}>
+                                        Stop audit
+                                    </button>
+                                ) : null}
+                                {isBulkIdenticalAuditRunning && bulkIdenticalAuditProgress ? (
+                                    <div className="cardHint">
+                                        Processed {Number(bulkIdenticalAuditProgress.done || 0)} / {Number(bulkIdenticalAuditProgress.total || 0)} points
+                                    </div>
+                                ) : null}
+                                {isBulkIdenticalAuditRunning && bulkIdenticalAuditCurrentFileName ? (
+                                    <div className="cardHint">
+                                        Current file: <span className="mono">{bulkIdenticalAuditCurrentFileName}</span>
+                                    </div>
+                                ) : null}
+                                {bulkIdenticalAuditSummary ? (
+                                    <div className="cardHint">
+                                        Scanned {Number(bulkIdenticalAuditSummary.scannedPoints || 0)} points, duplicate groups: {Number(bulkIdenticalAuditSummary.groups || 0)}, failed downloads: {Number(bulkIdenticalAuditSummary.failedPoints || 0)}.
+                                    </div>
+                                ) : null}
+                                {bulkIdenticalAuditLogText ? (
+                                    <button className="btn ghost" type="button" onClick={onDownloadBulkIdenticalAuditLog}>
+                                        Download identical audit log
+                                    </button>
+                                ) : null}
                             </>
                         ) : null}
                     </div>
@@ -516,6 +570,98 @@ export function AdminSettingsSection({
                                 Apply selected
                             </button>
                             <button className="btn small" type="button" onClick={closeBulkVerifyApplyModal}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {isBulkIdenticalApplyModalOpen ? (
+                <div className="pointModalBackdrop" onClick={closeBulkIdenticalApplyModal}>
+                    <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
+                        <div className="pointModalTitle">Resolve identical points</div>
+                        <div className="truthConflictList">
+                            {bulkIdenticalGroups.length === 0 ? (
+                                <div className="empty">No duplicate groups.</div>
+                            ) : (
+                                bulkIdenticalGroups.map((group) => {
+                                    const points = Array.isArray(group.points) ? group.points : [];
+                                    const keepPointId = String(group.keepPointId || points[0]?.id || "");
+                                    const keepPoint = points.find((point) => String(point?.id || "") === keepPointId) || points[0] || null;
+                                    return (
+                                        <div className="truthConflictItem" key={group.groupId}>
+                                            <label className="truthConflictItem">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(group.checked)}
+                                                    onChange={(e) => setBulkIdenticalGroupChecked(group.groupId, e.target.checked)}
+                                                    disabled={isBulkIdenticalApplying}
+                                                />
+                                                <span>
+                                                    Group {group.groupId}, benchmark {group.benchmark}, duplicates {points.length}, hash {String(group.hash || "").slice(0, 16)}
+                                                </span>
+                                            </label>
+                                            {keepPoint ? (
+                                                <div className="cardHint">
+                                                    Keep: {keepPoint.id} ({keepPoint.fileName}, delay={keepPoint.delay}, area={keepPoint.area}, sender={keepPoint.sender})
+                                                </div>
+                                            ) : null}
+                                            <button
+                                                className="btn ghost small"
+                                                type="button"
+                                                onClick={() => openBulkIdenticalGroupPicker(group.groupId)}
+                                                disabled={isBulkIdenticalApplying || !group.checked || points.length <= 1}
+                                            >
+                                                Choose file to keep
+                                            </button>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                        {bulkIdenticalPickerGroupId ? (
+                            <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
+                                <div className="pointModalTitle">Choose point to keep</div>
+                                <div className="truthConflictList">
+                                    {(bulkIdenticalGroups.find((group) => group.groupId === bulkIdenticalPickerGroupId)?.points || []).map((point) => {
+                                        const activeGroup = bulkIdenticalGroups.find((group) => group.groupId === bulkIdenticalPickerGroupId) || null;
+                                        const currentKeepId = String(activeGroup?.keepPointId || activeGroup?.points?.[0]?.id || "");
+                                        const pointId = String(point?.id || "");
+                                        return (
+                                            <label className="truthConflictItem" key={pointId}>
+                                                <input
+                                                    type="radio"
+                                                    name={`keep-${bulkIdenticalPickerGroupId}`}
+                                                    checked={pointId === currentKeepId}
+                                                    onChange={() => setBulkIdenticalGroupKeepPoint(bulkIdenticalPickerGroupId, pointId)}
+                                                    disabled={isBulkIdenticalApplying}
+                                                />
+                                                <span>
+                                                    {point?.fileName} (bench={point?.benchmark}, delay={point?.delay}, area={point?.area}, sender={point?.sender})
+                                                </span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                                <div className="pointModalActions">
+                                    <button className="btn small" type="button" onClick={closeBulkIdenticalGroupPicker} disabled={isBulkIdenticalApplying}>
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+                        <div className="pointModalActions">
+                            <button className="btn ghost small" type="button" onClick={selectAllBulkIdenticalGroups} disabled={isBulkIdenticalApplying}>
+                                Select all
+                            </button>
+                            <button className="btn ghost small" type="button" onClick={clearAllBulkIdenticalGroups} disabled={isBulkIdenticalApplying}>
+                                Clear all
+                            </button>
+                            <button className="btn primary small" type="button" onClick={applySelectedBulkIdenticalGroups} disabled={isBulkIdenticalApplying}>
+                                {isBulkIdenticalApplying ? "Applying..." : "Apply selected"}
+                            </button>
+                            <button className="btn small" type="button" onClick={closeBulkIdenticalApplyModal} disabled={isBulkIdenticalApplying}>
                                 Close
                             </button>
                         </div>

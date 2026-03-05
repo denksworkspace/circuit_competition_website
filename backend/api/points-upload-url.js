@@ -76,23 +76,6 @@ export default async function handler(req, res) {
         return;
     }
 
-    const duplicate = await sql`
-      select id
-      from points
-      where command_id = ${command.id}
-        and benchmark = ${parsed.benchmark}
-        and delay = ${parsed.delay}
-        and area = ${parsed.area}
-      limit 1
-    `;
-
-    if (duplicate.rows.length > 0) {
-        res.status(409).json({
-            error: "Point with the same benchmark, delay, and area already exists for this user.",
-        });
-        return;
-    }
-
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
     const region = process.env.AWS_REGION;

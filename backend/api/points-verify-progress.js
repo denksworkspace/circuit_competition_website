@@ -22,6 +22,9 @@ export default async function handler(req, res) {
         status: String(row.status || "queued"),
         done: Boolean(row.done),
         error: row.error ? String(row.error) : null,
+        doneCount: Number(row.doneCount || 0),
+        totalCount: Number(row.totalCount || 0),
+        currentFileName: String(row.currentFileName || ""),
         updatedAt: Number(row.updatedAt || Date.now()),
     });
 }

@@ -32,6 +32,8 @@ import {
 import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUtils.js";
 import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/testPointUtils.js";
 import {
+    applyAdminIdenticalResolutions,
+    checkPointDuplicate,
     applyAdminPointStatuses,
     deletePoint,
     exportAdminDatabase,
@@ -44,6 +46,7 @@ import {
     fetchAdminExportProgress,
     planTruthTablesUpload,
     runAdminBulkVerifyPoint,
+    runAdminIdenticalAudit,
     runAdminMetricsAuditPoint,
     requestUploadUrl,
     requestTruthUploadUrl,
@@ -138,13 +141,15 @@ export default function App() {
     // Upload
     const [benchFiles, setBenchFiles] = useState(() => []);
     const [descriptionDraft, setDescriptionDraft] = useState("");
-    const [selectedChecker, setSelectedChecker] = useState("select");
+    const [selectedChecker, setSelectedChecker] = useState("ABC");
     const [uploadError, setUploadError] = useState(" ");
     const [isUploading, setIsUploading] = useState(false);
+    const [isUploadStopping, setIsUploadStopping] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
     const fileInputRef = useRef(null);
     const [uploadLogText, setUploadLogText] = useState("");
-    const [selectedParser, setSelectedParser] = useState("select");
+    const [uploadVerdictNote, setUploadVerdictNote] = useState("");
+    const [selectedParser, setSelectedParser] = useState("ABC");
     const [checkerTleSecondsDraft, setCheckerTleSecondsDraft] = useState("60");
     const [parserTleSecondsDraft, setParserTleSecondsDraft] = useState("60");
     const [isUploadSettingsOpen, setIsUploadSettingsOpen] = useState(false);
@@ -182,6 +187,8 @@ export default function App() {
     const verifyTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcVerifyTimeoutSeconds || 60));
     const metricsTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcMetricsTimeoutSeconds || 60));
     const uploadCountdownRef = useRef(null);
+    const uploadStopRequestedRef = useRef(false);
+    const uploadAbortRef = useRef(null);
 
     const [adminUserIdDraft, setAdminUserIdDraft] = useState("");
     const [adminPanelError, setAdminPanelError] = useState("");
@@ -226,8 +233,19 @@ export default function App() {
     const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
     const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
+    const [isBulkIdenticalAuditRunning, setIsBulkIdenticalAuditRunning] = useState(false);
+    const [bulkIdenticalAuditSummary, setBulkIdenticalAuditSummary] = useState(null);
+    const [bulkIdenticalAuditLogText, setBulkIdenticalAuditLogText] = useState("");
+    const [bulkIdenticalAuditProgress, setBulkIdenticalAuditProgress] = useState(null);
+    const [bulkIdenticalAuditCurrentFileName, setBulkIdenticalAuditCurrentFileName] = useState("");
+    const [bulkIdenticalGroups, setBulkIdenticalGroups] = useState(() => []);
+    const [isBulkIdenticalApplyModalOpen, setIsBulkIdenticalApplyModalOpen] = useState(false);
+    const [isBulkIdenticalApplying, setIsBulkIdenticalApplying] = useState(false);
+    const [bulkIdenticalPickerGroupId, setBulkIdenticalPickerGroupId] = useState("");
     const bulkVerifyAbortRef = useRef(null);
     const bulkMetricsAbortRef = useRef(null);
+    const bulkIdenticalAbortRef = useRef(null);
+    const bulkIdenticalProgressPollRef = useRef(null);
     const adminSchemesExportAbortRef = useRef(null);
     const adminDbExportAbortRef = useRef(null);
     const adminSchemesExportPollRef = useRef(null);
@@ -442,6 +460,7 @@ export default function App() {
         const files = Array.from(e.target.files || []);
         setBenchFiles(files);
         setUploadLogText("");
+        setUploadVerdictNote("");
 
         if (files.length === 0) {
             setUploadError(" ");
@@ -512,6 +531,31 @@ export default function App() {
         }, 1000);
     }
 
+    function buildManualRowsFromAutoRows(autoRows, suffix = "") {
+        return (Array.isArray(autoRows) ? autoRows : []).map((row, index) => ({
+            key: `stop:${row.fileName || row?.candidate?.file?.name || "file"}:${index}:${suffix}`,
+            checked: true,
+            bench: row?.candidate?.parsed?.benchmark,
+            delay: row?.candidate?.parsed?.delay,
+            area: row?.candidate?.parsed?.area,
+            verdict: row?.candidate?.verificationResult?.status || "verified",
+            verdictReason: "Processed before stop request.",
+            reason: `file=${row.fileName || row?.candidate?.file?.name || "unknown"}`,
+            candidate: row.candidate,
+        }));
+    }
+
+    function requestStopUpload() {
+        if (!isUploading) return;
+        uploadStopRequestedRef.current = true;
+        if (uploadAbortRef.current) {
+            uploadAbortRef.current.abort();
+            uploadAbortRef.current = null;
+        }
+        setIsUploadStopping(true);
+        setUploadError("Stopping upload after current step...");
+    }
+
     function parseTruthFileName(fileNameRaw) {
         const fileName = String(fileNameRaw || "").trim();
         const match = fileName.match(/^bench(2\d\d)\.truth$/i);
@@ -538,6 +582,70 @@ export default function App() {
             reader.onerror = () => reject(new Error("Failed to read file content."));
             reader.readAsText(file);
         });
+    }
+
+    function normalizeCircuitTextForHash(textRaw) {
+        return String(textRaw || "")
+            .replace(/^\uFEFF/, "")
+            .replace(/\r\n?/g, "\n")
+            .trimEnd();
+    }
+
+    async function sha256Hex(textRaw) {
+        const text = normalizeCircuitTextForHash(textRaw);
+        const subtle = globalThis?.crypto?.subtle;
+        if (!subtle) return null;
+        const bytes = new TextEncoder().encode(text);
+        const digest = await subtle.digest("SHA-256", bytes);
+        return Array.from(new Uint8Array(digest))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+    }
+
+    async function findIdenticalPointDuplicate({ benchmark, delay, area, circuitText, signal = undefined }) {
+        const benchmarkStr = String(benchmark || "").trim();
+        const delayNum = Number(delay);
+        const areaNum = Number(area);
+        if (!benchmarkStr || benchmarkStr === "test" || !Number.isFinite(delayNum) || !Number.isFinite(areaNum)) {
+            return {
+                duplicateInfo: null,
+                blockedByCheckError: false,
+                errorReason: "",
+            };
+        }
+        try {
+            const duplicateCheck = await checkPointDuplicate({
+                authKey: authKeyDraft,
+                benchmark: benchmarkStr,
+                delay: delayNum,
+                area: areaNum,
+                circuitText: String(circuitText || ""),
+                signal,
+            });
+            if (duplicateCheck?.duplicate && duplicateCheck?.point) {
+                return {
+                    duplicateInfo: {
+                        id: String(duplicateCheck.point.id || ""),
+                        fileName: String(duplicateCheck.point.fileName || ""),
+                        sender: String(duplicateCheck.point.sender || ""),
+                    },
+                    blockedByCheckError: false,
+                    errorReason: "",
+                };
+            }
+            return {
+                duplicateInfo: null,
+                blockedByCheckError: false,
+                errorReason: "",
+            };
+        } catch (error) {
+            if (error?.name === "AbortError") throw error;
+            return {
+                duplicateInfo: null,
+                blockedByCheckError: true,
+                errorReason: String(error?.message || "Failed to verify duplicates against existing points."),
+            };
+        }
     }
 
     function isRenderNonVerdictReason(reasonRaw) {
@@ -670,7 +778,7 @@ export default function App() {
         a.remove();
     }
 
-    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null) {
+    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null, { signal } = {}) {
         const batchSize = Math.max(1, Number(benchFiles.length || 1));
         const pointId = uid();
         const storedFileName = buildStoredFileName({
@@ -685,9 +793,11 @@ export default function App() {
             fileName: storedFileName,
             fileSize: sourceFile.size,
             batchSize,
+            signal,
         });
         const putRes = await fetch(uploadMeta.uploadUrl, {
             method: "PUT",
+            signal,
             body: sourceFile,
         });
         if (!putRes.ok) {
@@ -706,12 +816,15 @@ export default function App() {
             checkerVersion: verificationResult?.checkerVersion || null,
         };
 
-        const savedPayload = await savePoint({
-            ...point,
-            authKey: authKeyDraft,
-            fileSize: sourceFile.size,
-            batchSize,
-        });
+        const savedPayload = await savePoint(
+            {
+                ...point,
+                authKey: authKeyDraft,
+                fileSize: sourceFile.size,
+                batchSize,
+            },
+            { signal }
+        );
 
         if (savedPayload?.quota) {
             setCurrentCommand((prev) => (prev ? { ...prev, ...savedPayload.quota } : prev));
@@ -750,6 +863,8 @@ export default function App() {
         }
 
         setIsUploading(true);
+        setIsUploadStopping(false);
+        uploadStopRequestedRef.current = false;
         setUploadProgress({
             done: 0,
             total: benchFiles.length,
@@ -760,6 +875,14 @@ export default function App() {
             transitionTarget: "next-circuit",
         });
         setUploadLogText("");
+        setUploadVerdictNote("");
+        const controller = new AbortController();
+        uploadAbortRef.current = controller;
+        const autoRows = [];
+        const manualRowsDraft = [];
+        const logRows = [];
+        let singleFileManualVerdict = null;
+        const isAbortError = (error) => error?.name === "AbortError";
 
         try {
             const parserEnabled = selectedParser === "ABC";
@@ -783,11 +906,10 @@ export default function App() {
                 preparedFiles.push({ file, parsed, circuitText });
             }
 
-            const autoRows = [];
-            const manualRowsDraft = [];
-            const logRows = [];
+            const batchDuplicateMap = new Map();
 
             for (const item of preparedFiles) {
+                if (uploadStopRequestedRef.current) break;
                 const normalizedInputFileName = item.parsed.normalizedFileName || item.file.name;
                 let parserState = {
                     kind: "skipped",
@@ -818,11 +940,13 @@ export default function App() {
                                 },
                             ],
                             timeoutSeconds: parserTimeoutSeconds,
+                            signal: controller.signal,
                         });
                         const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
                         const parserRow = parserRows[0] || { ok: true, fileName: normalizedInputFileName };
                         parserState = normalizeParserResultRow(parserRow, item.parsed);
                     } catch (validationError) {
+                        if (isAbortError(validationError)) throw validationError;
                         const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
                         const parserRow = detailRows[0] || {
                             ok: false,
@@ -837,6 +961,7 @@ export default function App() {
 
                 let checkerVerdict = null;
                 let checkerVersion = null;
+                let checkerErrorReason = "";
                 if (checkerEnabled) {
                     checkerVersion = checkerSelection;
                     setUploadProgress((prev) =>
@@ -859,10 +984,13 @@ export default function App() {
                             checkerVersion: checkerSelection,
                             applyStatus: false,
                             timeoutSeconds: checkerTimeoutSeconds,
+                            signal: controller.signal,
                         });
                         checkerVerdict = verified?.status === "verified";
-                    } catch {
+                    } catch (error) {
+                        if (isAbortError(error)) throw error;
                         checkerVerdict = null;
+                        checkerErrorReason = String(error?.message || "checker request failed");
                     } finally {
                         stopUploadCountdown();
                     }
@@ -889,6 +1017,32 @@ export default function App() {
                     },
                     parserChanged: parserState.changed,
                 };
+                const candidateHash = await sha256Hex(item.circuitText);
+                const duplicateKey = candidateHash
+                    ? `${parserState.parsed.benchmark}|${parserState.parsed.delay}|${parserState.parsed.area}|${candidateHash}`
+                    : null;
+                const duplicateCheck = await findIdenticalPointDuplicate({
+                    benchmark: parserState.parsed.benchmark,
+                    delay: parserState.parsed.delay,
+                    area: parserState.parsed.area,
+                    circuitText: item.circuitText,
+                    signal: controller.signal,
+                });
+                let duplicateInfo = duplicateCheck?.duplicateInfo || null;
+                const duplicateCheckError = String(duplicateCheck?.errorReason || "");
+                if (!duplicateInfo && duplicateKey && batchDuplicateMap.has(duplicateKey)) {
+                    const firstSeen = batchDuplicateMap.get(duplicateKey);
+                    duplicateInfo = {
+                        id: "",
+                        fileName: String(firstSeen?.fileName || ""),
+                        sender: String(currentCommand?.name || ""),
+                    };
+                }
+                if (duplicateKey && !batchDuplicateMap.has(duplicateKey)) {
+                    batchDuplicateMap.set(duplicateKey, {
+                        fileName: normalizedInputFileName,
+                    });
+                }
 
                 setUploadProgress((prev) => {
                     if (!prev) return prev;
@@ -900,15 +1054,64 @@ export default function App() {
                     };
                 });
 
-                if (finalStatus !== "verified") {
+                if (finalStatus !== "verified" || duplicateInfo || duplicateCheck?.blockedByCheckError) {
+                    const verdictLabel = duplicateCheck?.blockedByCheckError
+                        ? "blocked"
+                        : (duplicateInfo ? "duplicate" : finalStatus);
+                    let verdictReason = "";
+                    if (duplicateCheck?.blockedByCheckError) {
+                        verdictReason = duplicateCheckError || "Failed to verify duplicates against existing points.";
+                    } else if (finalStatus === "failed") {
+                        if (checkerErrorReason) {
+                            verdictReason = checkerErrorReason;
+                        } else if (parserState.kind === "failed" && parserState.reason) {
+                            verdictReason = String(parserState.reason);
+                        } else if (checkerVerdict === false) {
+                            verdictReason = "checker: not equivalent";
+                        }
+                        if (!verdictReason) {
+                            verdictReason = "checker/parser failed with unknown reason";
+                        }
+                    } else if (finalStatus === "non-verified") {
+                        if (checkerErrorReason) {
+                            verdictReason = checkerErrorReason;
+                        } else if (parserState.kind === "non-verdict" && parserState.reason) {
+                            verdictReason = String(parserState.reason);
+                        }
+                        if (!verdictReason) {
+                            verdictReason = "verification skipped or checker unavailable";
+                        }
+                    }
                     manualRowsDraft.push({
                         key: `${item.file.name}:${item.file.size}:${manualRowsDraft.length}`,
-                        checked: true,
+                        checked: !(duplicateInfo || duplicateCheck?.blockedByCheckError),
+                        bench: parserState.parsed.benchmark,
                         delay: parserState.parsed.delay,
                         area: parserState.parsed.area,
                         verdict: finalStatus,
+                        verdictReason,
+                        reason: duplicateInfo
+                            ? `Identical file hash for same delay+area already exists: ${duplicateInfo.fileName || duplicateInfo.id || "existing point"}.`
+                            : "",
                         candidate,
                     });
+                    const manualReasonParts = [];
+                    if (verdictReason) manualReasonParts.push(verdictReason);
+                    if (duplicateInfo) manualReasonParts.push("identical file hash and same bench+delay+area");
+                    const manualReason = manualReasonParts.join("; ");
+                    logRows.push({
+                        fileName: normalizedInputFileName,
+                        success: false,
+                        reason: manualReason
+                            ? `verdict=${verdictLabel}; ${manualReason}`
+                            : `verdict=${verdictLabel}; unknown reason`,
+                    });
+                    if (benchFiles.length === 1) {
+                        const details = verdictReason || (duplicateInfo ? "identical file hash and same bench+delay+area" : "");
+                        singleFileManualVerdict = details
+                            ? `Upload verdict: ${verdictLabel} (${details})`
+                            : `Upload verdict: ${verdictLabel}`;
+                    }
                     continue;
                 }
 
@@ -919,7 +1122,13 @@ export default function App() {
             }
 
             const savedPoints = [];
-            for (const row of autoRows) {
+            const pendingAutoRows = [];
+            for (let rowIndex = 0; rowIndex < autoRows.length; rowIndex += 1) {
+                if (uploadStopRequestedRef.current) {
+                    pendingAutoRows.push(...autoRows.slice(rowIndex));
+                    break;
+                }
+                const row = autoRows[rowIndex];
                 const fileName = row.fileName || row?.candidate?.file?.name || "unknown";
                 setUploadProgress((prev) =>
                     prev
@@ -932,25 +1141,47 @@ export default function App() {
                         : prev
                 );
                 try {
-                    const saved = await createPointFromUploadedFile(row.candidate.file, row.candidate.parsed, description, row.candidate.verificationResult);
+                    const saved = await createPointFromUploadedFile(
+                        row.candidate.file,
+                        row.candidate.parsed,
+                        description,
+                        row.candidate.verificationResult,
+                        { signal: controller.signal }
+                    );
                     savedPoints.push(saved);
                     logRows.push({
                         fileName,
                         success: true,
-                        reason: "Uploaded successfully.",
+                        reason: "verdict=verified; uploaded successfully.",
                     });
                 } catch (err) {
+                    if (isAbortError(err)) throw err;
                     logRows.push({
                         fileName,
                         success: false,
-                        reason: err?.message || "Failed to upload point.",
+                        reason: `verdict=failed; ${err?.message || "Failed to upload point."}`,
                     });
                 }
             }
 
-            if (manualRowsDraft.length > 0) {
+            if (uploadStopRequestedRef.current) {
+                const stopRows = buildManualRowsFromAutoRows(pendingAutoRows, "pending");
+                const combinedStopRows = [...manualRowsDraft, ...stopRows];
+                if (combinedStopRows.length > 0) {
+                    setManualApplyRows(combinedStopRows);
+                    setIsManualApplyOpen(true);
+                    setUploadError(
+                        `Upload stopped. ${stopRows.length} verified file(s) are ready to upload after confirmation.`
+                    );
+                } else {
+                    setUploadError("Upload stopped.");
+                }
+            } else if (manualRowsDraft.length > 0) {
                 setManualApplyRows(manualRowsDraft);
                 setIsManualApplyOpen(true);
+            }
+            if (benchFiles.length === 1 && singleFileManualVerdict) {
+                setUploadVerdictNote(singleFileManualVerdict);
             }
 
             if (savedPoints.length > 0) {
@@ -958,9 +1189,12 @@ export default function App() {
                 const latestSaved = savedPoints[savedPoints.length - 1];
                 setLastAddedId(latestSaved.id);
                 setBenchmarkFilter(String(latestSaved.benchmark));
+                if (benchFiles.length === 1) {
+                    setUploadVerdictNote("Upload verdict: verified");
+                }
             }
 
-            if (benchFiles.length >= 2) {
+            if (logRows.length > 0) {
                 const lines = logRows.map(
                     (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
                 );
@@ -984,9 +1218,31 @@ export default function App() {
             setDescriptionDraft("");
             clearFileInput();
         } catch (err) {
-            setUploadError(err?.message || "Failed to upload point.");
+            if (isAbortError(err) || uploadStopRequestedRef.current) {
+                const pendingAutoRows = autoRows.slice(0);
+                const stopRows = buildManualRowsFromAutoRows(pendingAutoRows, "abort");
+                const combinedRows = [...manualRowsDraft, ...stopRows];
+                if (combinedRows.length > 0) {
+                    setManualApplyRows(combinedRows);
+                    setIsManualApplyOpen(true);
+                }
+                setUploadError("Upload stopped.");
+                if (logRows.length > 0) {
+                    const lines = logRows.map(
+                        (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
+                    );
+                    setUploadLogText(lines.join("\n"));
+                }
+            } else {
+                setUploadError(err?.message || "Failed to upload point.");
+            }
         } finally {
             stopUploadCountdown();
+            uploadStopRequestedRef.current = false;
+            setIsUploadStopping(false);
+            if (uploadAbortRef.current === controller) {
+                uploadAbortRef.current = null;
+            }
             setIsUploading(false);
             setUploadProgress(null);
         }
@@ -1405,6 +1661,10 @@ export default function App() {
                 testingAbortRef.current.abort();
                 testingAbortRef.current = null;
             }
+            if (uploadAbortRef.current) {
+                uploadAbortRef.current.abort();
+                uploadAbortRef.current = null;
+            }
             if (bulkVerifyAbortRef.current) {
                 bulkVerifyAbortRef.current.abort();
                 bulkVerifyAbortRef.current = null;
@@ -1413,10 +1673,16 @@ export default function App() {
                 bulkMetricsAbortRef.current.abort();
                 bulkMetricsAbortRef.current = null;
             }
+            if (bulkIdenticalAbortRef.current) {
+                bulkIdenticalAbortRef.current.abort();
+                bulkIdenticalAbortRef.current = null;
+            }
             if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
             testingPointTickerRef.current = null;
             if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
             testingProgressPollRef.current = null;
+            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
+            bulkIdenticalProgressPollRef.current = null;
         };
     }, []);
 
@@ -2077,6 +2343,176 @@ export default function App() {
         }
     }
 
+    async function runBulkIdenticalAudit() {
+        if (bulkIdenticalAbortRef.current || isBulkIdenticalApplying) return;
+        const controller = new AbortController();
+        bulkIdenticalAbortRef.current = controller;
+        const progressToken = uid();
+        setIsBulkIdenticalAuditRunning(true);
+        setAdminPanelError("");
+        setBulkIdenticalAuditSummary(null);
+        setBulkIdenticalAuditLogText("");
+        setBulkIdenticalAuditProgress({ done: 0, total: 0 });
+        setBulkIdenticalAuditCurrentFileName("");
+        setBulkIdenticalGroups([]);
+        try {
+            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
+            bulkIdenticalProgressPollRef.current = setInterval(async () => {
+                if (controller.signal.aborted) return;
+                try {
+                    const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                    setBulkIdenticalAuditProgress({
+                        done: Number(progress?.doneCount || 0),
+                        total: Number(progress?.totalCount || 0),
+                    });
+                    setBulkIdenticalAuditCurrentFileName(String(progress?.currentFileName || ""));
+                } catch {
+                    // Ignore transient polling errors.
+                }
+            }, 500);
+            const payload = await runAdminIdenticalAudit({
+                authKey: authKeyDraft,
+                signal: controller.signal,
+                progressToken,
+            });
+            const groups = (Array.isArray(payload?.groups) ? payload.groups : []).map((group) => ({
+                ...group,
+                checked: true,
+                keepPointId: String(group?.points?.[0]?.id || ""),
+            }));
+            const summary = {
+                scannedPoints: Number(payload?.scannedPoints || 0),
+                failedPoints: Number(payload?.failedPoints || 0),
+                groups: groups.length,
+            };
+            setBulkIdenticalAuditSummary(summary);
+            setBulkIdenticalGroups(groups);
+            const logLines = (Array.isArray(payload?.log) ? payload.log : []).map(
+                (row) => `file=${row?.fileName || ""}; success=${row?.success ? "true" : "false"}; reason=${row?.reason || "No result"}`
+            );
+            if (groups.length > 0) {
+                for (const group of groups) {
+                    logLines.push(
+                        `group=${group.groupId}; benchmark=${group.benchmark}; duplicates=${Array.isArray(group.points) ? group.points.length : 0}; hash=${String(group.hash || "").slice(0, 16)}`
+                    );
+                }
+                setIsBulkIdenticalApplyModalOpen(true);
+            }
+            if (logLines.length > 0) {
+                setBulkIdenticalAuditLogText(logLines.join("\n"));
+            }
+            if (groups.length === 0) {
+                window.alert("Identical audit completed. No duplicate groups found.");
+            }
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                appendTextLog(setBulkIdenticalAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+                return;
+            }
+            setAdminPanelError(error?.message || "Failed to audit identical points.");
+        } finally {
+            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
+            bulkIdenticalProgressPollRef.current = null;
+            if (bulkIdenticalAbortRef.current === controller) {
+                bulkIdenticalAbortRef.current = null;
+            }
+            setIsBulkIdenticalAuditRunning(false);
+            setBulkIdenticalAuditProgress(null);
+            setBulkIdenticalAuditCurrentFileName("");
+        }
+    }
+
+    function setBulkIdenticalGroupChecked(groupId, checked) {
+        setBulkIdenticalGroups((prev) =>
+            prev.map((group) => (group.groupId === groupId ? { ...group, checked: Boolean(checked) } : group))
+        );
+    }
+
+    function openBulkIdenticalGroupPicker(groupId) {
+        setBulkIdenticalPickerGroupId(String(groupId || ""));
+    }
+
+    function closeBulkIdenticalGroupPicker() {
+        setBulkIdenticalPickerGroupId("");
+    }
+
+    function setBulkIdenticalGroupKeepPoint(groupId, pointId) {
+        const nextPointId = String(pointId || "").trim();
+        setBulkIdenticalGroups((prev) =>
+            prev.map((group) => {
+                if (group.groupId !== groupId) return group;
+                const points = Array.isArray(group.points) ? group.points : [];
+                const exists = points.some((point) => String(point?.id || "") === nextPointId);
+                return {
+                    ...group,
+                    keepPointId: exists ? nextPointId : String(points[0]?.id || ""),
+                };
+            })
+        );
+    }
+
+    function selectAllBulkIdenticalGroups() {
+        setBulkIdenticalGroups((prev) => prev.map((group) => ({ ...group, checked: true })));
+    }
+
+    function clearAllBulkIdenticalGroups() {
+        setBulkIdenticalGroups((prev) => prev.map((group) => ({ ...group, checked: false })));
+    }
+
+    function closeBulkIdenticalApplyModal() {
+        if (isBulkIdenticalApplying) return;
+        setBulkIdenticalPickerGroupId("");
+        setIsBulkIdenticalApplyModalOpen(false);
+    }
+
+    async function applySelectedBulkIdenticalGroups() {
+        const resolutions = bulkIdenticalGroups
+            .filter((group) => group.checked)
+            .map((group) => {
+                const points = Array.isArray(group.points) ? group.points : [];
+                if (points.length <= 1) return null;
+                const keepPointId = String(group.keepPointId || "").trim();
+                const keepPoint = points.find((point) => String(point?.id || "") === keepPointId) || points[0];
+                if (!keepPoint?.id) return null;
+                const removePointIds = points
+                    .filter((point) => String(point?.id || "") !== String(keepPoint.id))
+                    .map((point) => String(point?.id || "").trim())
+                    .filter(Boolean);
+                if (removePointIds.length === 0) return null;
+                return {
+                    keepPointId: String(keepPoint.id),
+                    removePointIds,
+                };
+            })
+            .filter(Boolean);
+
+        if (resolutions.length === 0) {
+            setIsBulkIdenticalApplyModalOpen(false);
+            return;
+        }
+
+        setIsBulkIdenticalApplying(true);
+        setAdminPanelError("");
+        try {
+            const result = await applyAdminIdenticalResolutions({
+                authKey: authKeyDraft,
+                resolutions,
+            });
+            const freshPoints = await fetchPoints();
+            setPoints(freshPoints);
+            setIsBulkIdenticalApplyModalOpen(false);
+            setBulkIdenticalPickerGroupId("");
+            setBulkIdenticalGroups([]);
+            window.alert(
+                `Identical groups applied: ${Number(result?.appliedGroups || 0)}. Deleted points: ${Number(result?.deletedPoints || 0)}.`
+            );
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to apply identical points resolutions.");
+        } finally {
+            setIsBulkIdenticalApplying(false);
+        }
+    }
+
     function stopBulkVerifyAllPoints() {
         if (!bulkVerifyAbortRef.current) return;
         bulkVerifyAbortRef.current.abort();
@@ -2087,6 +2523,12 @@ export default function App() {
         if (!bulkMetricsAbortRef.current) return;
         bulkMetricsAbortRef.current.abort();
         bulkMetricsAbortRef.current = null;
+    }
+
+    function stopBulkIdenticalAudit() {
+        if (!bulkIdenticalAbortRef.current) return;
+        bulkIdenticalAbortRef.current.abort();
+        bulkIdenticalAbortRef.current = null;
     }
 
     function setBulkVerifyCandidateChecked(pointId, checked) {
@@ -2184,6 +2626,19 @@ export default function App() {
         const a = document.createElement("a");
         a.href = url;
         a.download = `bulk-metrics-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function downloadBulkIdenticalAuditLog() {
+        if (!bulkIdenticalAuditLogText) return;
+        const blob = new Blob([bulkIdenticalAuditLogText], { type: "text/plain;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -2429,10 +2884,13 @@ export default function App() {
                             setUploadError(" ");
                         }}
                         uploadError={uploadError}
+                        uploadVerdictNote={uploadVerdictNote}
                         isUploading={isUploading}
+                        isUploadStopping={isUploadStopping}
                         uploadProgress={uploadProgress}
                         uploadLogText={uploadLogText}
                         onDownloadUploadLog={downloadUploadLog}
+                        onStopUpload={requestStopUpload}
                         selectedChecker={selectedChecker}
                         onSelectedCheckerChange={setSelectedChecker}
                         canUseFastHex={canUseFastHex}
@@ -2531,6 +2989,26 @@ export default function App() {
                             bulkMetricsAuditProgress={bulkMetricsAuditProgress}
                             bulkMetricsAuditLogText={bulkMetricsAuditLogText}
                             onDownloadBulkMetricsAuditLog={downloadBulkMetricsAuditLog}
+                            runBulkIdenticalAudit={runBulkIdenticalAudit}
+                            stopBulkIdenticalAudit={stopBulkIdenticalAudit}
+                            isBulkIdenticalAuditRunning={isBulkIdenticalAuditRunning}
+                            bulkIdenticalAuditSummary={bulkIdenticalAuditSummary}
+                            bulkIdenticalAuditLogText={bulkIdenticalAuditLogText}
+                            bulkIdenticalAuditProgress={bulkIdenticalAuditProgress}
+                            bulkIdenticalAuditCurrentFileName={bulkIdenticalAuditCurrentFileName}
+                            onDownloadBulkIdenticalAuditLog={downloadBulkIdenticalAuditLog}
+                            bulkIdenticalGroups={bulkIdenticalGroups}
+                            bulkIdenticalPickerGroupId={bulkIdenticalPickerGroupId}
+                            isBulkIdenticalApplyModalOpen={isBulkIdenticalApplyModalOpen}
+                            isBulkIdenticalApplying={isBulkIdenticalApplying}
+                            setBulkIdenticalGroupChecked={setBulkIdenticalGroupChecked}
+                            openBulkIdenticalGroupPicker={openBulkIdenticalGroupPicker}
+                            closeBulkIdenticalGroupPicker={closeBulkIdenticalGroupPicker}
+                            setBulkIdenticalGroupKeepPoint={setBulkIdenticalGroupKeepPoint}
+                            selectAllBulkIdenticalGroups={selectAllBulkIdenticalGroups}
+                            clearAllBulkIdenticalGroups={clearAllBulkIdenticalGroups}
+                            applySelectedBulkIdenticalGroups={applySelectedBulkIdenticalGroups}
+                            closeBulkIdenticalApplyModal={closeBulkIdenticalApplyModal}
                             bulkVerifyCandidates={bulkVerifyCandidates}
                             isBulkVerifyApplyModalOpen={isBulkVerifyApplyModalOpen}
                             setBulkVerifyCandidateChecked={setBulkVerifyCandidateChecked}

@@ -98,10 +98,11 @@ export async function fetchPoints() {
     return Array.isArray(data?.points) ? data.points : [];
 }
 
-export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize = 1 }) {
+export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize = 1, signal }) {
     const response = await fetch(apiUrl("/api/points-upload-url"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
     });
 
@@ -126,10 +127,11 @@ export async function requestUploadUrlDirect({ authKey, fileName, fileSize, batc
     return data;
 }
 
-export async function savePoint(pointPayload) {
+export async function savePoint(pointPayload, { signal } = {}) {
     const response = await fetch(apiUrl("/api/points"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify(pointPayload),
     });
 
@@ -162,10 +164,11 @@ export async function savePointDirect(pointPayload) {
     };
 }
 
-export async function validateUploadCircuits({ authKey, files, timeoutSeconds }) {
+export async function validateUploadCircuits({ authKey, files, timeoutSeconds, signal }) {
     const response = await fetch(apiUrl("/api/points-validate-upload"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({ authKey, files, timeoutSeconds }),
     });
 
@@ -241,6 +244,38 @@ export async function verifyPointCircuit({
     return data;
 }
 
+export async function checkPointDuplicate({
+    authKey,
+    benchmark,
+    delay,
+    area,
+    circuitText,
+    signal,
+}) {
+    const response = await fetch(apiUrl("/api/points-duplicate-check"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            benchmark,
+            delay,
+            area,
+            circuitText,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        const error = new Error(data?.error || "Failed to check duplicate point.");
+        error.code = data?.code || null;
+        throw error;
+    }
+    return {
+        duplicate: Boolean(data?.duplicate),
+        point: data?.point || null,
+    };
+}
+
 export async function fetchVerifyPointProgress({ token, signal }) {
     const query = new URLSearchParams({ token: String(token || "") });
     const response = await fetch(apiUrl(`/api/points-verify-progress?${query.toString()}`), { signal });
@@ -250,7 +285,16 @@ export async function fetchVerifyPointProgress({ token, signal }) {
         error.code = response.status;
         throw error;
     }
-    return data;
+    return {
+        ok: Boolean(data?.ok),
+        status: String(data?.status || "queued"),
+        done: Boolean(data?.done),
+        error: data?.error ? String(data.error) : null,
+        doneCount: Number(data?.doneCount || 0),
+        totalCount: Number(data?.totalCount || 0),
+        currentFileName: String(data?.currentFileName || ""),
+        updatedAt: Number(data?.updatedAt || Date.now()),
+    };
 }
 
 export async function runAdminBulkVerify({ authKey, checkerVersion }) {
@@ -325,6 +369,47 @@ export async function runAdminMetricsAuditPoint({ authKey, pointId, signal, prog
     }
     const mismatches = Array.isArray(data?.mismatches) ? data.mismatches : [];
     return mismatches[0] || null;
+}
+
+export async function runAdminIdenticalAudit({ authKey, signal, progressToken }) {
+    const response = await fetch(apiUrl("/api/admin-points-identical"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({ authKey, mode: "scan", progressToken }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to run identical points audit.");
+    }
+    return {
+        scannedPoints: Number(data?.scannedPoints || 0),
+        failedPoints: Number(data?.failedPoints || 0),
+        failures: Array.isArray(data?.failures) ? data.failures : [],
+        log: Array.isArray(data?.log) ? data.log : [],
+        groups: Array.isArray(data?.groups) ? data.groups : [],
+    };
+}
+
+export async function applyAdminIdenticalResolutions({ authKey, resolutions, signal }) {
+    const response = await fetch(apiUrl("/api/admin-points-identical"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            mode: "apply",
+            resolutions,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to apply identical points resolutions.");
+    }
+    return {
+        deletedPoints: Number(data?.deletedPoints || 0),
+        appliedGroups: Number(data?.appliedGroups || 0),
+    };
 }
 
 export async function planTruthTablesUpload({ authKey, fileNames }) {

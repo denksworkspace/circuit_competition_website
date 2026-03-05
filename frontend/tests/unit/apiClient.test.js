@@ -1,6 +1,7 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    applyAdminIdenticalResolutions,
     deletePoint,
     fetchCommandByAuthKey,
     fetchCommands,
@@ -8,6 +9,7 @@ import {
     planTruthTablesUpload,
     requestTruthUploadUrl,
     requestUploadUrl,
+    runAdminIdenticalAudit,
     savePoint,
     saveTruthTable,
 } from "../../src/services/apiClient.js";
@@ -95,5 +97,23 @@ describe("apiClient", () => {
         }));
         await expect(saveTruthTable({ authKey: "k", fileName: "bench200.truth" }))
             .rejects.toMatchObject({ message: "exists", code: "TRUTH_EXISTS" });
+    });
+
+    it("runAdminIdenticalAudit returns normalized summary", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({
+            body: { scannedPoints: 10, failedPoints: 1, failures: [{ pointId: "p1" }], log: [{ fileName: "a.bench", success: true }], groups: [{ groupId: "g1" }] },
+        }));
+        await expect(runAdminIdenticalAudit({ authKey: "k" })).resolves.toEqual({
+            scannedPoints: 10,
+            failedPoints: 1,
+            failures: [{ pointId: "p1" }],
+            log: [{ fileName: "a.bench", success: true }],
+            groups: [{ groupId: "g1" }],
+        });
+    });
+
+    it("applyAdminIdenticalResolutions throws api error message", async () => {
+        fetch.mockResolvedValueOnce(mockResponse({ ok: false, body: { error: "denied" } }));
+        await expect(applyAdminIdenticalResolutions({ authKey: "k", resolutions: [] })).rejects.toThrow("denied");
     });
 });

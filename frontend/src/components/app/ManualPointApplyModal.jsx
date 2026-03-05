@@ -28,7 +28,9 @@ export function ManualPointApplyModal({
                                 disabled={isApplying}
                             />
                             <span>
-                                Add point with delay={row.delay}, area={row.area}, verdict={row.verdict} to the chart?
+                                Add point with bench={row.bench}, delay={row.delay}, area={row.area}, verdict={row.verdict}
+                                {row.verdictReason ? ` (${row.verdictReason})` : ""} to the chart?
+                                {row.reason ? ` ${row.reason}` : ""}
                             </span>
                         </label>
                     ))}

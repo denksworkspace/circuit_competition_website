@@ -85,7 +85,6 @@ describe("api/points-upload-url handler", () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
 
         const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10 } });
         const res = createMockRes();
@@ -117,16 +116,16 @@ describe("api/points-upload-url handler", () => {
         expect(res.statusCode).toBe(413);
     });
 
-    it("returns 409 on duplicate point", async () => {
+    it("allows duplicate benchmark/delay/area for the same user", async () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [{ id: "dup" }] });
 
         const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
         await handler(req, res);
-        expect(res.statusCode).toBe(409);
+        expect(res.statusCode).toBe(200);
+        expect(res.body.uploadUrl).toBe("https://signed.example/upload");
     });
 
     it("returns 500 when s3 env incomplete", async () => {
@@ -134,7 +133,6 @@ describe("api/points-upload-url handler", () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, role: "leader", max_single_upload_bytes: 500 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
 
         const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();
@@ -146,7 +144,6 @@ describe("api/points-upload-url handler", () => {
         sql.mockResolvedValueOnce({
             rows: [{ id: 1, role: "admin", max_single_upload_bytes: 50 * 1024 * 1024 * 1024, total_upload_quota_bytes: 50 * 1024 * 1024 * 1024, uploaded_bytes_total: 0 }],
         });
-        sql.mockResolvedValueOnce({ rows: [] });
 
         const req = createMockReq({ method: "POST", body: { authKey: "k", fileName: benchName, fileSize: 10, batchSize: 1 } });
         const res = createMockRes();

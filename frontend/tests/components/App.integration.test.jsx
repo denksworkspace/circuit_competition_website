@@ -50,6 +50,7 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
         "GET /api/points": () => Promise.resolve(jsonResponse(200, { points })),
         "GET /api/commands": () => Promise.resolve(jsonResponse(200, { commands })),
         "POST /api/auth": () => Promise.resolve(jsonResponse(authStatus, authBody)),
+        "POST /api/points-duplicate-check": () => Promise.resolve(jsonResponse(200, { duplicate: false, point: null })),
         "GET /api/admin-users?authKey=key_ok&scope=all&limit=1000": () =>
             Promise.resolve(jsonResponse(200, { actionLogs: [] })),
     };
@@ -304,7 +305,7 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         expect(
-            await screen.findByLabelText("Add point with delay=15, area=40, verdict=failed to the chart?")
+            await screen.findByLabelText(/Add point with bench=254, delay=15, area=40, verdict=failed/)
         ).toBeInTheDocument();
         expect(calls).toEqual(["validate-upload"]);
     });
