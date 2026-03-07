@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MAX_MULTI_FILE_BATCH_COUNT } from "../constants/appConstants.js";
 import {
     fetchAdminMaintenanceSettings,
@@ -47,11 +47,11 @@ export function useAdminUserSettings({
         );
     }
 
-    async function loadMaintenanceSettings() {
+    const loadMaintenanceSettings = useCallback(async () => {
         if (!isAdmin) return;
         const maintenancePayload = await fetchAdminMaintenanceSettings({ authKey: authKeyDraft });
         applyMaintenanceDrafts(maintenancePayload?.maintenance || {});
-    }
+    }, [isAdmin, authKeyDraft]);
 
     async function loadAdminUser() {
         if (!isAdmin) return;
@@ -131,7 +131,7 @@ export function useAdminUserSettings({
         loadMaintenanceSettings().catch(() => {
             // do not block main UI on maintenance read failures
         });
-    }, [isAdmin, authKeyDraft]);
+    }, [isAdmin, authKeyDraft, loadMaintenanceSettings]);
 
     return {
         adminUserIdDraft,

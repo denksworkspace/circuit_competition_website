@@ -54,6 +54,42 @@ function buildPath(frontRaw) {
     return parts.join(" ");
 }
 
+function getPointAlongPareto(frontRaw, progressRaw) {
+    const front = Array.isArray(frontRaw) ? frontRaw : [];
+    if (front.length === 0) return { x: AXIS_MIN, y: AXIS_MAX };
+    if (front.length === 1) {
+        return { x: toSvgX(front[0].x), y: toSvgY(front[0].y) };
+    }
+
+    const progress = Math.max(0, Math.min(1, Number(progressRaw) || 0));
+    const segments = [];
+    let totalLength = 0;
+    for (let i = 1; i < front.length; i += 1) {
+        const x1 = toSvgX(front[i - 1].x);
+        const y1 = toSvgY(front[i - 1].y);
+        const x2 = toSvgX(front[i].x);
+        const y2 = toSvgY(front[i].y);
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        segments.push({ x1, y1, x2, y2, len });
+        totalLength += len;
+    }
+    if (totalLength <= 0) return { x: toSvgX(front[0].x), y: toSvgY(front[0].y) };
+
+    let target = totalLength * progress;
+    for (const seg of segments) {
+        if (target <= seg.len) {
+            const t = seg.len > 0 ? target / seg.len : 0;
+            return {
+                x: seg.x1 + (seg.x2 - seg.x1) * t,
+                y: seg.y1 + (seg.y2 - seg.y1) * t,
+            };
+        }
+        target -= seg.len;
+    }
+    const last = segments[segments.length - 1];
+    return { x: last.x2, y: last.y2 };
+}
+
 export function MaintenanceScreen() {
     const [points, setPoints] = useState(() => generatePoints());
     const pareto = useMemo(() => computePareto(points), [points]);
@@ -100,18 +136,7 @@ export function MaintenanceScreen() {
     }, [pathD]);
 
     const dashOffset = Math.max(0, pathLength * (1 - progress));
-    let pencilX = AXIS_MIN;
-    let pencilY = AXIS_MAX;
-    const pathNode = pathRef.current;
-    if (pathNode) {
-        try {
-            const point = pathNode.getPointAtLength(pathLength * progress);
-            pencilX = point.x;
-            pencilY = point.y;
-        } catch {
-            // Keep fallback values.
-        }
-    }
+    const pencilPosition = useMemo(() => getPointAlongPareto(pareto, progress), [pareto, progress]);
 
     return (
         <div className="maintenanceScreen">
@@ -146,7 +171,7 @@ export function MaintenanceScreen() {
                         />
 
                         <g
-                            transform={`translate(${pencilX},${pencilY}) rotate(${pencilAngleDeg})`}
+                            transform={`translate(${pencilPosition.x},${pencilPosition.y}) rotate(${pencilAngleDeg})`}
                             className="maintenancePencil"
                         >
                             <rect x="-22.4" y="-2.45" width="3.4" height="4.9" rx="1.1" className="maintenancePencilEraser" />
