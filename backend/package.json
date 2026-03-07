@@ -7,7 +7,9 @@
     "dev": "node server/render-api.mjs",
     "start": "node server/render-api.mjs",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:run:fast": "vitest run --exclude tests/security/**",
+    "test:run:security": "vitest run tests/security/**"
   },
   "dependencies": {
     "@vercel/postgres": "^0.10.0"

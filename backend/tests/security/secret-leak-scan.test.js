@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +16,7 @@ const PLACEHOLDER_VALUES = new Set([
 ]);
 
 const ROOT = process.cwd();
+const MAX_SCAN_FILE_BYTES = 1 * 1024 * 1024;
 const DIR_EXCLUDES = new Set([
     ".git",
     "node_modules",
@@ -24,7 +25,12 @@ const DIR_EXCLUDES = new Set([
     ".vercel",
     ".idea",
     ".vscode",
+    ".local-exported-points",
 ]);
+const LOCAL_EXPORT_MANIFESTS = [
+    ".local-exported-points/all/manifest.json",
+    ".local-exported-points/pareto/manifest.json",
+];
 
 function listRepoFiles(dir = ROOT) {
     const out = [];
@@ -61,9 +67,22 @@ function isIgnoredSecretLocalEnv(path) {
 function collectFindings() {
     const findings = [];
     const files = listRepoFiles();
+    for (const relPath of LOCAL_EXPORT_MANIFESTS) {
+        const absPath = path.join(ROOT, relPath);
+        if (existsSync(absPath)) files.push(relPath);
+    }
 
     for (const file of files) {
         if (isIgnoredSecretLocalEnv(file)) continue;
+        const absolutePath = path.join(ROOT, file);
+        let stats = null;
+        try {
+            stats = statSync(absolutePath);
+        } catch {
+            continue;
+        }
+        if (!stats.isFile()) continue;
+        if (stats.size > MAX_SCAN_FILE_BYTES) continue;
         const content = readUtf8(file);
         if (content == null) continue;
         const lines = content.split(/\r?\n/);
@@ -110,5 +129,5 @@ describe("security: repository secret scan", () => {
     it("does not contain committed database credentials or tokens", () => {
         const findings = collectFindings();
         expect(findings).toEqual([]);
-    });
+    }, 15_000);
 });

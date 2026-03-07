@@ -1,0 +1,30 @@
+export function getBenchFilesError({
+    files,
+    maxMultiFileBatchCount,
+    maxSingleUploadBytes,
+    remainingUploadBytes,
+    formatGb,
+    parseBenchFileName,
+}) {
+    if (!Array.isArray(files) || files.length === 0) return "";
+    if (files.length > maxMultiFileBatchCount) {
+        return `Too many files selected. Maximum is ${maxMultiFileBatchCount}.`;
+    }
+
+    for (const file of files) {
+        const parsed = parseBenchFileName(file.name);
+        if (!parsed.ok) return parsed.error;
+        if (file.size > maxSingleUploadBytes) {
+            return `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`;
+        }
+    }
+
+    if (files.length > 1) {
+        const batchBytes = files.reduce((sum, file) => sum + file.size, 0);
+        if (batchBytes > remainingUploadBytes) {
+            return `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`;
+        }
+    }
+
+    return "";
+}

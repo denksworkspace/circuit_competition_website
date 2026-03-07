@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import {
     DEFAULT_TEST_COMMAND_COUNT,
@@ -22,43 +22,25 @@ import { PointActionModal } from "./components/app/PointActionModal.jsx";
 import { ManualPointApplyModal } from "./components/app/ManualPointApplyModal.jsx";
 import {
     buildAxis,
-    buildStoredFileName,
     computeParetoFrontOriginal,
     computePlottedPoint,
     getRoleLabel,
-    parseBenchFileName,
     uid,
 } from "./utils/pointUtils.js";
 import { clamp, formatIntNoGrouping, parsePosIntCapped } from "./utils/numberUtils.js";
 import { chooseAreaSmartFromParetoFront, randInt, randomChoice } from "./utils/testPointUtils.js";
-import {
-    applyAdminIdenticalResolutions,
-    checkPointDuplicate,
-    applyAdminPointStatuses,
-    deletePoint,
-    exportAdminDatabase,
-    exportAdminSchemesZip,
-    fetchAdminActionLogs,
-    fetchAdminUserById,
-    fetchCommandByAuthKey,
-    fetchCommands,
-    fetchPoints,
-    fetchAdminExportProgress,
-    planTruthTablesUpload,
-    runAdminBulkVerifyPoint,
-    runAdminIdenticalAudit,
-    runAdminMetricsAuditPoint,
-    requestUploadUrl,
-    requestTruthUploadUrl,
-    savePoint,
-    saveTruthTable,
-    updateAdminUserUploadSettings,
-    validateUploadCircuits,
-    fetchVerifyPointProgress,
-    verifyPointCircuit,
-} from "./services/apiClient.js";
+import { useAppAuth } from "./hooks/useAppAuth.js";
+import { useAdminLogs } from "./hooks/useAdminLogs.js";
+import { useBenchmarkMenu } from "./hooks/useBenchmarkMenu.js";
+import { useAdminBulkActions } from "./hooks/useAdminBulkActions.js";
+import { useAdminExportFlow } from "./hooks/useAdminExportFlow.js";
+import { useBenchUploadFlow } from "./hooks/useBenchUploadFlow.js";
+import { usePointActions } from "./hooks/usePointActions.js";
+import { usePointTesting } from "./hooks/usePointTesting.js";
+import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
+import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
+import { downloadTextAsFile } from "./utils/fileDownloadUtils.js";
 
-const MAX_TRUTH_BATCH_FILES = 100;
 const CHECKER_ABC = "ABC";
 const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
 const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
@@ -79,48 +61,23 @@ export default function App() {
     const [lastAddedId, setLastAddedId] = useState(null);
     const [commands, setCommands] = useState(() => []);
     const commandByName = useMemo(() => new Map(commands.map((c) => [c.name, c])), [commands]);
-
-    const [authKeyDraft, setAuthKeyDraft] = useState(() => localStorage.getItem("bench_auth_key") || "");
-    const [currentCommand, setCurrentCommand] = useState(null);
-    const [authError, setAuthError] = useState("");
-    const [isAuthChecking, setIsAuthChecking] = useState(false);
-    const [isBootstrapping, setIsBootstrapping] = useState(true);
-
-    async function tryLogin(e) {
-        e.preventDefault();
-        const k = authKeyDraft.trim();
-        if (!k) {
-            setAuthError("Key is required.");
-            return;
-        }
-        setIsAuthChecking(true);
-        try {
-            const cmd = await fetchCommandByAuthKey(k);
-            if (!cmd) throw new Error("Invalid key.");
-            localStorage.setItem("bench_auth_key", k);
-            setCurrentCommand(cmd);
-            setAuthError("");
-        } catch (err) {
-            setAuthError(err?.message || "Invalid key.");
-            setCurrentCommand(null);
-        } finally {
-            setIsAuthChecking(false);
-        }
-    }
-
-    function logout() {
-        localStorage.removeItem("bench_auth_key");
-        setCurrentCommand(null);
-        setAuthKeyDraft("");
-        setAuthError("");
-    }
+    const {
+        authKeyDraft,
+        setAuthKeyDraft,
+        currentCommand,
+        setCurrentCommand,
+        authError,
+        isAuthChecking,
+        isBootstrapping,
+        tryLogin,
+        logout,
+    } = useAppAuth({ setPoints, setCommands });
 
     // Command filter (Codeforces-like tag chips). If none selected -> show all.
     const [commandQuery, setCommandQuery] = useState("");
     const [selectedCommands, setSelectedCommands] = useState(() => []);
     const selectedCommandSet = useMemo(() => new Set(selectedCommands), [selectedCommands]);
-    const [benchmarkMenuOpen, setBenchmarkMenuOpen] = useState(false);
-    const benchmarkMenuRef = useRef(null);
+    const { benchmarkMenuOpen, setBenchmarkMenuOpen, benchmarkMenuRef } = useBenchmarkMenu();
 
     function addSelectedCommand(name) {
         setSelectedCommands((prev) => (prev.includes(name) ? prev : [...prev, name]));
@@ -130,55 +87,8 @@ export default function App() {
         setSelectedCommands((prev) => prev.filter((x) => x !== name));
     }
 
-    function addSelectedAdminLogAction(action) {
-        setSelectedAdminLogActions((prev) => (prev.includes(action) ? prev : [...prev, action]));
-    }
-
-    function removeSelectedAdminLogAction(action) {
-        setSelectedAdminLogActions((prev) => prev.filter((x) => x !== action));
-    }
-
-    // Upload
-    const [benchFiles, setBenchFiles] = useState(() => []);
-    const [descriptionDraft, setDescriptionDraft] = useState("");
-    const [selectedChecker, setSelectedChecker] = useState("ABC");
-    const [uploadError, setUploadError] = useState(" ");
-    const [isUploading, setIsUploading] = useState(false);
-    const [isUploadStopping, setIsUploadStopping] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(null);
-    const fileInputRef = useRef(null);
-    const [uploadLogText, setUploadLogText] = useState("");
-    const [uploadVerdictNote, setUploadVerdictNote] = useState("");
-    const [selectedParser, setSelectedParser] = useState("ABC");
-    const [checkerTleSecondsDraft, setCheckerTleSecondsDraft] = useState("60");
-    const [parserTleSecondsDraft, setParserTleSecondsDraft] = useState("60");
-    const [isUploadSettingsOpen, setIsUploadSettingsOpen] = useState(false);
-    const [manualApplyRows, setManualApplyRows] = useState(() => []);
-    const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
-    const [isManualApplying, setIsManualApplying] = useState(false);
     const [navigateNotice, setNavigateNotice] = useState("");
-    const [actionPoint, setActionPoint] = useState(null);
-    const [selectedTestChecker, setSelectedTestChecker] = useState(DEFAULT_CHECKER_VERSION);
-    const [testingPointId, setTestingPointId] = useState(null);
-    const [testingPointLabel, setTestingPointLabel] = useState("");
-    const testingPointTickerRef = useRef(null);
-    const testingAbortRef = useRef(null);
-    const testingProgressPollRef = useRef(null);
 
-    function mapVerifyProgressLabel(statusRaw, tleSeconds) {
-        const status = String(statusRaw || "").trim().toLowerCase();
-        if (status === "queued") return "Testing: queued";
-        if (status === "auth") return "Testing: auth";
-        if (status === "download_point") return "Testing: download point";
-        if (status === "read_truth") return "Testing: read_truth";
-        if (status === "cec") return `Testing: cec -T ${tleSeconds} -n`;
-        if (status === "truth_to_hex") return "Testing: truth -> hex";
-        if (status === "bench_to_hex") return "Testing: bench -> hex";
-        if (status === "hex_compare") return "Testing: hex compare";
-        if (status === "done") return "Testing: done";
-        if (status === "error") return "Testing: failed";
-        return "Testing...";
-    }
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
     const uploadedBytesTotal = Math.max(0, Number(currentCommand?.uploadedBytesTotal || 0));
@@ -186,87 +96,178 @@ export default function App() {
     const maxMultiFileBatchCount = Math.max(1, Number(currentCommand?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
     const verifyTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcVerifyTimeoutSeconds || 60));
     const metricsTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcMetricsTimeoutSeconds || 60));
-    const uploadCountdownRef = useRef(null);
-    const uploadStopRequestedRef = useRef(false);
-    const uploadAbortRef = useRef(null);
-
-    const [adminUserIdDraft, setAdminUserIdDraft] = useState("");
-    const [adminPanelError, setAdminPanelError] = useState("");
-    const [adminUser, setAdminUser] = useState(null);
-    const [adminLogs, setAdminLogs] = useState(() => []);
-    const [adminLogCommandQuery, setAdminLogCommandQuery] = useState("");
-    const [adminLogActionQuery, setAdminLogActionQuery] = useState("");
-    const [selectedAdminLogActions, setSelectedAdminLogActions] = useState(() => []);
-    const [adminSingleGbDraft, setAdminSingleGbDraft] = useState("");
-    const [adminTotalGbDraft, setAdminTotalGbDraft] = useState("");
-    const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
-    const [adminVerifyTleSecondsDraft, setAdminVerifyTleSecondsDraft] = useState("");
-    const [adminMetricsTleSecondsDraft, setAdminMetricsTleSecondsDraft] = useState("");
-    const [isAdminLoading, setIsAdminLoading] = useState(false);
-    const [isAdminSaving, setIsAdminSaving] = useState(false);
-    const [isAdminSchemesExporting, setIsAdminSchemesExporting] = useState(false);
-    const [isAdminDbExporting, setIsAdminDbExporting] = useState(false);
-    const [adminSchemesExportProgress, setAdminSchemesExportProgress] = useState(null);
-    const [adminDbExportProgress, setAdminDbExportProgress] = useState(null);
-    const [adminExportError, setAdminExportError] = useState("");
-    const [adminSchemesExportScope, setAdminSchemesExportScope] = useState("all");
-    const [adminSchemesVerdictScope, setAdminSchemesVerdictScope] = useState("verify");
-    const [isAdminSchemesExportModalOpen, setIsAdminSchemesExportModalOpen] = useState(false);
     const [isAdminQuotaSettingsOpen, setIsAdminQuotaSettingsOpen] = useState(false);
-    const [truthFiles, setTruthFiles] = useState(() => []);
-    const truthFilesInputRef = useRef(null);
-    const [isTruthUploading, setIsTruthUploading] = useState(false);
-    const [truthUploadProgress, setTruthUploadProgress] = useState(null);
-    const [truthUploadError, setTruthUploadError] = useState("");
-    const [truthUploadLogText, setTruthUploadLogText] = useState("");
-    const [truthConflicts, setTruthConflicts] = useState(() => []);
-    const [isTruthConflictModalOpen, setIsTruthConflictModalOpen] = useState(false);
-    const [isBulkVerifyRunning, setIsBulkVerifyRunning] = useState(false);
-    const [selectedBulkVerifyChecker, setSelectedBulkVerifyChecker] = useState(DEFAULT_CHECKER_VERSION);
-    const [bulkVerifyIncludeVerified, setBulkVerifyIncludeVerified] = useState(true);
-    const [bulkVerifyCurrentFileName, setBulkVerifyCurrentFileName] = useState("");
-    const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
-    const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
-    const [bulkMetricsAuditCurrentFileName, setBulkMetricsAuditCurrentFileName] = useState("");
-    const [bulkMetricsAuditLogText, setBulkMetricsAuditLogText] = useState("");
-    const [bulkVerifyProgress, setBulkVerifyProgress] = useState(null);
-    const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
-    const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
-    const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
-    const [isBulkIdenticalAuditRunning, setIsBulkIdenticalAuditRunning] = useState(false);
-    const [bulkIdenticalAuditSummary, setBulkIdenticalAuditSummary] = useState(null);
-    const [bulkIdenticalAuditLogText, setBulkIdenticalAuditLogText] = useState("");
-    const [bulkIdenticalAuditProgress, setBulkIdenticalAuditProgress] = useState(null);
-    const [bulkIdenticalAuditCurrentFileName, setBulkIdenticalAuditCurrentFileName] = useState("");
-    const [bulkIdenticalGroups, setBulkIdenticalGroups] = useState(() => []);
-    const [isBulkIdenticalApplyModalOpen, setIsBulkIdenticalApplyModalOpen] = useState(false);
-    const [isBulkIdenticalApplying, setIsBulkIdenticalApplying] = useState(false);
-    const [bulkIdenticalPickerGroupId, setBulkIdenticalPickerGroupId] = useState("");
-    const bulkVerifyAbortRef = useRef(null);
-    const bulkMetricsAbortRef = useRef(null);
-    const bulkIdenticalAbortRef = useRef(null);
-    const bulkIdenticalProgressPollRef = useRef(null);
-    const adminSchemesExportAbortRef = useRef(null);
-    const adminDbExportAbortRef = useRef(null);
-    const adminSchemesExportPollRef = useRef(null);
-    const adminDbExportPollRef = useRef(null);
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
     const canUseFastHex = isAdmin;
+    const {
+        isAdminSchemesExporting,
+        isAdminDbExporting,
+        adminSchemesExportProgress,
+        adminDbExportProgress,
+        adminExportError,
+        adminSchemesExportScope,
+        setAdminSchemesExportScope,
+        adminSchemesVerdictScope,
+        setAdminSchemesVerdictScope,
+        isAdminSchemesExportModalOpen,
+        setIsAdminSchemesExportModalOpen,
+        downloadAllSchemesZip,
+        startAdminSchemesExportFromModal,
+        downloadDatabaseExport,
+    } = useAdminExportFlow({ authKeyDraft });
+    const {
+        adminLogCommandQuery,
+        setAdminLogCommandQuery,
+        adminLogActionQuery,
+        setAdminLogActionQuery,
+        selectedAdminLogActions,
+        addSelectedAdminLogAction,
+        removeSelectedAdminLogAction,
+        selectedAdminLogActionSet,
+        availableAdminLogActions,
+        filteredAdminLogs,
+        adminLogsPreview,
+        adminLogsHasMore,
+        refreshAdminLogs,
+    } = useAdminLogs({ isAdmin, authKeyDraft, commands });
+    const {
+        adminUserIdDraft,
+        setAdminUserIdDraft,
+        adminPanelError,
+        setAdminPanelError,
+        adminUser,
+        adminSingleGbDraft,
+        setAdminSingleGbDraft,
+        adminTotalGbDraft,
+        setAdminTotalGbDraft,
+        adminBatchCountDraft,
+        setAdminBatchCountDraft,
+        adminVerifyTleSecondsDraft,
+        setAdminVerifyTleSecondsDraft,
+        adminMetricsTleSecondsDraft,
+        setAdminMetricsTleSecondsDraft,
+        isAdminLoading,
+        isAdminSaving,
+        loadAdminUser,
+        saveAdminUserSettings,
+    } = useAdminUserSettings({
+        isAdmin,
+        authKeyDraft,
+        formatGb,
+        refreshAdminLogs,
+    });
+    const {
+        isBulkVerifyRunning,
+        selectedBulkVerifyChecker,
+        setSelectedBulkVerifyChecker,
+        bulkVerifyIncludeVerified,
+        setBulkVerifyIncludeVerified,
+        bulkVerifyCurrentFileName,
+        bulkVerifyLogText,
+        isBulkMetricsAuditRunning,
+        bulkMetricsAuditCurrentFileName,
+        bulkMetricsAuditLogText,
+        bulkVerifyProgress,
+        bulkMetricsAuditProgress,
+        bulkVerifyCandidates,
+        isBulkVerifyApplyModalOpen,
+        isBulkIdenticalAuditRunning,
+        bulkIdenticalAuditSummary,
+        bulkIdenticalAuditLogText,
+        bulkIdenticalAuditProgress,
+        bulkIdenticalAuditCurrentFileName,
+        bulkIdenticalGroups,
+        isBulkIdenticalApplyModalOpen,
+        isBulkIdenticalApplying,
+        bulkIdenticalPickerGroupId,
+        runBulkVerifyAllPoints,
+        runBulkMetricsAudit,
+        runBulkIdenticalAudit,
+        setBulkIdenticalGroupChecked,
+        openBulkIdenticalGroupPicker,
+        closeBulkIdenticalGroupPicker,
+        setBulkIdenticalGroupKeepPoint,
+        selectAllBulkIdenticalGroups,
+        clearAllBulkIdenticalGroups,
+        closeBulkIdenticalApplyModal,
+        applySelectedBulkIdenticalGroups,
+        stopBulkVerifyAllPoints,
+        stopBulkMetricsAudit,
+        stopBulkIdenticalAudit,
+        setBulkVerifyCandidateChecked,
+        selectAllBulkVerifyCandidates,
+        clearAllBulkVerifyCandidates,
+        closeBulkVerifyApplyModal,
+        applySelectedBulkVerifyCandidates,
+    } = useAdminBulkActions({
+        authKeyDraft,
+        points,
+        setPoints,
+        setAdminPanelError,
+        normalizeCheckerForActor,
+        enabledCheckers: ENABLED_CHECKERS,
+        defaultCheckerVersion: DEFAULT_CHECKER_VERSION,
+    });
+    const {
+        actionPoint,
+        getPointDownloadUrl,
+        canDeletePoint,
+        canTestPoint,
+        downloadCircuit,
+        openPointActionModal,
+        closePointActionModal,
+        confirmAndDeletePoint,
+    } = usePointActions({
+        points,
+        setPoints,
+        lastAddedId,
+        setLastAddedId,
+        currentCommand,
+        authKeyDraft,
+    });
+    const {
+        selectedTestChecker,
+        setSelectedTestChecker,
+        testingPointId,
+        testingPointLabel,
+        onTestPoint,
+    } = usePointTesting({
+        authKeyDraft,
+        currentCommand,
+        isAdmin,
+        verifyTimeoutQuotaSeconds,
+        normalizeCheckerForActor,
+        enabledCheckers: ENABLED_CHECKERS,
+        defaultCheckerVersion: DEFAULT_CHECKER_VERSION,
+        setPoints,
+    });
+    const {
+        truthFilesInputRef,
+        onTruthFilesChange,
+        uploadTruthTables,
+        isTruthUploading,
+        truthUploadError,
+        truthUploadLogText,
+        truthUploadProgress,
+        truthConflicts,
+        isTruthConflictModalOpen,
+        setTruthConflictChecked,
+        selectAllTruthConflicts,
+        clearAllTruthConflicts,
+        applyTruthConflicts,
+        closeTruthConflictModal,
+    } = useTruthUploadFlow({
+        authKeyDraft,
+        maxSingleUploadBytes,
+        remainingUploadBytes,
+        formatGb,
+    });
 
-    useEffect(() => {
-        return () => {
-            if (adminSchemesExportPollRef.current) clearInterval(adminSchemesExportPollRef.current);
-            if (adminDbExportPollRef.current) clearInterval(adminDbExportPollRef.current);
-            if (adminSchemesExportAbortRef.current) adminSchemesExportAbortRef.current.abort();
-            if (adminDbExportAbortRef.current) adminDbExportAbortRef.current.abort();
-        };
-    }, []);
-
-    const normalizeCheckerForActor = (checkerRaw) => {
+    function normalizeCheckerForActor(checkerRaw) {
         const checker = String(checkerRaw || "").trim();
         if (checker === CHECKER_ABC_FAST_HEX && !canUseFastHex) return CHECKER_ABC;
         return checker;
-    };
+    }
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
@@ -275,6 +276,55 @@ export default function App() {
         "non-verified": true,
         verified: true,
         failed: true,
+    });
+    const {
+        benchFiles,
+        descriptionDraft,
+        setDescriptionDraft,
+        selectedChecker,
+        setSelectedChecker,
+        uploadError,
+        setUploadError,
+        isUploading,
+        isUploadStopping,
+        uploadProgress,
+        fileInputRef,
+        uploadLogText,
+        uploadVerdictNote,
+        selectedParser,
+        setSelectedParser,
+        checkerTleSecondsDraft,
+        setCheckerTleSecondsDraft,
+        parserTleSecondsDraft,
+        setParserTleSecondsDraft,
+        isUploadSettingsOpen,
+        setIsUploadSettingsOpen,
+        manualApplyRows,
+        isManualApplyOpen,
+        isManualApplying,
+        onFileChange,
+        requestStopUpload,
+        addPointFromFile,
+        uploadDisabledReason,
+        canAdd,
+        setManualApplyChecked,
+        applyManualRows,
+        closeManualApplyModal,
+    } = useBenchUploadFlow({
+        authKeyDraft,
+        currentCommand,
+        setCurrentCommand,
+        setPoints,
+        setLastAddedId,
+        setBenchmarkFilter,
+        maxSingleUploadBytes,
+        remainingUploadBytes,
+        maxMultiFileBatchCount,
+        verifyTimeoutQuotaSeconds,
+        metricsTimeoutQuotaSeconds,
+        formatGb,
+        normalizeCheckerForActor,
+        enabledCheckers: ENABLED_CHECKERS,
     });
 
     const [deletePrefix, setDeletePrefix] = useState("");
@@ -358,13 +408,27 @@ export default function App() {
         fitViewToPoints(visiblePoints);
     }, [fitViewToPoints, visiblePoints]);
 
-    const prevBenchmarkRef = useRef(benchmarkFilter);
-    useEffect(() => {
-        if (prevBenchmarkRef.current !== benchmarkFilter) {
-            fitViewToAllVisiblePoints();
-            prevBenchmarkRef.current = benchmarkFilter;
+    const onSelectBenchmark = useCallback((benchmark) => {
+        const nextBenchmark = String(benchmark);
+        setBenchmarkFilter(nextBenchmark);
+        setBenchmarkMenuOpen(false);
+
+        const nextVisible = points.filter((p) => {
+            if (nextBenchmark === "test") {
+                if (p.benchmark !== "test") return false;
+            } else {
+                if (String(p.benchmark) !== nextBenchmark) return false;
+            }
+            if (!statusFilter[p.status]) return false;
+            if (selectedCommands.length > 0 && !selectedCommandSet.has(p.sender)) return false;
+            return true;
+        });
+
+        const nextPareto = computeParetoFrontOriginal(nextVisible);
+        if (!fitViewToPoints(nextPareto)) {
+            fitViewToPoints(nextVisible);
         }
-    }, [benchmarkFilter, fitViewToAllVisiblePoints]);
+    }, [fitViewToPoints, points, selectedCommandSet, selectedCommands.length, setBenchmarkMenuOpen, statusFilter]);
 
     // Pareto DISPLAY points: show only the segment inside the current rectangle
     // (no recomputation of membership, only cropping for display)
@@ -419,1016 +483,6 @@ export default function App() {
         if (!currentCommand) return [];
         return points.filter((p) => p.sender === currentCommand.name);
     }, [points, currentCommand]);
-
-    useEffect(() => {
-        let alive = true;
-        const savedKey = (localStorage.getItem("bench_auth_key") || "").trim();
-        const authPromise = savedKey ? fetchCommandByAuthKey(savedKey).catch(() => null) : Promise.resolve(null);
-        Promise.all([fetchPoints(), fetchCommands(), authPromise])
-            .then(([rows, dbCommands, authedCommand]) => {
-                if (!alive) return;
-                setPoints(rows);
-                setCommands(dbCommands);
-                if (authedCommand) {
-                    setCurrentCommand(authedCommand);
-                    setAuthError("");
-                } else if (savedKey) {
-                    localStorage.removeItem("bench_auth_key");
-                    setAuthError("Saved key is no longer valid.");
-                }
-            })
-            .catch((e) => {
-                if (!alive) return;
-                console.error(e);
-                setAuthError(String(e?.message || "Failed to load initial data."));
-            })
-            .finally(() => {
-                if (!alive) return;
-                setIsBootstrapping(false);
-            });
-        return () => {
-            alive = false;
-        };
-    }, []);
-
-    function clearFileInput() {
-        setBenchFiles([]);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-
-    function onFileChange(e) {
-        const files = Array.from(e.target.files || []);
-        setBenchFiles(files);
-        setUploadLogText("");
-        setUploadVerdictNote("");
-
-        if (files.length === 0) {
-            setUploadError(" ");
-            return;
-        }
-
-        if (files.length > maxMultiFileBatchCount) {
-            setUploadError(`Too many files selected. Maximum is ${maxMultiFileBatchCount}.`);
-            return;
-        }
-
-        for (const file of files) {
-            const parsed = parseBenchFileName(file.name);
-            if (!parsed.ok) {
-                setUploadError(parsed.error);
-                return;
-            }
-
-            if (file.size > maxSingleUploadBytes) {
-                setUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
-                return;
-            }
-        }
-
-        if (files.length > 1) {
-            const batchBytes = files.reduce((sum, file) => sum + file.size, 0);
-            if (batchBytes > remainingUploadBytes) {
-                setUploadError(
-                    `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`
-                );
-                return;
-            }
-        }
-
-        setUploadError(" ");
-    }
-
-    function normalizeDescriptionForSubmit() {
-        const description = descriptionDraft.trim();
-        if (!description) return "schema";
-        return description;
-    }
-
-    function parseCheckerTimeoutSeconds() {
-        return parsePosIntCapped(checkerTleSecondsDraft, verifyTimeoutQuotaSeconds);
-    }
-
-    function parseParserTimeoutSeconds() {
-        return parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
-    }
-
-    function stopUploadCountdown() {
-        if (uploadCountdownRef.current) {
-            clearInterval(uploadCountdownRef.current);
-            uploadCountdownRef.current = null;
-        }
-    }
-
-    function startUploadCountdown(seconds) {
-        stopUploadCountdown();
-        setUploadProgress((prev) => (prev ? { ...prev, secondsRemaining: seconds } : prev));
-        uploadCountdownRef.current = setInterval(() => {
-            setUploadProgress((prev) => {
-                if (!prev) return prev;
-                const nextSeconds = Math.max(0, Number(prev.secondsRemaining || 0) - 1);
-                return { ...prev, secondsRemaining: nextSeconds };
-            });
-        }, 1000);
-    }
-
-    function buildManualRowsFromAutoRows(autoRows, suffix = "") {
-        return (Array.isArray(autoRows) ? autoRows : []).map((row, index) => ({
-            key: `stop:${row.fileName || row?.candidate?.file?.name || "file"}:${index}:${suffix}`,
-            checked: true,
-            bench: row?.candidate?.parsed?.benchmark,
-            delay: row?.candidate?.parsed?.delay,
-            area: row?.candidate?.parsed?.area,
-            verdict: row?.candidate?.verificationResult?.status || "verified",
-            verdictReason: "Processed before stop request.",
-            reason: `file=${row.fileName || row?.candidate?.file?.name || "unknown"}`,
-            candidate: row.candidate,
-        }));
-    }
-
-    function requestStopUpload() {
-        if (!isUploading) return;
-        uploadStopRequestedRef.current = true;
-        if (uploadAbortRef.current) {
-            uploadAbortRef.current.abort();
-            uploadAbortRef.current = null;
-        }
-        setIsUploadStopping(true);
-        setUploadError("Stopping upload after current step...");
-    }
-
-    function parseTruthFileName(fileNameRaw) {
-        const fileName = String(fileNameRaw || "").trim();
-        const match = fileName.match(/^bench(2\d\d)\.truth$/i);
-        if (!match) {
-            return {
-                ok: false,
-                error: "Invalid truth file name. Expected: bench{200..299}.truth",
-            };
-        }
-        return {
-            ok: true,
-            benchmark: String(Number(match[1])),
-            fileName,
-        };
-    }
-
-    async function readCircuitFileAsText(file) {
-        if (file && typeof file.text === "function") {
-            return await file.text();
-        }
-        return await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ""));
-            reader.onerror = () => reject(new Error("Failed to read file content."));
-            reader.readAsText(file);
-        });
-    }
-
-    function normalizeCircuitTextForHash(textRaw) {
-        return String(textRaw || "")
-            .replace(/^\uFEFF/, "")
-            .replace(/\r\n?/g, "\n")
-            .trimEnd();
-    }
-
-    async function sha256Hex(textRaw) {
-        const text = normalizeCircuitTextForHash(textRaw);
-        const subtle = globalThis?.crypto?.subtle;
-        if (!subtle) return null;
-        const bytes = new TextEncoder().encode(text);
-        const digest = await subtle.digest("SHA-256", bytes);
-        return Array.from(new Uint8Array(digest))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-    }
-
-    async function findIdenticalPointDuplicate({ benchmark, delay, area, circuitText, signal = undefined }) {
-        const benchmarkStr = String(benchmark || "").trim();
-        const delayNum = Number(delay);
-        const areaNum = Number(area);
-        if (!benchmarkStr || benchmarkStr === "test" || !Number.isFinite(delayNum) || !Number.isFinite(areaNum)) {
-            return {
-                duplicateInfo: null,
-                blockedByCheckError: false,
-                errorReason: "",
-            };
-        }
-        try {
-            const duplicateCheck = await checkPointDuplicate({
-                authKey: authKeyDraft,
-                benchmark: benchmarkStr,
-                delay: delayNum,
-                area: areaNum,
-                circuitText: String(circuitText || ""),
-                signal,
-            });
-            if (duplicateCheck?.duplicate && duplicateCheck?.point) {
-                return {
-                    duplicateInfo: {
-                        id: String(duplicateCheck.point.id || ""),
-                        fileName: String(duplicateCheck.point.fileName || ""),
-                        sender: String(duplicateCheck.point.sender || ""),
-                    },
-                    blockedByCheckError: false,
-                    errorReason: "",
-                };
-            }
-            return {
-                duplicateInfo: null,
-                blockedByCheckError: false,
-                errorReason: "",
-            };
-        } catch (error) {
-            if (error?.name === "AbortError") throw error;
-            return {
-                duplicateInfo: null,
-                blockedByCheckError: true,
-                errorReason: String(error?.message || "Failed to verify duplicates against existing points."),
-            };
-        }
-    }
-
-    function isRenderNonVerdictReason(reasonRaw) {
-        const reason = String(reasonRaw || "").toLowerCase();
-        if (!reason) return true;
-        return (
-            reason.includes("timed out") ||
-            reason.includes("timeout") ||
-            reason.includes("failed to compute metrics") ||
-            reason.includes("body too large") ||
-            reason.includes("failed to fetch") ||
-            reason.includes("network")
-        );
-    }
-
-    function normalizeParserResultRow(row, fallbackParsed) {
-        if (!row) {
-            return {
-                kind: "non-verdict",
-                reason: "Render parser response is missing.",
-                parsed: fallbackParsed,
-                changed: false,
-            };
-        }
-        const expectedDelay = Number(row?.expected?.delay);
-        const expectedArea = Number(row?.expected?.area);
-        const actualDelay = Number(row?.actual?.delay);
-        const actualArea = Number(row?.actual?.area);
-        const hasExpected = Number.isFinite(expectedDelay) && Number.isFinite(expectedArea);
-        const hasActual = Number.isFinite(actualDelay) && Number.isFinite(actualArea);
-        const isParetoBetterOrEqual = hasExpected && hasActual && actualDelay <= expectedDelay && actualArea <= expectedArea;
-
-        if (row.ok && isParetoBetterOrEqual && (Boolean(row?.adjusted) || actualDelay !== expectedDelay || actualArea !== expectedArea)) {
-            return {
-                kind: "pass-adjusted",
-                reason: row.reason || `Parser adjusted metrics to delay=${actualDelay}, area=${actualArea}.`,
-                parsed: {
-                    ...fallbackParsed,
-                    delay: actualDelay,
-                    area: actualArea,
-                },
-                changed: actualDelay !== fallbackParsed.delay || actualArea !== fallbackParsed.area,
-            };
-        }
-
-        if (row.ok) {
-            return {
-                kind: "pass",
-                reason: "Parser matched filename metrics.",
-                parsed: fallbackParsed,
-                changed: false,
-            };
-        }
-
-        if (hasExpected && hasActual && actualDelay <= expectedDelay && actualArea <= expectedArea) {
-            return {
-                kind: "pass-adjusted",
-                reason: `Parser adjusted metrics to delay=${actualDelay}, area=${actualArea}.`,
-                parsed: {
-                    ...fallbackParsed,
-                    delay: actualDelay,
-                    area: actualArea,
-                },
-                changed: actualDelay !== fallbackParsed.delay || actualArea !== fallbackParsed.area,
-            };
-        }
-
-        if (hasExpected && hasActual) {
-            return {
-                kind: "failed",
-                reason: row.reason || "Metric mismatch.",
-                parsed: fallbackParsed,
-                changed: false,
-            };
-        }
-
-        if (isRenderNonVerdictReason(row.reason)) {
-            return {
-                kind: "non-verdict",
-                reason: row.reason || "Parser did not return verdict.",
-                parsed: fallbackParsed,
-                changed: false,
-            };
-        }
-
-        return {
-            kind: "failed",
-            reason: row.reason || "Parser validation failed.",
-            parsed: fallbackParsed,
-            changed: false,
-        };
-    }
-
-    function clearTruthFileInput() {
-        setTruthFiles([]);
-        if (truthFilesInputRef.current) truthFilesInputRef.current.value = "";
-    }
-
-    function getPointDownloadUrl(p) {
-        if (!p || !p.fileName || p.benchmark === "test") return null;
-        if (p.downloadUrl) return p.downloadUrl;
-        return null;
-    }
-
-    function canDeletePoint(p) {
-        if (!p) return false;
-        if (p.benchmark === "test") return true;
-        return Boolean(currentCommand && p.sender === currentCommand.name);
-    }
-
-    function canTestPoint(p) {
-        if (!p || p.benchmark === "test") return false;
-        return Boolean(currentCommand);
-    }
-
-    async function downloadCircuit(p) {
-        const url = getPointDownloadUrl(p);
-        if (!url) {
-            window.alert("File does not exist.");
-            return;
-        }
-
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = p.fileName || "circuit.bench";
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-    }
-
-    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null, { signal } = {}) {
-        const batchSize = Math.max(1, Number(benchFiles.length || 1));
-        const pointId = uid();
-        const storedFileName = buildStoredFileName({
-            benchmark: parsed.benchmark,
-            delay: parsed.delay,
-            area: parsed.area,
-            pointId,
-            sender: currentCommand.name,
-        });
-        const uploadMeta = await requestUploadUrl({
-            authKey: authKeyDraft,
-            fileName: storedFileName,
-            fileSize: sourceFile.size,
-            batchSize,
-            signal,
-        });
-        const putRes = await fetch(uploadMeta.uploadUrl, {
-            method: "PUT",
-            signal,
-            body: sourceFile,
-        });
-        if (!putRes.ok) {
-            throw new Error("Failed to upload file to S3.");
-        }
-
-        const point = {
-            id: pointId,
-            benchmark: parsed.benchmark,
-            delay: parsed.delay,
-            area: parsed.area,
-            description,
-            sender: currentCommand.name,
-            fileName: storedFileName,
-            status: verificationResult?.status || "non-verified",
-            checkerVersion: verificationResult?.checkerVersion || null,
-        };
-
-        const savedPayload = await savePoint(
-            {
-                ...point,
-                authKey: authKeyDraft,
-                fileSize: sourceFile.size,
-                batchSize,
-            },
-            { signal }
-        );
-
-        if (savedPayload?.quota) {
-            setCurrentCommand((prev) => (prev ? { ...prev, ...savedPayload.quota } : prev));
-        }
-
-        return savedPayload?.point || point;
-    }
-
-    async function addPointFromFile(e) {
-        e.preventDefault();
-        if (selectedChecker === "select" || selectedParser === "select") {
-            setUploadError("Please select checker and parser settings.");
-            setIsUploadSettingsOpen(true);
-            return;
-        }
-        if (benchFiles.length === 0) return;
-        if (benchFiles.length > maxMultiFileBatchCount) {
-            setUploadError(`Too many files selected. Maximum is ${maxMultiFileBatchCount}.`);
-            return;
-        }
-        const checkerTimeoutSeconds = parseCheckerTimeoutSeconds();
-        const parserTimeoutSeconds = parseParserTimeoutSeconds();
-        const checkerSelection = normalizeCheckerForActor(selectedChecker);
-        if (ENABLED_CHECKERS.has(checkerSelection) && checkerTimeoutSeconds === null) {
-            setUploadError(`Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`);
-            return;
-        }
-        if (selectedParser === "ABC" && parserTimeoutSeconds === null) {
-            setUploadError(`Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`);
-            return;
-        }
-        const description = normalizeDescriptionForSubmit();
-        if (description.length > MAX_DESCRIPTION_LEN) {
-            setUploadError(`Description is too long (max ${MAX_DESCRIPTION_LEN}).`);
-            return;
-        }
-
-        setIsUploading(true);
-        setIsUploadStopping(false);
-        uploadStopRequestedRef.current = false;
-        setUploadProgress({
-            done: 0,
-            total: benchFiles.length,
-            verified: 0,
-            phase: "preparing",
-            currentFileName: "",
-            secondsRemaining: null,
-            transitionTarget: "next-circuit",
-        });
-        setUploadLogText("");
-        setUploadVerdictNote("");
-        const controller = new AbortController();
-        uploadAbortRef.current = controller;
-        const autoRows = [];
-        const manualRowsDraft = [];
-        const logRows = [];
-        let singleFileManualVerdict = null;
-        const isAbortError = (error) => error?.name === "AbortError";
-
-        try {
-            const parserEnabled = selectedParser === "ABC";
-            const checkerEnabled = ENABLED_CHECKERS.has(checkerSelection);
-            const fileStepOrder = [];
-            if (parserEnabled) fileStepOrder.push("parser");
-            if (checkerEnabled) fileStepOrder.push("checker");
-            const resolveTransitionTarget = (currentStep) => {
-                const idx = fileStepOrder.indexOf(currentStep);
-                if (idx >= 0 && idx < fileStepOrder.length - 1) return "next-step";
-                return "next-circuit";
-            };
-            const needsCircuitText = parserEnabled || checkerEnabled;
-            const preparedFiles = [];
-            for (const file of benchFiles) {
-                const parsed = parseBenchFileName(file.name);
-                if (!parsed.ok) {
-                    throw new Error(parsed.error);
-                }
-                const circuitText = needsCircuitText ? await readCircuitFileAsText(file) : "";
-                preparedFiles.push({ file, parsed, circuitText });
-            }
-
-            const batchDuplicateMap = new Map();
-
-            for (const item of preparedFiles) {
-                if (uploadStopRequestedRef.current) break;
-                const normalizedInputFileName = item.parsed.normalizedFileName || item.file.name;
-                let parserState = {
-                    kind: "skipped",
-                    reason: "Parser is disabled.",
-                    parsed: item.parsed,
-                    changed: false,
-                };
-                if (parserEnabled) {
-                    setUploadProgress((prev) =>
-                        prev
-                            ? {
-                                ...prev,
-                                phase: "parser",
-                                currentFileName: normalizedInputFileName,
-                                secondsRemaining: parserTimeoutSeconds,
-                                transitionTarget: resolveTransitionTarget("parser"),
-                            }
-                            : prev
-                    );
-                    startUploadCountdown(parserTimeoutSeconds);
-                    try {
-                        const parserResult = await validateUploadCircuits({
-                            authKey: authKeyDraft,
-                            files: [
-                                {
-                                    fileName: normalizedInputFileName,
-                                    circuitText: item.circuitText,
-                                },
-                            ],
-                            timeoutSeconds: parserTimeoutSeconds,
-                            signal: controller.signal,
-                        });
-                        const parserRows = Array.isArray(parserResult?.files) ? parserResult.files : [];
-                        const parserRow = parserRows[0] || { ok: true, fileName: normalizedInputFileName };
-                        parserState = normalizeParserResultRow(parserRow, item.parsed);
-                    } catch (validationError) {
-                        if (isAbortError(validationError)) throw validationError;
-                        const detailRows = Array.isArray(validationError?.details) ? validationError.details : [];
-                        const parserRow = detailRows[0] || {
-                            ok: false,
-                            fileName: normalizedInputFileName,
-                            reason: validationError?.message || "Render parser request failed.",
-                        };
-                        parserState = normalizeParserResultRow(parserRow, item.parsed);
-                    } finally {
-                        stopUploadCountdown();
-                    }
-                }
-
-                let checkerVerdict = null;
-                let checkerVersion = null;
-                let checkerErrorReason = "";
-                if (checkerEnabled) {
-                    checkerVersion = checkerSelection;
-                    setUploadProgress((prev) =>
-                        prev
-                            ? {
-                                ...prev,
-                                phase: "checker",
-                                currentFileName: normalizedInputFileName,
-                                secondsRemaining: checkerTimeoutSeconds,
-                                transitionTarget: resolveTransitionTarget("checker"),
-                            }
-                            : prev
-                    );
-                    startUploadCountdown(checkerTimeoutSeconds);
-                    try {
-                        const verified = await verifyPointCircuit({
-                            authKey: authKeyDraft,
-                            benchmark: parserState.parsed.benchmark,
-                            circuitText: item.circuitText,
-                            checkerVersion: checkerSelection,
-                            applyStatus: false,
-                            timeoutSeconds: checkerTimeoutSeconds,
-                            signal: controller.signal,
-                        });
-                        checkerVerdict = verified?.status === "verified";
-                    } catch (error) {
-                        if (isAbortError(error)) throw error;
-                        checkerVerdict = null;
-                        checkerErrorReason = String(error?.message || "checker request failed");
-                    } finally {
-                        stopUploadCountdown();
-                    }
-                }
-
-                let finalStatus = "non-verified";
-                if (parserState.kind === "failed" || checkerVerdict === false) {
-                    finalStatus = "failed";
-                } else if (
-                    checkerEnabled &&
-                    checkerVerdict === true &&
-                    (!parserEnabled || parserState.kind === "pass" || parserState.kind === "pass-adjusted")
-                ) {
-                    finalStatus = "verified";
-                }
-
-                const candidate = {
-                    file: item.file,
-                    parsed: parserState.parsed,
-                    description,
-                    verificationResult: {
-                        status: finalStatus,
-                        checkerVersion,
-                    },
-                    parserChanged: parserState.changed,
-                };
-                const candidateHash = await sha256Hex(item.circuitText);
-                const duplicateKey = candidateHash
-                    ? `${parserState.parsed.benchmark}|${parserState.parsed.delay}|${parserState.parsed.area}|${candidateHash}`
-                    : null;
-                const duplicateCheck = await findIdenticalPointDuplicate({
-                    benchmark: parserState.parsed.benchmark,
-                    delay: parserState.parsed.delay,
-                    area: parserState.parsed.area,
-                    circuitText: item.circuitText,
-                    signal: controller.signal,
-                });
-                let duplicateInfo = duplicateCheck?.duplicateInfo || null;
-                const duplicateCheckError = String(duplicateCheck?.errorReason || "");
-                if (!duplicateInfo && duplicateKey && batchDuplicateMap.has(duplicateKey)) {
-                    const firstSeen = batchDuplicateMap.get(duplicateKey);
-                    duplicateInfo = {
-                        id: "",
-                        fileName: String(firstSeen?.fileName || ""),
-                        sender: String(currentCommand?.name || ""),
-                    };
-                }
-                if (duplicateKey && !batchDuplicateMap.has(duplicateKey)) {
-                    batchDuplicateMap.set(duplicateKey, {
-                        fileName: normalizedInputFileName,
-                    });
-                }
-
-                setUploadProgress((prev) => {
-                    if (!prev) return prev;
-                    const verifiedDelta = finalStatus === "verified" ? 1 : 0;
-                    return {
-                        ...prev,
-                        done: Math.min(prev.total, prev.done + 1),
-                        verified: Math.min(prev.total, Number(prev.verified || 0) + verifiedDelta),
-                    };
-                });
-
-                if (finalStatus !== "verified" || duplicateInfo || duplicateCheck?.blockedByCheckError) {
-                    const verdictLabel = duplicateCheck?.blockedByCheckError
-                        ? "blocked"
-                        : (duplicateInfo ? "duplicate" : finalStatus);
-                    let verdictReason = "";
-                    if (duplicateCheck?.blockedByCheckError) {
-                        verdictReason = duplicateCheckError || "Failed to verify duplicates against existing points.";
-                    } else if (finalStatus === "failed") {
-                        if (checkerErrorReason) {
-                            verdictReason = checkerErrorReason;
-                        } else if (parserState.kind === "failed" && parserState.reason) {
-                            verdictReason = String(parserState.reason);
-                        } else if (checkerVerdict === false) {
-                            verdictReason = "checker: not equivalent";
-                        }
-                        if (!verdictReason) {
-                            verdictReason = "checker/parser failed with unknown reason";
-                        }
-                    } else if (finalStatus === "non-verified") {
-                        if (checkerErrorReason) {
-                            verdictReason = checkerErrorReason;
-                        } else if (parserState.kind === "non-verdict" && parserState.reason) {
-                            verdictReason = String(parserState.reason);
-                        }
-                        if (!verdictReason) {
-                            verdictReason = "verification skipped or checker unavailable";
-                        }
-                    }
-                    manualRowsDraft.push({
-                        key: `${item.file.name}:${item.file.size}:${manualRowsDraft.length}`,
-                        checked: !(duplicateInfo || duplicateCheck?.blockedByCheckError),
-                        bench: parserState.parsed.benchmark,
-                        delay: parserState.parsed.delay,
-                        area: parserState.parsed.area,
-                        verdict: finalStatus,
-                        verdictReason,
-                        reason: duplicateInfo
-                            ? `Identical file hash for same delay+area already exists: ${duplicateInfo.fileName || duplicateInfo.id || "existing point"}.`
-                            : "",
-                        candidate,
-                    });
-                    const manualReasonParts = [];
-                    if (verdictReason) manualReasonParts.push(verdictReason);
-                    if (duplicateInfo) manualReasonParts.push("identical file hash and same bench+delay+area");
-                    const manualReason = manualReasonParts.join("; ");
-                    logRows.push({
-                        fileName: normalizedInputFileName,
-                        success: false,
-                        reason: manualReason
-                            ? `verdict=${verdictLabel}; ${manualReason}`
-                            : `verdict=${verdictLabel}; unknown reason`,
-                    });
-                    if (benchFiles.length === 1) {
-                        const details = verdictReason || (duplicateInfo ? "identical file hash and same bench+delay+area" : "");
-                        singleFileManualVerdict = details
-                            ? `Upload verdict: ${verdictLabel} (${details})`
-                            : `Upload verdict: ${verdictLabel}`;
-                    }
-                    continue;
-                }
-
-                autoRows.push({
-                    fileName: normalizedInputFileName,
-                    candidate,
-                });
-            }
-
-            const savedPoints = [];
-            const pendingAutoRows = [];
-            for (let rowIndex = 0; rowIndex < autoRows.length; rowIndex += 1) {
-                if (uploadStopRequestedRef.current) {
-                    pendingAutoRows.push(...autoRows.slice(rowIndex));
-                    break;
-                }
-                const row = autoRows[rowIndex];
-                const fileName = row.fileName || row?.candidate?.file?.name || "unknown";
-                setUploadProgress((prev) =>
-                    prev
-                        ? {
-                            ...prev,
-                            phase: "saving",
-                            currentFileName: fileName,
-                            secondsRemaining: null,
-                        }
-                        : prev
-                );
-                try {
-                    const saved = await createPointFromUploadedFile(
-                        row.candidate.file,
-                        row.candidate.parsed,
-                        description,
-                        row.candidate.verificationResult,
-                        { signal: controller.signal }
-                    );
-                    savedPoints.push(saved);
-                    logRows.push({
-                        fileName,
-                        success: true,
-                        reason: "verdict=verified; uploaded successfully.",
-                    });
-                } catch (err) {
-                    if (isAbortError(err)) throw err;
-                    logRows.push({
-                        fileName,
-                        success: false,
-                        reason: `verdict=failed; ${err?.message || "Failed to upload point."}`,
-                    });
-                }
-            }
-
-            if (uploadStopRequestedRef.current) {
-                const stopRows = buildManualRowsFromAutoRows(pendingAutoRows, "pending");
-                const combinedStopRows = [...manualRowsDraft, ...stopRows];
-                if (combinedStopRows.length > 0) {
-                    setManualApplyRows(combinedStopRows);
-                    setIsManualApplyOpen(true);
-                    setUploadError(
-                        `Upload stopped. ${stopRows.length} verified file(s) are ready to upload after confirmation.`
-                    );
-                } else {
-                    setUploadError("Upload stopped.");
-                }
-            } else if (manualRowsDraft.length > 0) {
-                setManualApplyRows(manualRowsDraft);
-                setIsManualApplyOpen(true);
-            }
-            if (benchFiles.length === 1 && singleFileManualVerdict) {
-                setUploadVerdictNote(singleFileManualVerdict);
-            }
-
-            if (savedPoints.length > 0) {
-                setPoints((prev) => [...savedPoints.reverse(), ...prev]);
-                const latestSaved = savedPoints[savedPoints.length - 1];
-                setLastAddedId(latestSaved.id);
-                setBenchmarkFilter(String(latestSaved.benchmark));
-                if (benchFiles.length === 1) {
-                    setUploadVerdictNote("Upload verdict: verified");
-                }
-            }
-
-            if (logRows.length > 0) {
-                const lines = logRows.map(
-                    (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
-                );
-                setUploadLogText(lines.join("\n"));
-            }
-
-            const failedCount = logRows.filter((row) => !row.success).length;
-            if (failedCount > 0) {
-                if (benchFiles.length >= 2) {
-                    setUploadError(
-                        `Uploaded ${logRows.length - failedCount}/${logRows.length} files. Download log for details.`
-                    );
-                } else {
-                    const firstFail = logRows.find((row) => !row.success);
-                    setUploadError(firstFail?.reason || "Failed to upload point.");
-                }
-            } else {
-                setUploadError(" ");
-            }
-
-            setDescriptionDraft("");
-            clearFileInput();
-        } catch (err) {
-            if (isAbortError(err) || uploadStopRequestedRef.current) {
-                const pendingAutoRows = autoRows.slice(0);
-                const stopRows = buildManualRowsFromAutoRows(pendingAutoRows, "abort");
-                const combinedRows = [...manualRowsDraft, ...stopRows];
-                if (combinedRows.length > 0) {
-                    setManualApplyRows(combinedRows);
-                    setIsManualApplyOpen(true);
-                }
-                setUploadError("Upload stopped.");
-                if (logRows.length > 0) {
-                    const lines = logRows.map(
-                        (row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`
-                    );
-                    setUploadLogText(lines.join("\n"));
-                }
-            } else {
-                setUploadError(err?.message || "Failed to upload point.");
-            }
-        } finally {
-            stopUploadCountdown();
-            uploadStopRequestedRef.current = false;
-            setIsUploadStopping(false);
-            if (uploadAbortRef.current === controller) {
-                uploadAbortRef.current = null;
-            }
-            setIsUploading(false);
-            setUploadProgress(null);
-        }
-    }
-
-    function setManualApplyChecked(key, checked) {
-        setManualApplyRows((prev) =>
-            prev.map((row) => (row.key === key ? { ...row, checked: Boolean(checked) } : row))
-        );
-    }
-
-    async function applyManualRows() {
-        const selected = manualApplyRows.filter((row) => row.checked);
-        if (selected.length === 0) {
-            setIsManualApplyOpen(false);
-            setManualApplyRows([]);
-            return;
-        }
-
-        setIsManualApplying(true);
-        try {
-            const savedPoints = [];
-            for (const row of selected) {
-                try {
-                    const saved = await createPointFromUploadedFile(
-                        row.candidate.file,
-                        row.candidate.parsed,
-                        String(row.candidate.description || "schema"),
-                        row.candidate.verificationResult
-                    );
-                    savedPoints.push(saved);
-                } catch {
-                    // Ignore failed rows here; detailed upload errors are still surfaced via upload log in main flow.
-                }
-            }
-
-            if (savedPoints.length > 0) {
-                setPoints((prev) => [...savedPoints.reverse(), ...prev]);
-                const latestSaved = savedPoints[savedPoints.length - 1];
-                setLastAddedId(latestSaved.id);
-                setBenchmarkFilter(String(latestSaved.benchmark));
-            }
-            setUploadError(" ");
-            setIsManualApplyOpen(false);
-            setManualApplyRows([]);
-        } finally {
-            setIsManualApplying(false);
-        }
-    }
-
-    function closeManualApplyModal() {
-        if (!isManualApplyOpen) return;
-        const ok = window.confirm("If you close this window, selected points will not be added to the current view. Continue?");
-        if (!ok) return;
-        setIsManualApplyOpen(false);
-        setManualApplyRows([]);
-    }
-
-    async function deletePointById(id) {
-        const p = points.find((x) => x.id === id);
-        if (!p) return false;
-
-        if (p?.benchmark === "test") {
-            setPoints((prev) => prev.filter((x) => x.id !== id));
-            if (lastAddedId === id) setLastAddedId(null);
-            return true;
-        }
-
-        try {
-            await deletePoint({ id, authKey: authKeyDraft });
-        } catch (error) {
-            window.alert(error?.message || "Failed to delete point.");
-            return false;
-        }
-
-        setPoints((prev) => prev.filter((x) => x.id !== id));
-        if (lastAddedId === id) setLastAddedId(null);
-        return true;
-    }
-
-    function openPointActionModal(pointId) {
-        const p = points.find((x) => x.id === pointId);
-        if (!p) return;
-        setActionPoint(p);
-    }
-
-    function closePointActionModal() {
-        setActionPoint(null);
-    }
-
-    async function confirmAndDeletePoint(pointId) {
-        const p = points.find((x) => x.id === pointId);
-        if (!p || !canDeletePoint(p)) return false;
-        if (!window.confirm(`Delete ${p.fileName}?`)) return false;
-        return await deletePointById(pointId);
-    }
-
-    async function onTestPoint(point, checkerVersionRaw = selectedTestChecker) {
-        if (!canTestPoint(point)) return;
-        if (testingPointId && testingPointId === point.id && testingAbortRef.current) {
-            testingAbortRef.current.abort();
-            testingAbortRef.current = null;
-            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
-            testingPointTickerRef.current = null;
-            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
-            testingProgressPollRef.current = null;
-            setTestingPointLabel("");
-            setTestingPointId(null);
-            return;
-        }
-        if (testingAbortRef.current) {
-            testingAbortRef.current.abort();
-            testingAbortRef.current = null;
-        }
-        if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
-        testingPointTickerRef.current = null;
-        if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
-        testingProgressPollRef.current = null;
-        setTestingPointId(point.id);
-        setTestingPointLabel("Testing: queued");
-        const controller = new AbortController();
-        testingAbortRef.current = controller;
-        const progressToken = uid();
-        testingProgressPollRef.current = setInterval(async () => {
-            if (controller.signal.aborted) return;
-            try {
-                const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
-                setTestingPointLabel(mapVerifyProgressLabel(progress?.status, verifyTimeoutQuotaSeconds));
-            } catch {
-                // ignore transient poll failures
-            }
-        }, 500);
-        const canApplyStatus =
-            point.sender === currentCommand?.name || currentCommand?.role === ROLE_ADMIN;
-        const normalizedChecker = normalizeCheckerForActor(checkerVersionRaw);
-        const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker) ? normalizedChecker : DEFAULT_CHECKER_VERSION;
-        try {
-            const result = await verifyPointCircuit({
-                authKey: authKeyDraft,
-                pointId: point.id,
-                applyStatus: canApplyStatus,
-                checkerVersion,
-                signal: controller.signal,
-                progressToken,
-            });
-            const scriptText = String(result?.script || "").trim();
-            const commandInfo = isAdmin && scriptText ? `\n\nServer command:\n${scriptText}` : "";
-            if (canApplyStatus) {
-                setPoints((prev) =>
-                    prev.map((row) =>
-                        row.id === point.id
-                            ? {
-                                ...row,
-                                status: result.status,
-                                checkerVersion: result.checkerVersion,
-                            }
-                            : row
-                    )
-                );
-                window.alert(
-                    result.equivalent
-                        ? `Checker: equivalent. Status updated to verified.${commandInfo}`
-                        : `Checker: not equivalent. Status updated to failed.${commandInfo}`
-                );
-            } else {
-                window.alert(
-                    result.equivalent
-                        ? `Checker: equivalent. Status was not changed.${commandInfo}`
-                        : `Checker: not equivalent. Status was not changed.${commandInfo}`
-                );
-            }
-        } catch (error) {
-            if (error?.name === "AbortError") return;
-            window.alert(error?.message || "Failed to run checker.");
-        } finally {
-            if (testingAbortRef.current === controller) {
-                testingAbortRef.current = null;
-            }
-            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
-            testingPointTickerRef.current = null;
-            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
-            testingProgressPollRef.current = null;
-            setTestingPointLabel("");
-            setTestingPointId(null);
-        }
-    }
 
     function clearAllTestNoConfirm() {
         setPoints((prev) => prev.filter((p) => p.benchmark !== "test"));
@@ -1591,44 +645,6 @@ export default function App() {
         parsePosIntCapped(delayMaxDraft, MAX_VALUE) !== null &&
         parsePosIntCapped(areaMaxDraft, MAX_VALUE) !== null;
 
-    const uploadDisabledReason = (() => {
-        if (isUploading) return "Upload is already in progress.";
-        if (benchFiles.length === 0) return "No files selected.";
-        if (selectedChecker === "select" || selectedParser === "select") {
-            return "Please configure checker and parser in settings.";
-        }
-        const checkerSelection = normalizeCheckerForActor(selectedChecker);
-        if (ENABLED_CHECKERS.has(checkerSelection) && parseCheckerTimeoutSeconds() === null) {
-            return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
-        }
-        if (selectedParser === "ABC" && parseParserTimeoutSeconds() === null) {
-            return `Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`;
-        }
-        if (benchFiles.length > maxMultiFileBatchCount) {
-            return `Too many files selected. Maximum is ${maxMultiFileBatchCount}.`;
-        }
-        for (const file of benchFiles) {
-            const parsed = parseBenchFileName(file.name);
-            if (!parsed.ok) return parsed.error;
-            if (file.size > maxSingleUploadBytes) {
-                return `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`;
-            }
-        }
-        if (benchFiles.length > 1) {
-            const batchBytes = benchFiles.reduce((sum, file) => sum + file.size, 0);
-            if (batchBytes > remainingUploadBytes) {
-                return `Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`;
-            }
-        }
-        const description = normalizeDescriptionForSubmit();
-        if (description.length > MAX_DESCRIPTION_LEN) {
-            return `Description is too long (max ${MAX_DESCRIPTION_LEN}).`;
-        }
-        return "";
-    })();
-
-    const canAdd = uploadDisabledReason === "";
-
     useEffect(() => {
         const suggestedChecker = String(verifyTimeoutQuotaSeconds);
         setCheckerTleSecondsDraft((prev) => {
@@ -1636,7 +652,7 @@ export default function App() {
             if (Number.isFinite(parsed) && parsed >= 1 && parsed <= verifyTimeoutQuotaSeconds) return prev;
             return suggestedChecker;
         });
-    }, [verifyTimeoutQuotaSeconds]);
+    }, [verifyTimeoutQuotaSeconds, setCheckerTleSecondsDraft]);
 
     useEffect(() => {
         const suggestedParser = String(metricsTimeoutQuotaSeconds);
@@ -1645,1004 +661,38 @@ export default function App() {
             if (Number.isFinite(parsed) && parsed >= 1 && parsed <= metricsTimeoutQuotaSeconds) return prev;
             return suggestedParser;
         });
-    }, [metricsTimeoutQuotaSeconds]);
+    }, [metricsTimeoutQuotaSeconds, setParserTleSecondsDraft]);
 
     useEffect(() => {
         if (canUseFastHex) return;
         setSelectedChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
         setSelectedTestChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
         setSelectedBulkVerifyChecker((prev) => (prev === CHECKER_ABC_FAST_HEX ? CHECKER_ABC : prev));
-    }, [canUseFastHex]);
-
-    useEffect(() => {
-        return () => {
-            stopUploadCountdown();
-            if (testingAbortRef.current) {
-                testingAbortRef.current.abort();
-                testingAbortRef.current = null;
-            }
-            if (uploadAbortRef.current) {
-                uploadAbortRef.current.abort();
-                uploadAbortRef.current = null;
-            }
-            if (bulkVerifyAbortRef.current) {
-                bulkVerifyAbortRef.current.abort();
-                bulkVerifyAbortRef.current = null;
-            }
-            if (bulkMetricsAbortRef.current) {
-                bulkMetricsAbortRef.current.abort();
-                bulkMetricsAbortRef.current = null;
-            }
-            if (bulkIdenticalAbortRef.current) {
-                bulkIdenticalAbortRef.current.abort();
-                bulkIdenticalAbortRef.current = null;
-            }
-            if (testingPointTickerRef.current) clearInterval(testingPointTickerRef.current);
-            testingPointTickerRef.current = null;
-            if (testingProgressPollRef.current) clearInterval(testingProgressPollRef.current);
-            testingProgressPollRef.current = null;
-            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
-            bulkIdenticalProgressPollRef.current = null;
-        };
-    }, []);
-
-    const refreshAdminLogs = useCallback(async () => {
-        if (!isAdmin) return;
-        const commandNameById = new Map(commands.map((cmd) => [Number(cmd.id), String(cmd.name || "")]));
-        const normalizeLogRows = (rows) =>
-            rows.map((log) => {
-                const commandId = Number(log?.commandId);
-                const fallbackName = commandNameById.get(commandId) || "";
-                return {
-                    ...log,
-                    commandId,
-                    targetName: String(log?.targetName || fallbackName || ""),
-                };
-            });
-        try {
-            let globalLogs = [];
-            try {
-                const payload = await fetchAdminActionLogs({ authKey: authKeyDraft, limit: 1000 });
-                globalLogs = normalizeLogRows(Array.isArray(payload?.actionLogs) ? payload.actionLogs : []);
-            } catch (error) {
-                console.error(error);
-            }
-            if (globalLogs.length > 0) {
-                setAdminLogs(globalLogs);
-                return;
-            }
-
-            // Fallback for environments where global logs endpoint is unavailable:
-            // collect user-scoped logs and merge them.
-            if (!Array.isArray(commands) || commands.length === 0) {
-                setAdminLogs([]);
-                return;
-            }
-            const perUserPayloads = await Promise.all(
-                commands.map((cmd) => fetchAdminUserById({ authKey: authKeyDraft, userId: cmd.id }).catch(() => null))
-            );
-            const merged = [];
-            const seen = new Set();
-            for (const item of perUserPayloads) {
-                const logs = Array.isArray(item?.actionLogs) ? item.actionLogs : [];
-                for (const rawLog of normalizeLogRows(logs)) {
-                    const log = rawLog;
-                    const id = Number(log?.id);
-                    if (Number.isFinite(id) && seen.has(id)) continue;
-                    if (Number.isFinite(id)) seen.add(id);
-                    merged.push(log);
-                }
-            }
-            merged.sort((a, b) => {
-                const ta = Date.parse(String(a?.createdAt || "")) || 0;
-                const tb = Date.parse(String(b?.createdAt || "")) || 0;
-                return tb - ta;
-            });
-            setAdminLogs(merged);
-        } catch (error) {
-            console.error(error);
-            setAdminLogs([]);
-        }
-    }, [authKeyDraft, commands, isAdmin]);
-
-    useEffect(() => {
-        if (!isAdmin) {
-            setAdminLogs([]);
-            return;
-        }
-        refreshAdminLogs();
-    }, [isAdmin, refreshAdminLogs]);
-
-    async function loadAdminUser() {
-        if (!currentCommand || currentCommand.role !== ROLE_ADMIN) return;
-
-        const userId = Number(adminUserIdDraft);
-        if (!Number.isInteger(userId) || userId < 1) {
-            setAdminPanelError("Enter a valid numeric user id.");
-            return;
-        }
-
-        setIsAdminLoading(true);
-        setAdminPanelError("");
-        try {
-            const payload = await fetchAdminUserById({ authKey: authKeyDraft, userId });
-            setAdminUser(payload.user);
-            setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
-            setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
-            setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
-            setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
-            setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
-            refreshAdminLogs();
-        } catch (error) {
-            setAdminUser(null);
-            setAdminPanelError(error?.message || "Failed to load user.");
-        } finally {
-            setIsAdminLoading(false);
-        }
-    }
-
-    async function saveAdminUserSettings() {
-        if (!adminUser) return;
-        setIsAdminSaving(true);
-        setAdminPanelError("");
-        try {
-            const payload = await updateAdminUserUploadSettings({
-                authKey: authKeyDraft,
-                userId: adminUser.id,
-                maxSingleUploadGb: adminSingleGbDraft,
-                totalUploadQuotaGb: adminTotalGbDraft,
-                maxMultiFileBatchCount: adminBatchCountDraft,
-                abcVerifyTimeoutSeconds: adminVerifyTleSecondsDraft,
-                abcMetricsTimeoutSeconds: adminMetricsTleSecondsDraft,
-            });
-            setAdminUser(payload.user);
-            setAdminSingleGbDraft(formatGb(payload.user?.maxSingleUploadBytes || 0));
-            setAdminTotalGbDraft(formatGb(payload.user?.totalUploadQuotaBytes || 0));
-            setAdminBatchCountDraft(String(payload.user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
-            setAdminVerifyTleSecondsDraft(String(payload.user?.abcVerifyTimeoutSeconds || 60));
-            setAdminMetricsTleSecondsDraft(String(payload.user?.abcMetricsTimeoutSeconds || 60));
-            refreshAdminLogs();
-        } catch (error) {
-            setAdminPanelError(error?.message || "Failed to save settings.");
-        } finally {
-            setIsAdminSaving(false);
-        }
-    }
-
-    function downloadBlobFile(blob, fileName) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-    }
-
-    function stopAdminExportProgressPoll(which) {
-        const ref = which === "schemes" ? adminSchemesExportPollRef : adminDbExportPollRef;
-        if (!ref.current) return;
-        clearInterval(ref.current);
-        ref.current = null;
-    }
-
-    function startAdminExportProgressPoll({ token, signal, which }) {
-        const setProgress = which === "schemes" ? setAdminSchemesExportProgress : setAdminDbExportProgress;
-        stopAdminExportProgressPoll(which);
-        const poll = async () => {
-            if (signal.aborted) return;
-            try {
-                const progress = await fetchAdminExportProgress({ token, signal });
-                setProgress(progress);
-                if (progress?.doneFlag) {
-                    stopAdminExportProgressPoll(which);
-                }
-            } catch {
-                // Keep polling; transient failures are expected while export starts.
-            }
-        };
-        refForWhich(which).current = setInterval(poll, 500);
-        poll();
-    }
-
-    function refForWhich(which) {
-        return which === "schemes" ? adminSchemesExportPollRef : adminDbExportPollRef;
-    }
-
-    function stopAdminSchemesExport() {
-        if (!adminSchemesExportAbortRef.current) return;
-        adminSchemesExportAbortRef.current.abort();
-        adminSchemesExportAbortRef.current = null;
-    }
-
-    function stopAdminDbExport() {
-        if (!adminDbExportAbortRef.current) return;
-        adminDbExportAbortRef.current.abort();
-        adminDbExportAbortRef.current = null;
-    }
-
-    async function downloadAllSchemesZip() {
-        if (!authKeyDraft.trim()) return;
-        if (isAdminSchemesExporting) {
-            stopAdminSchemesExport();
-            return;
-        }
-        setAdminExportError("");
-        setIsAdminSchemesExportModalOpen(true);
-    }
-
-    async function startAdminSchemesExportFromModal() {
-        if (!authKeyDraft.trim()) return;
-        if (isAdminSchemesExporting) return;
-        const exportScope = adminSchemesExportScope === "pareto" ? "pareto" : "all";
-        const verdictScope = adminSchemesVerdictScope === "all" ? "all" : "verify";
-        setAdminExportError("");
-        setAdminSchemesExportProgress({
-            status: "queued",
-            done: 0,
-            total: 0,
-            unit: "files",
-            scope: exportScope,
-            verdictScope,
-        });
-        setIsAdminSchemesExporting(true);
-        setIsAdminSchemesExportModalOpen(false);
-        const controller = new AbortController();
-        adminSchemesExportAbortRef.current = controller;
-        const progressToken = uid();
-        startAdminExportProgressPoll({ token: progressToken, signal: controller.signal, which: "schemes" });
-        try {
-            const result = await exportAdminSchemesZip({
-                authKey: authKeyDraft,
-                progressToken,
-                signal: controller.signal,
-                scope: exportScope,
-                verdictScope,
-            });
-            if (result?.mode === "zip") {
-                downloadBlobFile(result.blob, result.fileName || "schemes-export.zip");
-            } else {
-                const saved = Number(result?.savedFiles || 0);
-                const skipped = Number(result?.skippedAlreadyExported || 0);
-                const exportDir = String(result?.exportDir || "");
-                window.alert(
-                    `Saved files: ${saved}\nSkipped (already exported): ${skipped}\nFolder: ${exportDir || "(unknown)"}`
-                );
-            }
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                setAdminExportError("Schemes export cancelled.");
-                return;
-            }
-            setAdminExportError(error?.message || "Failed to export schemes archive.");
-        } finally {
-            if (adminSchemesExportAbortRef.current === controller) {
-                adminSchemesExportAbortRef.current = null;
-            }
-            stopAdminExportProgressPoll("schemes");
-            setIsAdminSchemesExporting(false);
-        }
-    }
-
-    async function downloadDatabaseExport() {
-        if (!authKeyDraft.trim()) return;
-        if (isAdminDbExporting) {
-            stopAdminDbExport();
-            return;
-        }
-        setAdminExportError("");
-        setAdminDbExportProgress({
-            status: "queued",
-            done: 0,
-            total: 0,
-            unit: "tables",
-        });
-        setIsAdminDbExporting(true);
-        const controller = new AbortController();
-        adminDbExportAbortRef.current = controller;
-        const progressToken = uid();
-        startAdminExportProgressPoll({ token: progressToken, signal: controller.signal, which: "db" });
-        try {
-            const { blob, fileName } = await exportAdminDatabase({
-                authKey: authKeyDraft,
-                progressToken,
-                signal: controller.signal,
-            });
-            downloadBlobFile(blob, fileName || "database-export.sql");
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                setAdminExportError("Database export cancelled.");
-                return;
-            }
-            setAdminExportError(error?.message || "Failed to export database.");
-        } finally {
-            if (adminDbExportAbortRef.current === controller) {
-                adminDbExportAbortRef.current = null;
-            }
-            stopAdminExportProgressPoll("db");
-            setIsAdminDbExporting(false);
-        }
-    }
-
-    function onTruthFilesChange(e) {
-        const files = Array.from(e.target.files || []);
-        setTruthFiles(files);
-        if (files.length > MAX_TRUTH_BATCH_FILES) {
-            setTruthUploadError(`Too many files selected. Maximum is ${MAX_TRUTH_BATCH_FILES}.`);
-        } else {
-            const tooLargeTruth = files.find((file) => Number(file.size || 0) > maxSingleUploadBytes);
-            if (tooLargeTruth) {
-                setTruthUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
-            } else {
-                const batchBytes = files.reduce((sum, file) => sum + Number(file.size || 0), 0);
-                if (batchBytes > remainingUploadBytes) {
-                    setTruthUploadError(`Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`);
-                } else {
-                    setTruthUploadError("");
-                }
-            }
-        }
-        setTruthUploadLogText("");
-        setTruthUploadProgress(null);
-        setTruthConflicts([]);
-        setIsTruthConflictModalOpen(false);
-    }
-
-    async function uploadAndSaveTruthFile(file, { allowReplace = false, allowCreateBenchmark = false } = {}) {
-        const batchSize = Math.max(1, truthFiles.length);
-        const uploadMeta = await requestTruthUploadUrl({
-            authKey: authKeyDraft,
-            fileName: file.name,
-            fileSize: file.size,
-            batchSize,
-        });
-        const putRes = await fetch(uploadMeta.uploadUrl, {
-            method: "PUT",
-            body: file,
-        });
-        if (!putRes.ok) {
-            throw new Error("Failed to upload truth file to S3.");
-        }
-        await saveTruthTable({
-            authKey: authKeyDraft,
-            fileName: file.name,
-            fileSize: file.size,
-            batchSize,
-            allowReplace,
-            allowCreateBenchmark,
-        });
-    }
-
-    function toTruthLogText(rows) {
-        return rows
-            .map((row) => `file=${row.fileName}; success=${row.success ? "true" : "false"}; reason=${row.reason}`)
-            .join("\n");
-    }
-
-    async function uploadTruthTables() {
-        if (truthFiles.length === 0) {
-            setTruthUploadError("Select at least one .truth file.");
-            return;
-        }
-        if (truthFiles.length > MAX_TRUTH_BATCH_FILES) {
-            setTruthUploadError(`Too many files selected. Maximum is ${MAX_TRUTH_BATCH_FILES}.`);
-            return;
-        }
-        const tooLargeTruth = truthFiles.find((file) => Number(file.size || 0) > maxSingleUploadBytes);
-        if (tooLargeTruth) {
-            setTruthUploadError(`File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`);
-            return;
-        }
-        const batchBytes = truthFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
-        if (batchBytes > remainingUploadBytes) {
-            setTruthUploadError(`Multi-file quota exceeded. Remaining: ${formatGb(remainingUploadBytes)} GB.`);
-            return;
-        }
-        setIsTruthUploading(true);
-        setTruthUploadProgress({ done: 0, total: truthFiles.length });
-        setTruthUploadError("");
-        setTruthUploadLogText("");
-        setTruthConflicts([]);
-        setIsTruthConflictModalOpen(false);
-
-        try {
-            const invalidName = truthFiles.find((file) => !parseTruthFileName(file.name).ok);
-            if (invalidName) {
-                setTruthUploadError("Invalid truth file name. Expected: bench{200..299}.truth");
-                return;
-            }
-
-            const plan = await planTruthTablesUpload({
-                authKey: authKeyDraft,
-                fileNames: truthFiles.map((f) => f.name),
-            });
-            const fileByName = new Map(truthFiles.map((file) => [file.name, file]));
-            const logRows = [];
-            const pending = [];
-
-            for (const item of plan.files) {
-                const sourceFile = fileByName.get(item.fileName);
-                if (!sourceFile) continue;
-                if (item.action === "invalid") {
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: false,
-                        reason: item.reason || "Invalid truth file.",
-                    });
-                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-                    continue;
-                }
-                if (item.action === "requires_replace" || item.action === "requires_create_benchmark") {
-                    pending.push({
-                        ...item,
-                        checked: false,
-                    });
-                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-                    continue;
-                }
-                try {
-                    await uploadAndSaveTruthFile(sourceFile);
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: true,
-                        reason: "Uploaded successfully.",
-                    });
-                } catch (error) {
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: false,
-                        reason: error?.message || "Failed to upload truth file.",
-                    });
-                }
-                setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-            }
-
-            if (pending.length > 0) {
-                setTruthConflicts(pending);
-                setIsTruthConflictModalOpen(true);
-            }
-
-            if (logRows.length > 0) {
-                setTruthUploadLogText(toTruthLogText(logRows));
-            }
-            if (pending.length > 0) {
-                setTruthUploadError("Some files require confirmation. Review the conflict dialog.");
-            } else {
-                const failed = logRows.filter((row) => !row.success).length;
-                if (failed > 0) {
-                    setTruthUploadError("Some truth files failed. Download log for details.");
-                }
-                clearTruthFileInput();
-            }
-        } catch (error) {
-            setTruthUploadError(error?.message || "Failed to upload truth files.");
-        } finally {
-            setIsTruthUploading(false);
-            setTruthUploadProgress(null);
-        }
-    }
-
-    function setTruthConflictChecked(fileName, checked) {
-        setTruthConflicts((prev) => prev.map((row) => (row.fileName === fileName ? { ...row, checked } : row)));
-    }
-
-    function selectAllTruthConflicts() {
-        setTruthConflicts((prev) => prev.map((row) => ({ ...row, checked: true })));
-    }
-
-    function clearAllTruthConflicts() {
-        setTruthConflicts((prev) => prev.map((row) => ({ ...row, checked: false })));
-    }
-
-    async function applyTruthConflicts() {
-        if (truthConflicts.length === 0) {
-            setIsTruthConflictModalOpen(false);
-            return;
-        }
-        setIsTruthUploading(true);
-        setTruthUploadProgress({ done: 0, total: truthConflicts.length });
-        try {
-            const fileByName = new Map(truthFiles.map((file) => [file.name, file]));
-            const logRows = truthUploadLogText
-                ? truthUploadLogText.split("\n").filter(Boolean).map((line) => {
-                    const parts = line.split("; ");
-                    return {
-                        fileName: parts[0]?.replace(/^file=/, "") || "<unknown>",
-                        success: parts[1]?.replace(/^success=/, "") === "true",
-                        reason: parts[2]?.replace(/^reason=/, "") || "",
-                    };
-                })
-                : [];
-
-            for (const item of truthConflicts) {
-                if (!item.checked) {
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: false,
-                        reason: "Skipped by admin decision.",
-                    });
-                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-                    continue;
-                }
-                const sourceFile = fileByName.get(item.fileName);
-                if (!sourceFile) {
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: false,
-                        reason: "Local file is missing.",
-                    });
-                    setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-                    continue;
-                }
-                try {
-                    await uploadAndSaveTruthFile(sourceFile, {
-                        allowReplace: item.action === "requires_replace",
-                        allowCreateBenchmark: item.action === "requires_create_benchmark",
-                    });
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: true,
-                        reason: "Uploaded successfully after confirmation.",
-                    });
-                } catch (error) {
-                    logRows.push({
-                        fileName: item.fileName,
-                        success: false,
-                        reason: error?.message || "Failed to upload truth file.",
-                    });
-                }
-                setTruthUploadProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-            }
-
-            setTruthUploadLogText(toTruthLogText(logRows));
-            const failed = logRows.filter((row) => !row.success).length;
-            setTruthUploadError(failed > 0 ? "Some truth files failed. Download log for details." : "");
-            setTruthConflicts([]);
-            setIsTruthConflictModalOpen(false);
-            clearTruthFileInput();
-        } finally {
-            setIsTruthUploading(false);
-            setTruthUploadProgress(null);
-        }
-    }
-
-    function closeTruthConflictModal() {
-        setIsTruthConflictModalOpen(false);
-    }
-
-    function appendTextLog(setter, line) {
-        setter((prev) => (prev ? `${prev}\n${line}` : line));
-    }
-
-    async function runBulkVerifyAllPoints(checkerVersionRaw = selectedBulkVerifyChecker) {
-        if (bulkVerifyAbortRef.current) return;
-        const normalizedChecker = normalizeCheckerForActor(checkerVersionRaw);
-        const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker) ? normalizedChecker : DEFAULT_CHECKER_VERSION;
-        const controller = new AbortController();
-        bulkVerifyAbortRef.current = controller;
-        setIsBulkVerifyRunning(true);
-        const targetPoints = points.filter((p) => {
-            if (p.benchmark === "test") return false;
-            if (bulkVerifyIncludeVerified) return true;
-            return String(p.status || "").toLowerCase() !== "verified";
-        });
-        setBulkVerifyProgress({ done: 0, total: targetPoints.length });
-        setAdminPanelError("");
-        setBulkVerifyLogText("");
-        setBulkVerifyCurrentFileName("");
-        try {
-            const rows = [];
-            for (const point of targetPoints) {
-                if (controller.signal.aborted) break;
-                setBulkVerifyCurrentFileName(point.fileName || "");
-                let row = null;
-                row = await runAdminBulkVerifyPoint({
-                    authKey: authKeyDraft,
-                    checkerVersion,
-                    pointId: point.id,
-                    signal: controller.signal,
-                    progressToken: uid(),
-                });
-                if (row) rows.push(row);
-                appendTextLog(
-                    setBulkVerifyLogText,
-                    `file=${row?.fileName || point.fileName}; success=${row?.ok ? "true" : "false"}; reason=${row?.reason || "No result"}`
-                );
-                setBulkVerifyProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-            }
-            if (controller.signal.aborted) {
-                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-
-            const updates = rows
-                .filter((row) => row.ok && (row.recommendedStatus === "verified" || row.recommendedStatus === "failed"))
-                .map((row) => ({
-                    pointId: row.pointId,
-                    status: row.recommendedStatus,
-                    benchmark: row.benchmark,
-                    fileName: row.fileName,
-                    checked: true,
-                }));
-
-            if (updates.length === 0) {
-                window.alert("Bulk check completed. No status updates available.");
-                return;
-            }
-
-            setBulkVerifyCandidates(updates);
-            setIsBulkVerifyApplyModalOpen(true);
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-            setAdminPanelError(error?.message || "Failed to run bulk verification.");
-        } finally {
-            if (bulkVerifyAbortRef.current === controller) {
-                bulkVerifyAbortRef.current = null;
-            }
-            setIsBulkVerifyRunning(false);
-            setBulkVerifyProgress(null);
-            setBulkVerifyCurrentFileName("");
-        }
-    }
-
-    async function runBulkMetricsAudit() {
-        if (bulkMetricsAbortRef.current) return;
-        const controller = new AbortController();
-        bulkMetricsAbortRef.current = controller;
-        setIsBulkMetricsAuditRunning(true);
-        const targetPoints = points.filter((p) => p.benchmark !== "test");
-        setBulkMetricsAuditProgress({ done: 0, total: targetPoints.length });
-        setAdminPanelError("");
-        setBulkMetricsAuditLogText("");
-        setBulkMetricsAuditCurrentFileName("");
-        try {
-            const mismatches = [];
-            for (const point of targetPoints) {
-                if (controller.signal.aborted) break;
-                setBulkMetricsAuditCurrentFileName(point.fileName || "");
-                let mismatch = null;
-                mismatch = await runAdminMetricsAuditPoint({
-                    authKey: authKeyDraft,
-                    pointId: point.id,
-                    signal: controller.signal,
-                    progressToken: uid(),
-                });
-                if (mismatch) mismatches.push(mismatch);
-                appendTextLog(
-                    setBulkMetricsAuditLogText,
-                    mismatch
-                        ? `file=${mismatch.fileName || point.fileName}; success=false; reason=${mismatch.reason || "Metric mismatch"}`
-                        : `file=${point.fileName}; success=true; reason=Metrics matched.`
-                );
-                setBulkMetricsAuditProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-            }
-            if (controller.signal.aborted) {
-                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-            if (mismatches.length === 0) {
-                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=true; reason=No mismatches.");
-            }
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-            setAdminPanelError(error?.message || "Failed to run metrics audit.");
-        } finally {
-            if (bulkMetricsAbortRef.current === controller) {
-                bulkMetricsAbortRef.current = null;
-            }
-            setIsBulkMetricsAuditRunning(false);
-            setBulkMetricsAuditProgress(null);
-            setBulkMetricsAuditCurrentFileName("");
-        }
-    }
-
-    async function runBulkIdenticalAudit() {
-        if (bulkIdenticalAbortRef.current || isBulkIdenticalApplying) return;
-        const controller = new AbortController();
-        bulkIdenticalAbortRef.current = controller;
-        const progressToken = uid();
-        setIsBulkIdenticalAuditRunning(true);
-        setAdminPanelError("");
-        setBulkIdenticalAuditSummary(null);
-        setBulkIdenticalAuditLogText("");
-        setBulkIdenticalAuditProgress({ done: 0, total: 0 });
-        setBulkIdenticalAuditCurrentFileName("");
-        setBulkIdenticalGroups([]);
-        try {
-            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
-            bulkIdenticalProgressPollRef.current = setInterval(async () => {
-                if (controller.signal.aborted) return;
-                try {
-                    const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
-                    setBulkIdenticalAuditProgress({
-                        done: Number(progress?.doneCount || 0),
-                        total: Number(progress?.totalCount || 0),
-                    });
-                    setBulkIdenticalAuditCurrentFileName(String(progress?.currentFileName || ""));
-                } catch {
-                    // Ignore transient polling errors.
-                }
-            }, 500);
-            const payload = await runAdminIdenticalAudit({
-                authKey: authKeyDraft,
-                signal: controller.signal,
-                progressToken,
-            });
-            const groups = (Array.isArray(payload?.groups) ? payload.groups : []).map((group) => ({
-                ...group,
-                checked: true,
-                keepPointId: String(group?.points?.[0]?.id || ""),
-            }));
-            const summary = {
-                scannedPoints: Number(payload?.scannedPoints || 0),
-                failedPoints: Number(payload?.failedPoints || 0),
-                groups: groups.length,
-            };
-            setBulkIdenticalAuditSummary(summary);
-            setBulkIdenticalGroups(groups);
-            const logLines = (Array.isArray(payload?.log) ? payload.log : []).map(
-                (row) => `file=${row?.fileName || ""}; success=${row?.success ? "true" : "false"}; reason=${row?.reason || "No result"}`
-            );
-            if (groups.length > 0) {
-                for (const group of groups) {
-                    logLines.push(
-                        `group=${group.groupId}; benchmark=${group.benchmark}; duplicates=${Array.isArray(group.points) ? group.points.length : 0}; hash=${String(group.hash || "").slice(0, 16)}`
-                    );
-                }
-                setIsBulkIdenticalApplyModalOpen(true);
-            }
-            if (logLines.length > 0) {
-                setBulkIdenticalAuditLogText(logLines.join("\n"));
-            }
-            if (groups.length === 0) {
-                window.alert("Identical audit completed. No duplicate groups found.");
-            }
-        } catch (error) {
-            if (error?.name === "AbortError") {
-                appendTextLog(setBulkIdenticalAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-            setAdminPanelError(error?.message || "Failed to audit identical points.");
-        } finally {
-            if (bulkIdenticalProgressPollRef.current) clearInterval(bulkIdenticalProgressPollRef.current);
-            bulkIdenticalProgressPollRef.current = null;
-            if (bulkIdenticalAbortRef.current === controller) {
-                bulkIdenticalAbortRef.current = null;
-            }
-            setIsBulkIdenticalAuditRunning(false);
-            setBulkIdenticalAuditProgress(null);
-            setBulkIdenticalAuditCurrentFileName("");
-        }
-    }
-
-    function setBulkIdenticalGroupChecked(groupId, checked) {
-        setBulkIdenticalGroups((prev) =>
-            prev.map((group) => (group.groupId === groupId ? { ...group, checked: Boolean(checked) } : group))
-        );
-    }
-
-    function openBulkIdenticalGroupPicker(groupId) {
-        setBulkIdenticalPickerGroupId(String(groupId || ""));
-    }
-
-    function closeBulkIdenticalGroupPicker() {
-        setBulkIdenticalPickerGroupId("");
-    }
-
-    function setBulkIdenticalGroupKeepPoint(groupId, pointId) {
-        const nextPointId = String(pointId || "").trim();
-        setBulkIdenticalGroups((prev) =>
-            prev.map((group) => {
-                if (group.groupId !== groupId) return group;
-                const points = Array.isArray(group.points) ? group.points : [];
-                const exists = points.some((point) => String(point?.id || "") === nextPointId);
-                return {
-                    ...group,
-                    keepPointId: exists ? nextPointId : String(points[0]?.id || ""),
-                };
-            })
-        );
-    }
-
-    function selectAllBulkIdenticalGroups() {
-        setBulkIdenticalGroups((prev) => prev.map((group) => ({ ...group, checked: true })));
-    }
-
-    function clearAllBulkIdenticalGroups() {
-        setBulkIdenticalGroups((prev) => prev.map((group) => ({ ...group, checked: false })));
-    }
-
-    function closeBulkIdenticalApplyModal() {
-        if (isBulkIdenticalApplying) return;
-        setBulkIdenticalPickerGroupId("");
-        setIsBulkIdenticalApplyModalOpen(false);
-    }
-
-    async function applySelectedBulkIdenticalGroups() {
-        const resolutions = bulkIdenticalGroups
-            .filter((group) => group.checked)
-            .map((group) => {
-                const points = Array.isArray(group.points) ? group.points : [];
-                if (points.length <= 1) return null;
-                const keepPointId = String(group.keepPointId || "").trim();
-                const keepPoint = points.find((point) => String(point?.id || "") === keepPointId) || points[0];
-                if (!keepPoint?.id) return null;
-                const removePointIds = points
-                    .filter((point) => String(point?.id || "") !== String(keepPoint.id))
-                    .map((point) => String(point?.id || "").trim())
-                    .filter(Boolean);
-                if (removePointIds.length === 0) return null;
-                return {
-                    keepPointId: String(keepPoint.id),
-                    removePointIds,
-                };
-            })
-            .filter(Boolean);
-
-        if (resolutions.length === 0) {
-            setIsBulkIdenticalApplyModalOpen(false);
-            return;
-        }
-
-        setIsBulkIdenticalApplying(true);
-        setAdminPanelError("");
-        try {
-            const result = await applyAdminIdenticalResolutions({
-                authKey: authKeyDraft,
-                resolutions,
-            });
-            const freshPoints = await fetchPoints();
-            setPoints(freshPoints);
-            setIsBulkIdenticalApplyModalOpen(false);
-            setBulkIdenticalPickerGroupId("");
-            setBulkIdenticalGroups([]);
-            window.alert(
-                `Identical groups applied: ${Number(result?.appliedGroups || 0)}. Deleted points: ${Number(result?.deletedPoints || 0)}.`
-            );
-        } catch (error) {
-            setAdminPanelError(error?.message || "Failed to apply identical points resolutions.");
-        } finally {
-            setIsBulkIdenticalApplying(false);
-        }
-    }
-
-    function stopBulkVerifyAllPoints() {
-        if (!bulkVerifyAbortRef.current) return;
-        bulkVerifyAbortRef.current.abort();
-        bulkVerifyAbortRef.current = null;
-    }
-
-    function stopBulkMetricsAudit() {
-        if (!bulkMetricsAbortRef.current) return;
-        bulkMetricsAbortRef.current.abort();
-        bulkMetricsAbortRef.current = null;
-    }
-
-    function stopBulkIdenticalAudit() {
-        if (!bulkIdenticalAbortRef.current) return;
-        bulkIdenticalAbortRef.current.abort();
-        bulkIdenticalAbortRef.current = null;
-    }
-
-    function setBulkVerifyCandidateChecked(pointId, checked) {
-        setBulkVerifyCandidates((prev) => prev.map((row) => (row.pointId === pointId ? { ...row, checked } : row)));
-    }
-
-    function selectAllBulkVerifyCandidates() {
-        setBulkVerifyCandidates((prev) => prev.map((row) => ({ ...row, checked: true })));
-    }
-
-    function clearAllBulkVerifyCandidates() {
-        setBulkVerifyCandidates((prev) => prev.map((row) => ({ ...row, checked: false })));
-    }
-
-    function closeBulkVerifyApplyModal() {
-        setIsBulkVerifyApplyModalOpen(false);
-    }
-
-    async function applySelectedBulkVerifyCandidates() {
-        const updates = bulkVerifyCandidates
-            .filter((row) => row.checked)
-            .map((row) => ({ pointId: row.pointId, status: row.status }));
-        if (updates.length === 0) {
-            setIsBulkVerifyApplyModalOpen(false);
-            return;
-        }
-
-        setIsBulkVerifyRunning(true);
-        setAdminPanelError("");
-        try {
-            const normalizedChecker = normalizeCheckerForActor(selectedBulkVerifyChecker);
-            const checkerVersion = ENABLED_CHECKERS.has(normalizedChecker)
-                ? normalizedChecker
-                : DEFAULT_CHECKER_VERSION;
-            await applyAdminPointStatuses({
-                authKey: authKeyDraft,
-                updates,
-                checkerVersion,
-            });
-            const freshPoints = await fetchPoints();
-            setPoints(freshPoints);
-            setIsBulkVerifyApplyModalOpen(false);
-            setBulkVerifyCandidates([]);
-            window.alert(`Applied statuses for ${updates.length} points.`);
-        } catch (error) {
-            setAdminPanelError(error?.message || "Failed to apply statuses.");
-        } finally {
-            setIsBulkVerifyRunning(false);
-        }
-    }
+    }, [canUseFastHex, setSelectedBulkVerifyChecker, setSelectedChecker, setSelectedTestChecker]);
 
     function downloadUploadLog() {
         if (!uploadLogText) return;
-        const blob = new Blob([uploadLogText], { type: "text/plain;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadTextAsFile(uploadLogText, `upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
     function downloadTruthUploadLog() {
         if (!truthUploadLogText) return;
-        const blob = new Blob([truthUploadLogText], { type: "text/plain;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `truth-upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadTextAsFile(truthUploadLogText, `truth-upload-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
     function downloadBulkVerifyLog() {
         if (!bulkVerifyLogText) return;
-        const blob = new Blob([bulkVerifyLogText], { type: "text/plain;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `bulk-check-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadTextAsFile(bulkVerifyLogText, `bulk-check-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
     function downloadBulkMetricsAuditLog() {
         if (!bulkMetricsAuditLogText) return;
-        const blob = new Blob([bulkMetricsAuditLogText], { type: "text/plain;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `bulk-metrics-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadTextAsFile(bulkMetricsAuditLogText, `bulk-metrics-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
     function downloadBulkIdenticalAuditLog() {
         if (!bulkIdenticalAuditLogText) return;
-        const blob = new Blob([bulkIdenticalAuditLogText], { type: "text/plain;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadTextAsFile(bulkIdenticalAuditLogText, `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
     function formatDelayTick(value) {
@@ -2689,49 +739,15 @@ export default function App() {
     );
 
     useEffect(() => {
-        setSentPage(1);
+        const timer = setTimeout(() => setSentPage(1), 0);
+        return () => clearTimeout(timer);
     }, [myPoints.length]);
-
-    const selectedAdminLogActionSet = useMemo(() => new Set(selectedAdminLogActions), [selectedAdminLogActions]);
-    const availableAdminLogActions = useMemo(() => {
-        const actions = new Set();
-        for (const log of adminLogs) {
-            if (log?.action) actions.add(String(log.action));
-        }
-        return Array.from(actions).sort((a, b) => a.localeCompare(b));
-    }, [adminLogs]);
-    const filteredAdminLogs = useMemo(() => {
-        const query = adminLogCommandQuery.trim().toLowerCase();
-        if (!query && selectedAdminLogActionSet.size === 0) return adminLogs;
-        return adminLogs.filter((log) => {
-            const targetName = String(log?.targetName || "").toLowerCase();
-            if (query && !targetName.startsWith(query)) return false;
-            if (selectedAdminLogActionSet.size > 0 && !selectedAdminLogActionSet.has(String(log?.action || ""))) {
-                return false;
-            }
-            return true;
-        });
-    }, [adminLogs, adminLogCommandQuery, selectedAdminLogActionSet]);
-    const adminLogsPreview = useMemo(() => filteredAdminLogs.slice(0, 3), [filteredAdminLogs]);
-    const adminLogsHasMore = filteredAdminLogs.length > adminLogsPreview.length;
 
     useEffect(() => {
         if (!navigateNotice) return;
         const t = setTimeout(() => setNavigateNotice(""), 3200);
         return () => clearTimeout(t);
     }, [navigateNotice]);
-
-    useEffect(() => {
-        if (!benchmarkMenuOpen) return;
-        function onDocMouseDown(e) {
-            if (!benchmarkMenuRef.current) return;
-            if (!benchmarkMenuRef.current.contains(e.target)) {
-                setBenchmarkMenuOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", onDocMouseDown);
-        return () => document.removeEventListener("mousedown", onDocMouseDown);
-    }, [benchmarkMenuOpen]);
 
     function focusPoint(p) {
         if (!p) return;
@@ -2848,10 +864,7 @@ export default function App() {
                         benchmarkMenuOpen={benchmarkMenuOpen}
                         benchmarkLabel={benchmarkLabel}
                         onBenchmarkMenuToggle={() => setBenchmarkMenuOpen((v) => !v)}
-                        onSelectBenchmark={(benchmark) => {
-                            setBenchmarkFilter(benchmark);
-                            setBenchmarkMenuOpen(false);
-                        }}
+                        onSelectBenchmark={onSelectBenchmark}
                         availableBenchmarks={availableBenchmarks}
                         colorMode={colorMode}
                         onColorModeChange={setColorMode}
