@@ -55,10 +55,14 @@ export default async function handler(req, res) {
         `;
 
     const mismatches = [];
+    const totalCount = Number(pointsRes.rows.length || 0);
+    let processedCount = 0;
+    report("scan", { done: false, error: null, doneCount: 0, totalCount, currentFileName: "" });
     for (const point of pointsRes.rows) {
         const pointId = String(point.id);
         const benchmark = String(point.benchmark || "");
         const fileName = String(point.file_name || "");
+        report("scan", { done: false, error: null, doneCount: processedCount, totalCount, currentFileName: fileName });
 
         try {
             report("download_point");
@@ -107,11 +111,14 @@ export default async function handler(req, res) {
                 reason: String(error?.message || "Metrics audit failed."),
             });
         }
+        processedCount += 1;
+        report("scan", { done: false, error: null, doneCount: processedCount, totalCount, currentFileName: fileName });
     }
 
     res.status(200).json({
         ok: true,
         mismatches,
+        scannedPoints: processedCount,
     });
-    report("done", { done: true, error: null });
+    report("done", { done: true, error: null, doneCount: processedCount, totalCount, currentFileName: "" });
 }

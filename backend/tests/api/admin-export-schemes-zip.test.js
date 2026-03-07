@@ -71,7 +71,9 @@ describe("api/admin-export-schemes-zip handler", () => {
 
     it("returns schemes archive", async () => {
         authenticateAdmin.mockResolvedValueOnce({ id: 99 });
-        sql.mockResolvedValueOnce({ rows: [{ file_name: "bench200_1_1_a_b.bench" }] });
+        sql.mockResolvedValueOnce({
+            rows: [{ benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_a_b.bench", status: "verified", lifecycle_status: "main" }],
+        });
 
         const req = { method: "GET", query: { authKey: "k" } };
         const res = createMockRes();
@@ -83,29 +85,21 @@ describe("api/admin-export-schemes-zip handler", () => {
         expect(res.ended).toBe(true);
     });
 
-    it("keeps only current pareto-front files in local pareto export", async () => {
+    it("keeps only current pareto-front files in local pareto export and removes deleted from pareto dir", async () => {
         authenticateAdmin.mockResolvedValueOnce({ id: 99 });
         sql.mockResolvedValueOnce({
             rows: [
-                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified" },
-                { benchmark: "200", delay: 2, area: 2, file_name: "bench200_2_2_drop.bench", status: "verified" },
-                { benchmark: "201", delay: 5, area: 7, file_name: "bench201_5_7_keep2.bench", status: "verified" },
+                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified", lifecycle_status: "main" },
+                { benchmark: "200", delay: 2, area: 2, file_name: "bench200_2_2_drop.bench", status: "verified", lifecycle_status: "main" },
+                { benchmark: "201", delay: 5, area: 7, file_name: "bench201_5_7_keep2.bench", status: "verified", lifecycle_status: "main" },
+                { benchmark: "201", delay: 6, area: 9, file_name: "bench201_6_9_deleted.bench", status: "verified", lifecycle_status: "deleted" },
             ],
         });
-        fs.readdir
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_drop.bench" },
-                { isFile: () => true, name: "bench201_5_7_keep2.bench" },
-                { isFile: () => true, name: "bench333_9_9_old.bench" },
-            ])
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_drop.bench" },
-                { isFile: () => true, name: "bench201_5_7_keep2.bench" },
-                { isFile: () => true, name: "bench333_9_9_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ]);
+        fs.readdir.mockResolvedValueOnce([
+            { isFile: () => true, name: "bench200_1_1_keep.bench" },
+            { isFile: () => true, name: "bench201_6_9_deleted.bench" },
+            { isFile: () => true, name: "manifest.json" },
+        ]);
 
         const req = {
             method: "GET",
@@ -117,33 +111,20 @@ describe("api/admin-export-schemes-zip handler", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.mode).toBe("local_files");
-        expect(res.body.removedOutdatedParetoFiles).toBe(2);
-        expect(fs.rm).toHaveBeenCalledTimes(2);
-        const removedTargets = fs.rm.mock.calls.map((args) => String(args[0]));
-        expect(removedTargets.some((target) => target.includes("bench200_2_2_drop.bench"))).toBe(true);
-        expect(removedTargets.some((target) => target.includes("bench333_9_9_old.bench"))).toBe(true);
-        expect(removedTargets.some((target) => target.includes("bench200_1_1_keep.bench"))).toBe(false);
-        expect(removedTargets.some((target) => target.includes("bench201_5_7_keep2.bench"))).toBe(false);
+        expect(res.body.savedFiles).toBe(2);
+        expect(fs.rm).toHaveBeenCalledTimes(1);
+        expect(String(fs.rm.mock.calls[0][0])).toContain("bench201_6_9_deleted.bench");
+        expect(fs.rename).not.toHaveBeenCalled();
     });
 
-    it("marks outdated files as deleted in local all export", async () => {
+    it("adds deleted_ prefix for deleted lifecycle rows in local all export", async () => {
         authenticateAdmin.mockResolvedValueOnce({ id: 99 });
         sql.mockResolvedValueOnce({
             rows: [
-                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified" },
+                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified", lifecycle_status: "main" },
+                { benchmark: "200", delay: 2, area: 2, file_name: "bench200_2_2_old.bench", status: "verified", lifecycle_status: "deleted" },
             ],
         });
-        fs.readdir
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ])
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ]);
 
         const req = {
             method: "GET",
@@ -155,58 +136,12 @@ describe("api/admin-export-schemes-zip handler", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.mode).toBe("local_files");
-        expect(res.body.renamedDeletedFiles).toBe(1);
-        expect(fs.rename).toHaveBeenCalledTimes(1);
-        expect(String(fs.rename.mock.calls[0][0])).toContain("bench200_2_2_old.bench");
-        expect(String(fs.rename.mock.calls[0][1])).toContain("deleted_bench200_2_2_old.bench");
+        expect(res.body.savedFiles).toBe(2);
+        expect(fs.writeFile).toHaveBeenCalled();
+        const writtenTargets = fs.writeFile.mock.calls.map((args) => String(args[0]));
+        expect(writtenTargets.some((target) => target.includes("bench200_1_1_keep.bench"))).toBe(true);
+        expect(writtenTargets.some((target) => target.includes("deleted_bench200_2_2_old.bench"))).toBe(true);
         expect(fs.rm).not.toHaveBeenCalled();
-    });
-
-    it("never removes files directly for local all exports across requests", async () => {
-        authenticateAdmin.mockResolvedValue({ id: 99 });
-        sql.mockResolvedValue({
-            rows: [
-                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified" },
-            ],
-        });
-        fs.readdir
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ])
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ])
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "deleted_bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ])
-            .mockResolvedValueOnce([
-                { isFile: () => true, name: "bench200_1_1_keep.bench" },
-                { isFile: () => true, name: "deleted_bench200_2_2_old.bench" },
-                { isFile: () => true, name: "manifest.json" },
-            ]);
-
-        const req = {
-            method: "GET",
-            query: { authKey: "k", scope: "all" },
-            headers: { host: "localhost:3000" },
-        };
-
-        const firstRes = createMockRes();
-        await handler(req, firstRes);
-        const secondRes = createMockRes();
-        await handler(req, secondRes);
-
-        expect(firstRes.statusCode).toBe(200);
-        expect(secondRes.statusCode).toBe(200);
-        expect(fs.rm).not.toHaveBeenCalled();
-        expect(fs.rename).toHaveBeenCalledTimes(1);
-        expect(String(fs.rename.mock.calls[0][0])).toContain("bench200_2_2_old.bench");
-        expect(String(fs.rename.mock.calls[0][1])).toContain("deleted_bench200_2_2_old.bench");
+        expect(fs.rename).not.toHaveBeenCalled();
     });
 });

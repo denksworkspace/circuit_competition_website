@@ -296,8 +296,9 @@ export function AdminSettingsPanel({
                         </div>
                     ) : null}
                     {isBulkVerifyRunning && bulkVerifyCurrentFileName ? (
-                        <div className="cardHint">
-                            Current file: <span className="mono">{bulkVerifyCurrentFileName}</span>
+                        <div className="cardHint progressStableRow">
+                            <span>Current file:</span>
+                            <span className="mono progressFileName" title={bulkVerifyCurrentFileName}>{bulkVerifyCurrentFileName}</span>
                         </div>
                     ) : null}
                     {bulkVerifyLogText ? (
@@ -325,8 +326,9 @@ export function AdminSettingsPanel({
                         </div>
                     ) : null}
                     {isBulkMetricsAuditRunning && bulkMetricsAuditCurrentFileName ? (
-                        <div className="cardHint">
-                            Current file: <span className="mono">{bulkMetricsAuditCurrentFileName}</span>
+                        <div className="cardHint progressStableRow">
+                            <span>Current file:</span>
+                            <span className="mono progressFileName" title={bulkMetricsAuditCurrentFileName}>{bulkMetricsAuditCurrentFileName}</span>
                         </div>
                     ) : null}
                     {bulkMetricsAuditLogText ? (
@@ -354,8 +356,9 @@ export function AdminSettingsPanel({
                         </div>
                     ) : null}
                     {isBulkIdenticalAuditRunning && bulkIdenticalAuditCurrentFileName ? (
-                        <div className="cardHint">
-                            Current file: <span className="mono">{bulkIdenticalAuditCurrentFileName}</span>
+                        <div className="cardHint progressStableRow">
+                            <span>Current file:</span>
+                            <span className="mono progressFileName" title={bulkIdenticalAuditCurrentFileName}>{bulkIdenticalAuditCurrentFileName}</span>
                         </div>
                     ) : null}
                     {bulkIdenticalAuditSummary ? (

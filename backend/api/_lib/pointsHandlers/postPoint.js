@@ -124,8 +124,8 @@ export async function handlePostPoint(req, res) {
         }
 
         const insert = await sql`
-            insert into points (id, benchmark, delay, area, description, sender, file_name, status, checker_version, command_id)
-            values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus}, ${checkerVersion ?? null}, ${command.id})
+            insert into points (id, benchmark, delay, area, description, sender, file_name, status, lifecycle_status, checker_version, command_id)
+            values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus}, 'main', ${checkerVersion ?? null}, ${command.id})
             returning id, benchmark, delay, area, description, sender, file_name, status, checker_version
         `;
         const nextQuota = quotaRow
@@ -138,6 +138,7 @@ export async function handlePostPoint(req, res) {
             action: "point_created",
             details: {
                 pointId: id,
+                bench: String(benchmark),
                 benchmark: String(benchmark),
                 delay,
                 area,

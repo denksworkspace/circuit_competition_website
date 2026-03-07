@@ -55,6 +55,7 @@ export default async function handler(req, res) {
           set status = ${status},
               checker_version = ${checker}
           where id = ${pointId}
+            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
         `;
         applied += 1;
     }

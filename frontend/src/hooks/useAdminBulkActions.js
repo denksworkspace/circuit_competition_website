@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import {
     applyAdminIdenticalResolutions,
+    runAdminBulkVerify,
     applyAdminPointStatuses,
     fetchPoints,
     fetchVerifyPointProgress,
-    runAdminBulkVerifyPoint,
     runAdminIdenticalAudit,
-    runAdminMetricsAuditPoint,
+    runAdminMetricsAudit,
 } from "../services/apiClient.js";
 import { uid } from "../utils/pointUtils.js";
 import { appendTextLog } from "../utils/uploadFlowUtils.js";
 
 export function useAdminBulkActions({
     authKeyDraft,
-    points,
     setPoints,
     setAdminPanelError,
     normalizeCheckerForActor,
@@ -45,6 +44,8 @@ export function useAdminBulkActions({
     const bulkVerifyAbortRef = useRef(null);
     const bulkMetricsAbortRef = useRef(null);
     const bulkIdenticalAbortRef = useRef(null);
+    const bulkVerifyProgressPollRef = useRef(null);
+    const bulkMetricsProgressPollRef = useRef(null);
     const bulkIdenticalProgressPollRef = useRef(null);
 
     useEffect(() => {
@@ -61,6 +62,14 @@ export function useAdminBulkActions({
                 bulkIdenticalAbortRef.current.abort();
                 bulkIdenticalAbortRef.current = null;
             }
+            if (bulkVerifyProgressPollRef.current) {
+                clearInterval(bulkVerifyProgressPollRef.current);
+                bulkVerifyProgressPollRef.current = null;
+            }
+            if (bulkMetricsProgressPollRef.current) {
+                clearInterval(bulkMetricsProgressPollRef.current);
+                bulkMetricsProgressPollRef.current = null;
+            }
             if (bulkIdenticalProgressPollRef.current) {
                 clearInterval(bulkIdenticalProgressPollRef.current);
                 bulkIdenticalProgressPollRef.current = null;
@@ -75,41 +84,58 @@ export function useAdminBulkActions({
         const controller = new AbortController();
         bulkVerifyAbortRef.current = controller;
         setIsBulkVerifyRunning(true);
-        const targetPoints = points.filter((p) => {
-            if (p.benchmark === "test") return false;
-            if (bulkVerifyIncludeVerified) return true;
-            return String(p.status || "").toLowerCase() !== "verified";
-        });
-        setBulkVerifyProgress({ done: 0, total: targetPoints.length });
         setAdminPanelError("");
         setBulkVerifyLogText("");
         setBulkVerifyCurrentFileName("");
         try {
-            const rows = [];
-            for (const point of targetPoints) {
-                if (controller.signal.aborted) break;
-                setBulkVerifyCurrentFileName(point.fileName || "");
-                const row = await runAdminBulkVerifyPoint({
-                    authKey: authKeyDraft,
-                    checkerVersion,
-                    pointId: point.id,
-                    signal: controller.signal,
-                    progressToken: uid(),
-                });
-                if (row) rows.push(row);
+            const progressToken = uid();
+            setBulkVerifyProgress({ done: 0, total: 0 });
+            if (bulkVerifyProgressPollRef.current) clearInterval(bulkVerifyProgressPollRef.current);
+            bulkVerifyProgressPollRef.current = setInterval(async () => {
+                if (controller.signal.aborted) return;
+                try {
+                    const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                    setBulkVerifyProgress({
+                        done: Number(progress?.doneCount || 0),
+                        total: Number(progress?.totalCount || 0),
+                    });
+                    setBulkVerifyCurrentFileName(String(progress?.currentFileName || ""));
+                } catch {
+                    // Ignore transient polling errors.
+                }
+            }, 500);
+            const payload = await runAdminBulkVerify({
+                authKey: authKeyDraft,
+                checkerVersion,
+                includeVerified: bulkVerifyIncludeVerified,
+                includeDeleted: true,
+                signal: controller.signal,
+                progressToken,
+            });
+            const rows = Array.isArray(payload?.log) ? payload.log : [];
+            setBulkVerifyProgress((prev) => ({
+                done: rows.length,
+                total: Math.max(Number(prev?.total || 0), rows.length),
+            }));
+
+            for (const row of rows) {
                 appendTextLog(
                     setBulkVerifyLogText,
-                    `file=${row?.fileName || point.fileName}; success=${row?.ok ? "true" : "false"}; reason=${row?.reason || "No result"}`
+                    `file=${row?.fileName || ""}; success=${row?.ok ? "true" : "false"}; reason=${row?.reason || "No result"}`
                 );
-                setBulkVerifyProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
             }
-            if (controller.signal.aborted) {
-                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
+            if (rows.length === 0) {
+                appendTextLog(setBulkVerifyLogText, "file=<bulk>; success=true; reason=No points to verify with current filter.");
+                window.alert("No points to verify with current filter.");
                 return;
             }
 
             const updates = rows
-                .filter((row) => row.ok && (row.recommendedStatus === "verified" || row.recommendedStatus === "failed"))
+                .filter((row) => {
+                    if (!row?.ok) return false;
+                    if (row.recommendedStatus !== "verified" && row.recommendedStatus !== "failed") return false;
+                    return String(row?.sourceStatus || "").trim().toLowerCase() !== "deleted";
+                })
                 .map((row) => ({
                     pointId: row.pointId,
                     status: row.recommendedStatus,
@@ -132,6 +158,8 @@ export function useAdminBulkActions({
             }
             setAdminPanelError(error?.message || "Failed to run bulk verification.");
         } finally {
+            if (bulkVerifyProgressPollRef.current) clearInterval(bulkVerifyProgressPollRef.current);
+            bulkVerifyProgressPollRef.current = null;
             if (bulkVerifyAbortRef.current === controller) {
                 bulkVerifyAbortRef.current = null;
             }
@@ -146,36 +174,43 @@ export function useAdminBulkActions({
         const controller = new AbortController();
         bulkMetricsAbortRef.current = controller;
         setIsBulkMetricsAuditRunning(true);
-        const targetPoints = points.filter((p) => p.benchmark !== "test");
-        setBulkMetricsAuditProgress({ done: 0, total: targetPoints.length });
+        setBulkMetricsAuditProgress({ done: 0, total: 0 });
         setAdminPanelError("");
         setBulkMetricsAuditLogText("");
         setBulkMetricsAuditCurrentFileName("");
         try {
-            const mismatches = [];
-            for (const point of targetPoints) {
-                if (controller.signal.aborted) break;
-                setBulkMetricsAuditCurrentFileName(point.fileName || "");
-                const mismatch = await runAdminMetricsAuditPoint({
-                    authKey: authKeyDraft,
-                    pointId: point.id,
-                    signal: controller.signal,
-                    progressToken: uid(),
-                });
-                if (mismatch) mismatches.push(mismatch);
-                appendTextLog(
-                    setBulkMetricsAuditLogText,
-                    mismatch
-                        ? `file=${mismatch.fileName || point.fileName}; success=false; reason=${mismatch.reason || "Metric mismatch"}`
-                        : `file=${point.fileName}; success=true; reason=Metrics matched.`
-                );
-                setBulkMetricsAuditProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-            }
-            if (controller.signal.aborted) {
-                appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=false; reason=Stopped by admin.");
-                return;
-            }
-            if (mismatches.length === 0) {
+            const progressToken = uid();
+            if (bulkMetricsProgressPollRef.current) clearInterval(bulkMetricsProgressPollRef.current);
+            bulkMetricsProgressPollRef.current = setInterval(async () => {
+                if (controller.signal.aborted) return;
+                try {
+                    const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                    setBulkMetricsAuditProgress({
+                        done: Number(progress?.doneCount || 0),
+                        total: Number(progress?.totalCount || 0),
+                    });
+                    setBulkMetricsAuditCurrentFileName(String(progress?.currentFileName || ""));
+                } catch {
+                    // Ignore transient polling errors.
+                }
+            }, 500);
+            const payload = await runAdminMetricsAudit({
+                authKey: authKeyDraft,
+                signal: controller.signal,
+                progressToken,
+            });
+            const mismatches = Array.isArray(payload?.mismatches) ? payload.mismatches : [];
+            const scannedPoints = Number(payload?.scannedPoints || 0);
+            setBulkMetricsAuditProgress({ done: scannedPoints, total: scannedPoints });
+
+            if (mismatches.length > 0) {
+                for (const mismatch of mismatches) {
+                    appendTextLog(
+                        setBulkMetricsAuditLogText,
+                        `file=${mismatch?.fileName || ""}; success=false; reason=${mismatch?.reason || "Metric mismatch"}`
+                    );
+                }
+            } else {
                 appendTextLog(setBulkMetricsAuditLogText, "file=<bulk>; success=true; reason=No mismatches.");
             }
         } catch (error) {
@@ -185,6 +220,8 @@ export function useAdminBulkActions({
             }
             setAdminPanelError(error?.message || "Failed to run metrics audit.");
         } finally {
+            if (bulkMetricsProgressPollRef.current) clearInterval(bulkMetricsProgressPollRef.current);
+            bulkMetricsProgressPollRef.current = null;
             if (bulkMetricsAbortRef.current === controller) {
                 bulkMetricsAbortRef.current = null;
             }

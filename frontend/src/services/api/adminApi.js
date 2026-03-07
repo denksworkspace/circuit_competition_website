@@ -1,10 +1,18 @@
 import { apiUrl, parseJsonSafe } from "../http/client.js";
 
-export async function runAdminBulkVerify({ authKey, checkerVersion }) {
+export async function runAdminBulkVerify({
+    authKey,
+    checkerVersion,
+    includeVerified = true,
+    includeDeleted = true,
+    signal,
+    progressToken,
+}) {
     const response = await fetch(apiUrl("/api/admin-points-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, checkerVersion }),
+        signal,
+        body: JSON.stringify({ authKey, checkerVersion, includeVerified, includeDeleted, progressToken }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
@@ -44,11 +52,12 @@ export async function applyAdminPointStatuses({ authKey, updates, checkerVersion
     return data;
 }
 
-export async function runAdminMetricsAudit({ authKey }) {
+export async function runAdminMetricsAudit({ authKey, signal, progressToken }) {
     const response = await fetch(apiUrl("/api/admin-points-audit"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey }),
+        signal,
+        body: JSON.stringify({ authKey, progressToken }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
@@ -56,6 +65,7 @@ export async function runAdminMetricsAudit({ authKey }) {
     }
     return {
         mismatches: Array.isArray(data?.mismatches) ? data.mismatches : [],
+        scannedPoints: Number(data?.scannedPoints || 0),
     };
 }
 

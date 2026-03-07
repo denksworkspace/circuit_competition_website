@@ -150,6 +150,7 @@ export default async function handler(req, res) {
               set status = 'non-verified',
                   checker_version = null
               where benchmark = ${benchmark}
+                and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
             `;
         }
 

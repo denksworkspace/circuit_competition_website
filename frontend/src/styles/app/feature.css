@@ -233,6 +233,23 @@
     color: var(--muted);
 }
 
+.progressStableRow {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    width: min(100%, 520px);
+}
+
+.progressFileName {
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
 .settingsGear {
     width: 28px;
     height: 28px;
@@ -413,6 +430,31 @@
 
 .truthConflictItem:last-child {
     border-bottom: none;
+}
+
+.identicalResolveList {
+    gap: 8px;
+    padding: 8px;
+}
+
+.identicalResolveRow {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    display: grid;
+    gap: 8px;
+    background: #fff;
+}
+
+.identicalResolveMeta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.identicalResolveField {
+    margin: 0;
+    gap: 6px;
 }
 
 .maintenanceScreen {

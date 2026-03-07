@@ -13,6 +13,23 @@ export function AdminLogsPanel({
     adminLogsTotal,
     adminLogsHasMore,
 }) {
+    function formatLogDetails(log) {
+        const details = log?.details;
+        if (!details || typeof details !== "object") return "{}";
+        if (log?.action === "point_created" || log?.action === "point_soft_deleted") {
+            const parts = [];
+            if (details.pointId != null && String(details.pointId) !== "") parts.push(`pointId=${details.pointId}`);
+            const bench = details.bench ?? details.benchmark;
+            if (bench != null && String(bench) !== "") parts.push(`bench=${bench}`);
+            if (details.delay != null && String(details.delay) !== "") parts.push(`delay=${details.delay}`);
+            if (details.area != null && String(details.area) !== "") parts.push(`area=${details.area}`);
+            if (details.fileName != null && String(details.fileName) !== "") parts.push(`file=${details.fileName}`);
+            if (details.note != null && String(details.note) !== "") parts.push(`note=${details.note}`);
+            if (parts.length > 0) return parts.join("; ");
+        }
+        return JSON.stringify(details);
+    }
+
     return (
         <>
             <div className="cardHint">Latest action logs (all users):</div>
@@ -97,7 +114,7 @@ export function AdminLogsPanel({
                                     <span className="pill">actor: {log.actorName || "system"}</span>
                                 </div>
                                 <div className="compactBottom">
-                                    <span className="mono mutedMono">{JSON.stringify(log.details || {})}</span>
+                                    <span className="mono mutedMono">{formatLogDetails(log)}</span>
                                 </div>
                             </div>
                         </div>

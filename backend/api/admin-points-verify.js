@@ -19,9 +19,11 @@ export default async function handler(req, res) {
     const authKey = String(body?.authKey || "").trim();
     const checkerVersion = normalizeCheckerVersion(body?.checkerVersion || CHECKER_ABC);
     const pointId = body?.pointId ? String(body.pointId) : null;
+    const includeVerified = Boolean(body?.includeVerified ?? true);
+    const includeDeleted = Boolean(body?.includeDeleted ?? false);
     const progressToken = String(body?.progressToken || "").trim();
     const report = (status, patch = {}) => setVerifyProgress(progressToken, { status, ...patch });
-    report("queued", { done: false, error: null });
+    report("queued", { done: false, error: null, doneCount: 0, totalCount: 0, currentFileName: "" });
 
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -54,37 +56,48 @@ export default async function handler(req, res) {
 
     const pointsRes = pointId
         ? await sql`
-          select id, benchmark, file_name
+          select id, benchmark, file_name, status, lifecycle_status
           from points
           where id = ${pointId}
             and benchmark <> 'test'
+            and (${includeDeleted}::boolean or lower(coalesce(lifecycle_status, 'main')) <> 'deleted')
           order by created_at desc
         `
         : await sql`
-          select id, benchmark, file_name
+          select id, benchmark, file_name, status, lifecycle_status
           from points
           where benchmark <> 'test'
+            and (${includeVerified}::boolean or lower(coalesce(status, '')) <> 'verified')
+            and (${includeDeleted}::boolean or lower(coalesce(lifecycle_status, 'main')) <> 'deleted')
           order by created_at desc
         `;
 
     const log = [];
+    const totalCount = Number(pointsRes.rows.length || 0);
+    let doneCount = 0;
+    report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: "" });
     for (const point of pointsRes.rows) {
         const pointId = String(point.id);
         const benchmark = String(point.benchmark || "");
         const fileName = String(point.file_name || "");
+        const sourceStatus = String(point.lifecycle_status || "").trim().toLowerCase() || "main";
+        report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
 
         try {
-            report("download_point");
+            report("download_point", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
             const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
             if (!downloaded.ok) {
                 log.push({
                     pointId,
                     benchmark,
                     fileName,
+                    sourceStatus,
                     ok: false,
                     reason: downloaded.reason,
                     recommendedStatus: "non-verified",
                 });
+                doneCount += 1;
+                report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
                 continue;
             }
 
@@ -102,10 +115,13 @@ export default async function handler(req, res) {
                     pointId,
                     benchmark,
                     fileName,
+                    sourceStatus,
                     ok: false,
                     reason: verified.reason,
                     recommendedStatus: "non-verified",
                 });
+                doneCount += 1;
+                report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
                 continue;
             }
 
@@ -113,21 +129,27 @@ export default async function handler(req, res) {
                 pointId,
                 benchmark,
                 fileName,
+                sourceStatus,
                 ok: true,
                 equivalent: verified.equivalent,
                 recommendedStatus: verified.equivalent ? "verified" : "failed",
                 checkerVersion,
                 reason: verified.equivalent ? "Equivalent." : "Not equivalent.",
             });
+            doneCount += 1;
+            report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
         } catch (error) {
             log.push({
                 pointId,
                 benchmark,
                 fileName,
+                sourceStatus,
                 ok: false,
                 reason: String(error?.message || "Verification failed."),
                 recommendedStatus: "non-verified",
             });
+            doneCount += 1;
+            report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
         }
     }
 
@@ -136,5 +158,5 @@ export default async function handler(req, res) {
         checkerVersion,
         log,
     });
-    report("done", { done: true, error: null });
+    report("done", { done: true, error: null, doneCount, totalCount, currentFileName: "" });
 }

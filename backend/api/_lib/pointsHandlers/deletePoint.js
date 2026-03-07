@@ -2,8 +2,10 @@
 import { sql } from "@vercel/postgres";
 import { parseBody } from "../http.js";
 import { addActionLog } from "../actionLogs.js";
+import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 
 export async function handleDeletePoint(req, res) {
+    await ensurePointsStatusConstraint();
     const body = parseBody(req);
     const { id, authKey } = body || {};
 
@@ -19,9 +21,18 @@ export async function handleDeletePoint(req, res) {
     }
 
     const commandId = cmdRes.rows[0].id;
-    const pointRes = await sql`select id, command_id from points where id = ${id}`;
+    const pointRes = await sql`
+      select id, command_id, lifecycle_status, benchmark, delay, area, file_name
+      from points
+      where id = ${id}
+      limit 1
+    `;
     if (pointRes.rows.length === 0) {
         res.status(404).json({ error: "Point not found." });
+        return;
+    }
+    if (String(pointRes.rows[0].lifecycle_status || "").toLowerCase() === "deleted") {
+        res.status(200).json({ ok: true });
         return;
     }
 
@@ -30,12 +41,25 @@ export async function handleDeletePoint(req, res) {
         return;
     }
 
-    await sql`delete from points where id = ${id}`;
+    await sql`
+      update points
+      set lifecycle_status = 'deleted',
+          checker_version = null
+      where id = ${id}
+    `;
     await addActionLog({
         commandId,
         actorCommandId: commandId,
-        action: "point_deleted",
-        details: { pointId: id, note: "Quota is not refunded for deleted points." },
+        action: "point_soft_deleted",
+        details: {
+            pointId: id,
+            bench: String(pointRes.rows[0].benchmark || ""),
+            benchmark: String(pointRes.rows[0].benchmark || ""),
+            delay: Number(pointRes.rows[0].delay),
+            area: Number(pointRes.rows[0].area),
+            fileName: String(pointRes.rows[0].file_name || ""),
+            note: "Quota is not refunded for deleted points.",
+        },
     });
     res.status(200).json({ ok: true });
 }

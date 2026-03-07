@@ -5,6 +5,7 @@ import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { downloadPointCircuitText } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 function normalizeCircuitTextForHash(textRaw) {
     return String(textRaw || "")
@@ -18,6 +19,27 @@ function sha256Hex(textRaw) {
         .createHash("sha256")
         .update(normalizeCircuitTextForHash(textRaw), "utf8")
         .digest("hex");
+}
+
+let pointsContentHashSchemaReadyPromise = null;
+
+async function ensurePointsContentHashSchema() {
+    if (!pointsContentHashSchemaReadyPromise) {
+        pointsContentHashSchemaReadyPromise = (async () => {
+            await sql`
+              alter table points
+              add column if not exists content_hash text
+            `;
+            await sql`
+              create index if not exists points_benchmark_content_hash_idx
+              on points(benchmark, content_hash)
+            `;
+        })().catch((error) => {
+            pointsContentHashSchemaReadyPromise = null;
+            throw error;
+        });
+    }
+    return pointsContentHashSchemaReadyPromise;
 }
 
 function normalizeResolutions(rawResolutions) {
@@ -48,10 +70,12 @@ async function ensureAdminByAuthKey(authKey) {
 }
 
 async function scanIdenticalGroups(req, res, report) {
+    await ensurePointsContentHashSchema();
     const pointsRes = await sql`
-      select id, benchmark, delay, area, sender, file_name, created_at
+      select id, benchmark, delay, area, sender, file_name, created_at, content_hash
       from points
       where benchmark <> 'test'
+        and lower(coalesce(lifecycle_status, 'main')) = 'main'
       order by created_at desc
     `;
 
@@ -76,30 +100,40 @@ async function scanIdenticalGroups(req, res, report) {
             totalCount,
             currentFileName: fileName,
         });
-        const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
-        if (!downloaded.ok) {
-            const reason = downloaded.reason || "Failed to download point file.";
-            failures.push({
-                pointId,
-                fileName,
-                benchmark,
-                reason,
-            });
-            log.push({
-                pointId,
-                fileName,
-                success: false,
-                reason,
-            });
-            report("scan", {
-                done: false,
-                doneCount: scanned + failures.length,
-                totalCount,
-                currentFileName: fileName,
-            });
-            continue;
+        let hash = String(row.content_hash || "").trim();
+        if (!hash) {
+            const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
+            if (!downloaded.ok) {
+                const reason = downloaded.reason || "Failed to download point file.";
+                failures.push({
+                    pointId,
+                    fileName,
+                    benchmark,
+                    reason,
+                });
+                log.push({
+                    pointId,
+                    fileName,
+                    success: false,
+                    reason,
+                });
+                report("scan", {
+                    done: false,
+                    doneCount: scanned + failures.length,
+                    totalCount,
+                    currentFileName: fileName,
+                });
+                continue;
+            }
+            hash = sha256Hex(downloaded.circuitText);
+            await sql`
+              update points
+              set content_hash = ${hash}
+              where id = ${pointId}
+                and (content_hash is null or btrim(content_hash) = '')
+            `;
         }
-        const hash = sha256Hex(downloaded.circuitText);
+
         const key = `${benchmark}|${hash}`;
         if (!byHash.has(key)) byHash.set(key, []);
         byHash.get(key).push({
@@ -116,7 +150,7 @@ async function scanIdenticalGroups(req, res, report) {
             pointId,
             fileName,
             success: true,
-            reason: `hash=${hash.slice(0, 16)} benchmark=${benchmark}`,
+            reason: `${String(row.content_hash || "").trim() ? "reused" : "computed"} hash=${hash.slice(0, 16)} benchmark=${benchmark}`,
         });
         scanned += 1;
         report("scan", {
@@ -157,6 +191,7 @@ async function scanIdenticalGroups(req, res, report) {
 }
 
 async function applyIdenticalResolutions(res, resolutions) {
+    await ensurePointsStatusConstraint();
     let deletedPoints = 0;
 
     for (const item of resolutions) {
@@ -164,9 +199,12 @@ async function applyIdenticalResolutions(res, resolutions) {
         const removeIds = Array.from(new Set(item.removePointIds.filter((id) => id && id !== keepId)));
         if (removeIds.length === 0) continue;
         const result = await sql`
-          delete from points
+          update points
+          set lifecycle_status = 'deleted',
+              checker_version = null
           where id = any(${removeIds}::text[])
             and id <> ${keepId}
+            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
         `;
         deletedPoints += Number(result.rowCount || 0);
     }
@@ -199,6 +237,9 @@ export default async function handler(req, res) {
         res.status(auth.status).json({ error: auth.error });
         return;
     }
+
+    await ensurePointsContentHashSchema();
+    await ensurePointsStatusConstraint();
 
     if (mode === "apply") {
         await applyIdenticalResolutions(res, resolutions);

@@ -8,6 +8,7 @@ on:
 
 jobs:
   test-and-build:
+    if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -33,3 +34,231 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  main-pipeline-with-maintenance:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_BACKEND_SERVICE_ID: ${{ secrets.RENDER_BACKEND_SERVICE_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+      BACKEND_HEALTHCHECK_URL: ${{ secrets.BACKEND_HEALTHCHECK_URL }}
+      FRONTEND_HEALTHCHECK_URL: ${{ secrets.FRONTEND_HEALTHCHECK_URL }}
+      MAINTENANCE_API_URL: ${{ secrets.MAINTENANCE_API_URL }}
+      MAINTENANCE_ADMIN_AUTH_KEY: ${{ secrets.MAINTENANCE_ADMIN_AUTH_KEY }}
+      MAINTENANCE_DEFAULT_MESSAGE: "Technical maintenance is in progress. Please try again in 5-10 minutes."
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: npm install --prefix frontend
+
+      - name: Install backend dependencies
+        run: npm install --prefix backend
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            RENDER_API_KEY
+            RENDER_BACKEND_SERVICE_ID
+            VERCEL_TOKEN
+            VERCEL_PROJECT_ID
+            BACKEND_HEALTHCHECK_URL
+            FRONTEND_HEALTHCHECK_URL
+            MAINTENANCE_API_URL
+            MAINTENANCE_ADMIN_AUTH_KEY
+          )
+          missing=0
+          for var in "${required[@]}"; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing required secret/env: $var"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Enable maintenance mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn \
+              --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
+              --arg message "$MAINTENANCE_DEFAULT_MESSAGE" \
+              '{authKey: $authKey, enabled: true, message: $message}')"
+
+      - name: CI checks (lint + test + build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:coverage
+          npm run build
+
+      - name: Wait for Render deploy (backend)
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_TS="$(date -u +%s)"
+          START_MS="$((START_TS * 1000))"
+
+          fetch_latest_deploy() {
+            local service_id="$1"
+            local raw
+            raw="$(curl -fsS "https://api.render.com/v1/services/${service_id}/deploys?limit=1" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}")"
+            echo "$raw" | jq -c 'if type=="array" then .[0] elif .deploys then .deploys[0] elif .items then .items[0] else empty end'
+          }
+
+          wait_for_service_live() {
+            local service_id="$1"
+            local service_name="$2"
+            local max_attempts=90
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              local deploy_json
+              deploy_json="$(fetch_latest_deploy "$service_id")"
+              if [ -z "$deploy_json" ] || [ "$deploy_json" = "null" ]; then
+                echo "[$service_name] attempt ${attempt}/${max_attempts}: no deploy data yet"
+                sleep 20
+                attempt=$((attempt + 1))
+                continue
+              fi
+
+              local deploy_id status created_at created_ts
+              deploy_id="$(echo "$deploy_json" | jq -r '.id // ""')"
+              status="$(echo "$deploy_json" | jq -r '.status // ""' | tr '[:upper:]' '[:lower:]')"
+              created_at="$(echo "$deploy_json" | jq -r '.createdAt // .created_at // ""')"
+              created_ts="$(date -u -d "$created_at" +%s 2>/dev/null || echo 0)"
+
+              echo "[$service_name] attempt ${attempt}/${max_attempts}: id=${deploy_id:-n/a} status=${status:-unknown} created_at=${created_at:-n/a}"
+
+              if [ "$status" = "failed" ] || [ "$status" = "canceled" ] || [ "$status" = "cancelled" ]; then
+                echo "::error::Render deploy for ${service_name} ended with status=${status}"
+                exit 1
+              fi
+
+              if [ "$status" = "live" ] && [ "$created_ts" -ge $((START_TS - 600)) ]; then
+                echo "[$service_name] live deploy detected"
+                return 0
+              fi
+
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+
+            echo "::error::Timed out waiting for Render deploy (${service_name})"
+            exit 1
+          }
+
+          wait_for_service_live "$RENDER_BACKEND_SERVICE_ID" "render-backend"
+
+          fetch_vercel_latest_deploy() {
+            local query="https://api.vercel.com/v6/deployments?projectId=${VERCEL_PROJECT_ID}&target=production&limit=1"
+            if [ -n "${VERCEL_TEAM_ID:-}" ]; then
+              query="${query}&teamId=${VERCEL_TEAM_ID}"
+            fi
+            curl -fsS "$query" -H "Authorization: Bearer ${VERCEL_TOKEN}"
+          }
+
+          wait_for_vercel_ready() {
+            local max_attempts=90
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              local raw deploy_json deploy_id state created_ms
+              raw="$(fetch_vercel_latest_deploy)"
+              deploy_json="$(echo "$raw" | jq -c '.deployments[0] // empty')"
+              if [ -z "$deploy_json" ] || [ "$deploy_json" = "null" ]; then
+                echo "[vercel] attempt ${attempt}/${max_attempts}: no deploy data yet"
+                sleep 20
+                attempt=$((attempt + 1))
+                continue
+              fi
+
+              deploy_id="$(echo "$deploy_json" | jq -r '.uid // .id // ""')"
+              state="$(echo "$deploy_json" | jq -r '.readyState // ""' | tr '[:upper:]' '[:lower:]')"
+              created_ms="$(echo "$deploy_json" | jq -r '.createdAt // 0')"
+              echo "[vercel] attempt ${attempt}/${max_attempts}: id=${deploy_id:-n/a} state=${state:-unknown} created_ms=${created_ms}"
+
+              if [ "$state" = "error" ] || [ "$state" = "canceled" ] || [ "$state" = "cancelled" ]; then
+                echo "::error::Vercel deployment ended with state=${state}"
+                exit 1
+              fi
+
+              if [ "$state" = "ready" ] && [ "${created_ms:-0}" -ge $((START_MS - 600000)) ]; then
+                echo "[vercel] production deployment is ready"
+                return 0
+              fi
+
+              sleep 20
+              attempt=$((attempt + 1))
+            done
+            echo "::error::Timed out waiting for Vercel production deployment"
+            exit 1
+          }
+
+          wait_for_vercel_ready
+
+      - name: Wait for health checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          wait_for_health() {
+            local url="$1"
+            local name="$2"
+            local max_attempts=60
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              local code
+              code="$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)"
+              echo "[$name] attempt ${attempt}/${max_attempts}: http=${code}"
+              if [ "$code" = "200" ]; then
+                return 0
+              fi
+              sleep 10
+              attempt=$((attempt + 1))
+            done
+            echo "::error::Health check timeout for ${name} (${url})"
+            exit 1
+          }
+          wait_for_health "$BACKEND_HEALTHCHECK_URL" "backend"
+          wait_for_health "$FRONTEND_HEALTHCHECK_URL" "frontend-vercel"
+
+      - name: Disable maintenance mode
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn \
+              --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
+              --arg message "$MAINTENANCE_DEFAULT_MESSAGE" \
+              '{authKey: $authKey, enabled: false, message: $message}')"
+
+      - name: Keep maintenance mode on deploy failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILURE_MESSAGE="Technical maintenance is still in progress due to deploy failure. Please try again later."
+          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn \
+              --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
+              --arg message "$FAILURE_MESSAGE" \
+              '{authKey: $authKey, enabled: true, message: $message}')"

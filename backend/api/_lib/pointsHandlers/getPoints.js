@@ -2,9 +2,11 @@
 import { sql } from "@vercel/postgres";
 import { normalizePointRow } from "../points.js";
 import { ensureTruthTablesSchema } from "../truthTables.js";
+import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 
 export async function handleGetPoints(req, res) {
     await ensureTruthTablesSchema();
+    await ensurePointsStatusConstraint();
     const { rows } = await sql`
       select
         p.id,
@@ -19,6 +21,7 @@ export async function handleGetPoints(req, res) {
         (t.benchmark is not null) as has_truth
       from points p
       left join truth_tables t on t.benchmark = p.benchmark
+      where lower(coalesce(p.lifecycle_status, 'main')) <> 'deleted'
       order by p.created_at desc
     `;
 
