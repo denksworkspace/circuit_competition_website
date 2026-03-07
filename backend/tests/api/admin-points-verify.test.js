@@ -13,6 +13,9 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
 vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     ensureCommandUploadSettingsSchema: vi.fn(),
 }));
+vi.mock("../../api/_lib/pointsStatus.js", () => ({
+    ensurePointsStatusConstraint: vi.fn(),
+}));
 vi.mock("../../api/_lib/pointVerification.js", async (importOriginal) => {
     const actual = await importOriginal();
     return {

@@ -12,6 +12,7 @@ import {
     verifyCircuitWithTruth,
 } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -47,6 +48,7 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    await ensurePointsStatusConstraint();
     report("auth");
     const authRes = await sql`
       select id, role, name, abc_verify_timeout_seconds
@@ -142,12 +144,17 @@ export default async function handler(req, res) {
             res.status(403).json({ error: "Cannot update status for another command point." });
             return;
         }
-        await sql`
+        const updateResult = await sql`
           update points
           set status = ${nextStatus},
               checker_version = ${checkerVersion}
           where id = ${pointId}
+            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
         `;
+        if (Number(updateResult.rowCount || 0) === 0) {
+            res.status(409).json({ error: "Cannot apply status for deleted point.", code: "POINT_DELETED" });
+            return;
+        }
     }
 
     res.status(200).json({

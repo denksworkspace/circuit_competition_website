@@ -45,6 +45,8 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+      POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       BACKEND_HEALTHCHECK_URL: ${{ secrets.BACKEND_HEALTHCHECK_URL }}
       FRONTEND_HEALTHCHECK_URL: ${{ secrets.FRONTEND_HEALTHCHECK_URL }}
       MAINTENANCE_API_URL: ${{ secrets.MAINTENANCE_API_URL }}
@@ -89,6 +91,10 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
+          if [ -z "${POSTGRES_URL:-}" ] && [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::Missing required secret/env: set POSTGRES_URL or DATABASE_URL for db migration."
+            exit 1
+          fi
           CLEAN_MAINT_URL="$(printf '%s' "${MAINTENANCE_API_URL}" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
           if [[ ! "$CLEAN_MAINT_URL" =~ ^https?:// ]]; then
             echo "::error::MAINTENANCE_API_URL must start with http:// or https://. Current value is invalid."
@@ -114,6 +120,19 @@ jobs:
           npm run lint
           npm run test:coverage
           npm run build
+
+      - name: Run backend DB migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${POSTGRES_URL:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
+            export POSTGRES_URL="${DATABASE_URL}"
+          fi
+          if [ -z "${POSTGRES_URL:-}" ]; then
+            echo "::error::POSTGRES_URL is required (or provide DATABASE_URL fallback)."
+            exit 1
+          fi
+          npm run db:migrate --prefix backend
 
       - name: Wait for Render deploy (backend)
         shell: bash

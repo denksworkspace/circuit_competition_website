@@ -26,6 +26,12 @@ Run backend:
 npm run dev --prefix backend
 ```
 
+Run backend DB migration (points lifecycle/status schema safety):
+
+```bash
+npm run db:migrate --prefix backend
+```
+
 ## Frontend env (`frontend/.env`)
 
 ```env
@@ -35,6 +41,7 @@ VITE_DEV_API_TARGET=http://localhost:3000
 
 - `VITE_API_BASE_URL` is used in production builds.
 - `VITE_DEV_API_TARGET` is used only by Vite dev proxy.
+- Direct frontend API routes (`/api/points-direct`, `/api/points-upload-url-direct`) are deprecated.
 
 ## Backend env (`backend/.env`)
 

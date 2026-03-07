@@ -10,6 +10,9 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
         ensureCommandRolesSchema: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/pointsStatus.js", () => ({
+    ensurePointsStatusConstraint: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import handler from "../../api/admin-points-apply.js";

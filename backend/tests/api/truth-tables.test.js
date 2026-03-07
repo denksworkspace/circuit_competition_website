@@ -23,6 +23,9 @@ vi.mock("../../api/_lib/truthTables.js", async (importOriginal) => {
 vi.mock("../../api/_lib/actionLogs.js", () => ({
     addActionLog: vi.fn(),
 }));
+vi.mock("../../api/_lib/pointsStatus.js", () => ({
+    ensurePointsStatusConstraint: vi.fn(),
+}));
 vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     DEFAULT_MAX_MULTI_FILE_BATCH_COUNT: 100,
     ensureCommandUploadSettingsSchema: vi.fn(),

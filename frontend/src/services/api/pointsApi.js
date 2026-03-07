@@ -1,4 +1,4 @@
-import { apiUrl, directApiUrl, parseJsonSafe } from "../http/client.js";
+import { apiUrl, parseJsonSafe } from "../http/client.js";
 
 export async function fetchPoints() {
     const response = await fetch(apiUrl("/api/points"));
@@ -24,43 +24,11 @@ export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize 
     return data;
 }
 
-export async function requestUploadUrlDirect({ authKey, fileName, fileSize, batchSize = 1 }) {
-    const response = await fetch(directApiUrl("/api/points-upload-url-direct"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authKey, fileName, fileSize, batchSize }),
-    });
-
-    const data = await parseJsonSafe(response);
-    if (!response.ok) {
-        throw new Error(data?.error || "Failed to get upload URL.");
-    }
-    return data;
-}
-
 export async function savePoint(pointPayload, { signal } = {}) {
     const response = await fetch(apiUrl("/api/points"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal,
-        body: JSON.stringify(pointPayload),
-    });
-
-    const data = await parseJsonSafe(response);
-    if (!response.ok) {
-        throw new Error(data?.error || "Failed to save point.");
-    }
-
-    return {
-        point: data?.point || null,
-        quota: data?.quota || null,
-    };
-}
-
-export async function savePointDirect(pointPayload) {
-    const response = await fetch(directApiUrl("/api/points-direct"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pointPayload),
     });
 

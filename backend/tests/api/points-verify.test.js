@@ -13,6 +13,9 @@ vi.mock("../../api/_roles.js", async (importOriginal) => {
 vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     ensureCommandUploadSettingsSchema: vi.fn(),
 }));
+vi.mock("../../api/_lib/pointsStatus.js", () => ({
+    ensurePointsStatusConstraint: vi.fn(),
+}));
 vi.mock("../../api/_lib/pointVerification.js", async (importOriginal) => {
     const actual = await importOriginal();
     return {
@@ -51,7 +54,7 @@ describe("api/points-verify", () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant", name: "u1" }] });
         verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: true });
         sql.mockResolvedValueOnce({ rows: [{ id: "p1", sender: "u1", benchmark: "254", file_name: "f.bench" }] });
-        sql.mockResolvedValueOnce({ rows: [] });
+        sql.mockResolvedValueOnce({ rowCount: 1, rows: [] });
 
         const req = createMockReq({
             method: "POST",
@@ -69,6 +72,30 @@ describe("api/points-verify", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.status).toBe("verified");
+    });
+
+    it("does not apply status for deleted point", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant", name: "u1" }] });
+        verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: true });
+        sql.mockResolvedValueOnce({ rows: [{ id: "p1", sender: "u1", benchmark: "254", file_name: "f.bench" }] });
+        sql.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                benchmark: "254",
+                circuitText: "x",
+                checkerVersion: "ABC",
+                pointId: "p1",
+                applyStatus: true,
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body.code).toBe("POINT_DELETED");
     });
 
     it("caps timeoutSeconds by user verify quota", async () => {

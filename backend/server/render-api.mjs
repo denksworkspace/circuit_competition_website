@@ -3,6 +3,7 @@ import path from "node:path";
 import { access, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkMaintenanceBlock } from "../api/_lib/maintenanceMode.js";
+import { ensurePointsStatusConstraint } from "../api/_lib/pointsStatus.js";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(serverDir, "../api");
@@ -223,6 +224,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await bootstrapEnv();
+await ensurePointsStatusConstraint();
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => {

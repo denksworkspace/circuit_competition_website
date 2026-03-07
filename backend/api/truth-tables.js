@@ -15,6 +15,7 @@ import {
     ensureCommandUploadSettingsSchema,
     normalizeCommandUploadSettings,
 } from "./_lib/commandUploadSettings.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 const MAX_TRUTH_BATCH_FILES = 100;
 
@@ -54,6 +55,7 @@ export default async function handler(req, res) {
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
     await ensureTruthTablesSchema();
+    await ensurePointsStatusConstraint();
 
     const authRes = await sql`
       select id, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count

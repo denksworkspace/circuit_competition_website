@@ -3,9 +3,7 @@ export { fetchCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./
 export {
     fetchPoints,
     requestUploadUrl,
-    requestUploadUrlDirect,
     savePoint,
-    savePointDirect,
     validateUploadCircuits,
     testPointCircuit,
     verifyPointCircuit,

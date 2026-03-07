@@ -3,6 +3,7 @@ import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { CHECKER_ABC, CHECKER_ABC_FAST_HEX, normalizeCheckerVersion } from "./_lib/pointVerification.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 const ALLOWED_STATUS = new Set(["verified", "failed", "non-verified"]);
 
@@ -24,6 +25,7 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensurePointsStatusConstraint();
     const authRes = await sql`
       select id, role
       from commands

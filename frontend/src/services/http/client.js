@@ -6,22 +6,11 @@ const apiBaseUrl = useLocalApiInDev
     : String(import.meta.env.VITE_API_BASE_URL || "")
         .trim()
         .replace(/\/+$/, "");
-const directApiBaseUrl = useLocalApiInDev
-    ? ""
-    : String(import.meta.env.VITE_DIRECT_API_BASE_URL || "")
-        .trim()
-        .replace(/\/+$/, "");
 
 export function apiUrl(path) {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     if (!apiBaseUrl) return normalizedPath;
     return `${apiBaseUrl}${normalizedPath}`;
-}
-
-export function directApiUrl(path) {
-    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    if (!directApiBaseUrl) return normalizedPath;
-    return `${directApiBaseUrl}${normalizedPath}`;
 }
 
 export async function parseJsonSafe(response) {

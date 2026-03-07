@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node server/render-api.mjs",
-    "start": "node server/render-api.mjs",
+    "start": "npm run db:migrate && node server/render-api.mjs",
+    "db:migrate": "node scripts/migrate-points-schema.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:run:fast": "vitest run --exclude tests/security/**",

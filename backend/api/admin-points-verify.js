@@ -11,6 +11,7 @@ import {
     verifyCircuitWithTruth,
 } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -36,6 +37,7 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    await ensurePointsStatusConstraint();
     report("auth");
     const authRes = await sql`
       select id, role, abc_verify_timeout_seconds

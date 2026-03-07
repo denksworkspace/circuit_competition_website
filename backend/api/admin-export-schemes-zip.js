@@ -8,6 +8,7 @@ import { buildDownloadUrl } from "./_lib/points.js";
 import { authenticateAdmin } from "./_lib/adminUsers/utils.js";
 import { buildZipBuffer } from "./_lib/zip.js";
 import { setExportProgress } from "./_lib/exportProgress.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 const MAX_TOTAL_FILES = 5000;
 const LOCAL_EXPORT_TRACK_ROOT = path.join(process.cwd(), ".local-exported-points");
@@ -155,6 +156,7 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensurePointsStatusConstraint();
 
     const admin = await authenticateAdmin(authKey);
     if (!admin) {

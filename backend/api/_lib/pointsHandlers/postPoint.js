@@ -9,6 +9,7 @@ import {
     normalizeCommandUploadSettings,
 } from "../commandUploadSettings.js";
 import { addActionLog } from "../actionLogs.js";
+import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 
 const MAX_DESCRIPTION_LEN = 200;
 
@@ -19,6 +20,7 @@ function isValidStatus(status) {
 export async function handlePostPoint(req, res) {
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    await ensurePointsStatusConstraint();
 
     const body = parseBody(req);
     const {

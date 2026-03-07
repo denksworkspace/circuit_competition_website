@@ -4,6 +4,7 @@ import { createMockRes } from "../helpers/mockHttp.js";
 
 vi.mock("@vercel/postgres", () => ({ sql: vi.fn() }));
 vi.mock("../../api/_roles.js", () => ({ ensureCommandRolesSchema: vi.fn() }));
+vi.mock("../../api/_lib/pointsStatus.js", () => ({ ensurePointsStatusConstraint: vi.fn() }));
 vi.mock("../../api/_lib/adminUsers/utils.js", () => ({ authenticateAdmin: vi.fn() }));
 vi.mock("../../api/_lib/points.js", () => ({
     buildDownloadUrl: vi.fn((fileName) => `https://points.example/${fileName}`),
