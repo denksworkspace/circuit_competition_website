@@ -2,6 +2,7 @@ import http from "node:http";
 import path from "node:path";
 import { access, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { checkMaintenanceBlock } from "../api/_lib/maintenanceMode.js";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(serverDir, "../api");
@@ -188,6 +189,7 @@ const server = http.createServer(async (req, res) => {
         const reqAny = req;
         reqAny.query = Object.fromEntries(url.searchParams.entries());
         reqAny.abortSignal = requestAbortController.signal;
+        reqAny.urlPath = url.pathname;
 
         if (req.method && ["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) {
             try {
@@ -203,6 +205,14 @@ const server = http.createServer(async (req, res) => {
         }
 
         const resAny = augmentResponse(res);
+        const maintenanceCheck = await checkMaintenanceBlock(reqAny);
+        if (maintenanceCheck?.blocked) {
+            resAny.status(503).json({
+                error: maintenanceCheck?.state?.message || "Technical maintenance is in progress. Please try again later.",
+                maintenance: true,
+            });
+            return;
+        }
         await handler(reqAny, resAny);
     } catch (error) {
         console.error(error);

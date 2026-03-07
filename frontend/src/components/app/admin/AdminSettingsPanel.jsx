@@ -24,6 +24,13 @@ export function AdminSettingsPanel({
     onAdminVerifyTleSecondsDraftChange,
     adminMetricsTleSecondsDraft,
     onAdminMetricsTleSecondsDraftChange,
+    isMaintenanceModeEnabled,
+    onMaintenanceModeEnabledChange,
+    maintenanceMessageDraft,
+    onMaintenanceMessageDraftChange,
+    maintenanceWhitelistDraft,
+    onMaintenanceWhitelistDraftChange,
+    saveMaintenanceSettings,
     saveAdminUserSettings,
     isAdminSaving,
     truthFilesInputRef,
@@ -76,6 +83,42 @@ export function AdminSettingsPanel({
 
             <button className="btn ghost" type="button" onClick={loadAdminUser} disabled={isAdminLoading}>
                 {isAdminLoading ? "Loading..." : "Load user"}
+            </button>
+
+            <div className="cardHint">Maintenance mode (global)</div>
+            <label className="field">
+                <span className="mono">
+                    <input
+                        type="checkbox"
+                        checked={isMaintenanceModeEnabled}
+                        onChange={(e) => onMaintenanceModeEnabledChange(e.target.checked)}
+                    />
+                    {" "}MAINTENANCE_MODE {isMaintenanceModeEnabled ? "ON" : "OFF"}
+                </span>
+            </label>
+            <label className="field">
+                <span>Maintenance message</span>
+                <input
+                    value={maintenanceMessageDraft}
+                    onChange={(e) => onMaintenanceMessageDraftChange(e.target.value)}
+                    placeholder="Technical maintenance is in progress..."
+                />
+            </label>
+            <label className="field">
+                <span>Whitelist admin IDs</span>
+                <input
+                    value={maintenanceWhitelistDraft}
+                    onChange={(e) => onMaintenanceWhitelistDraftChange(e.target.value)}
+                    placeholder="1, 2, 3"
+                />
+            </label>
+            <button
+                className="btn primary"
+                type="button"
+                onClick={saveMaintenanceSettings}
+                disabled={isAdminSaving}
+            >
+                {isAdminSaving ? "Saving..." : "Save maintenance mode"}
             </button>
 
             <div className="buttonRow">

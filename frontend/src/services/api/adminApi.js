@@ -184,3 +184,42 @@ export async function updateAdminUserUploadSettings({
         actionLogs: Array.isArray(data?.actionLogs) ? data.actionLogs : [],
     };
 }
+
+export async function fetchAdminMaintenanceSettings({ authKey }) {
+    const query = new URLSearchParams({
+        authKey: String(authKey || ""),
+    });
+    const response = await fetch(apiUrl(`/api/admin-maintenance?${query.toString()}`));
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load maintenance settings.");
+    }
+    return {
+        maintenance: data?.maintenance || null,
+    };
+}
+
+export async function updateAdminMaintenanceSettings({
+    authKey,
+    enabled,
+    message,
+    whitelistAdminIds,
+}) {
+    const response = await fetch(apiUrl("/api/admin-maintenance"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            authKey,
+            enabled: Boolean(enabled),
+            message: String(message || ""),
+            whitelistAdminIds,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to update maintenance settings.");
+    }
+    return {
+        maintenance: data?.maintenance || null,
+    };
+}

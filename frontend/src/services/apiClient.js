@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-export { fetchCommands, fetchCommandByAuthKey } from "./api/authApi.js";
+export { fetchCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./api/authApi.js";
 export {
     fetchPoints,
     requestUploadUrl,
@@ -23,6 +23,8 @@ export {
     fetchAdminUserById,
     fetchAdminActionLogs,
     updateAdminUserUploadSettings,
+    fetchAdminMaintenanceSettings,
+    updateAdminMaintenanceSettings,
 } from "./api/adminApi.js";
 export {
     planTruthTablesUpload,

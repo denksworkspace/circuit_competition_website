@@ -20,6 +20,7 @@ import { AdminSettingsSection } from "./components/app/AdminSettingsSection.jsx"
 import { FindPointsSection } from "./components/app/FindPointsSection.jsx";
 import { PointActionModal } from "./components/app/PointActionModal.jsx";
 import { ManualPointApplyModal } from "./components/app/ManualPointApplyModal.jsx";
+import { MaintenanceScreen } from "./components/app/MaintenanceScreen.jsx";
 import {
     buildAxis,
     computeParetoFrontOriginal,
@@ -40,6 +41,7 @@ import { usePointTesting } from "./hooks/usePointTesting.js";
 import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
 import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
 import { downloadTextAsFile } from "./utils/fileDownloadUtils.js";
+import { fetchMaintenanceStatus } from "./services/apiClient.js";
 
 const CHECKER_ABC = "ABC";
 const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
@@ -47,6 +49,8 @@ const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
 const ENABLED_CHECKERS = new Set([CHECKER_ABC, CHECKER_ABC_FAST_HEX]);
 
 export default function App() {
+    const isLocalRuntime = typeof window !== "undefined"
+        && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
     function bytesToGb(bytes) {
         const value = Number(bytes);
         if (!Number.isFinite(value) || value < 0) return 0;
@@ -88,6 +92,12 @@ export default function App() {
     }
 
     const [navigateNotice, setNavigateNotice] = useState("");
+    const [maintenanceStatus, setMaintenanceStatus] = useState(() => ({
+        enabled: false,
+        activeForUser: false,
+        bypass: false,
+        message: "",
+    }));
 
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
@@ -146,10 +156,17 @@ export default function App() {
         setAdminVerifyTleSecondsDraft,
         adminMetricsTleSecondsDraft,
         setAdminMetricsTleSecondsDraft,
+        isMaintenanceModeEnabled,
+        setIsMaintenanceModeEnabled,
+        maintenanceMessageDraft,
+        setMaintenanceMessageDraft,
+        maintenanceWhitelistDraft,
+        setMaintenanceWhitelistDraft,
         isAdminLoading,
         isAdminSaving,
         loadAdminUser,
         saveAdminUserSettings,
+        saveMaintenanceSettings,
     } = useAdminUserSettings({
         isAdmin,
         authKeyDraft,
@@ -749,6 +766,38 @@ export default function App() {
         return () => clearTimeout(t);
     }, [navigateNotice]);
 
+    useEffect(() => {
+        let cancelled = false;
+        let timer = null;
+        async function poll() {
+            try {
+                const status = await fetchMaintenanceStatus({ authKey: authKeyDraft });
+                if (!cancelled) {
+                    setMaintenanceStatus({
+                        enabled: Boolean(status?.enabled),
+                        activeForUser: Boolean(status?.activeForUser),
+                        bypass: Boolean(status?.bypass),
+                        message: String(status?.message || ""),
+                    });
+                }
+            } catch {
+                if (!cancelled) {
+                    setMaintenanceStatus((prev) => ({
+                        ...prev,
+                        enabled: false,
+                        activeForUser: false,
+                    }));
+                }
+            }
+        }
+        poll();
+        timer = setInterval(poll, 15000);
+        return () => {
+            cancelled = true;
+            if (timer) clearInterval(timer);
+        };
+    }, [authKeyDraft, currentCommand?.id]);
+
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
@@ -769,6 +818,10 @@ export default function App() {
                 onLogin={tryLogin}
             />
         );
+    }
+
+    if (maintenanceStatus.activeForUser && !isLocalRuntime) {
+        return <MaintenanceScreen />;
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";
@@ -801,6 +854,12 @@ export default function App() {
                             </div>
                         </div>
                     </div>
+                    {isAdmin ? (
+                        <span className={`serverStatus ${maintenanceStatus.enabled ? "serverOff" : "serverOn"}`}>
+                            <span className="serverStatusDot" />
+                            {maintenanceStatus.enabled ? "server off" : "server on"}
+                        </span>
+                    ) : null}
                     <div className="pill subtle">
                         Multi-file quota: {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
                     </div>
@@ -953,6 +1012,13 @@ export default function App() {
                             onAdminVerifyTleSecondsDraftChange={setAdminVerifyTleSecondsDraft}
                             adminMetricsTleSecondsDraft={adminMetricsTleSecondsDraft}
                             onAdminMetricsTleSecondsDraftChange={setAdminMetricsTleSecondsDraft}
+                            isMaintenanceModeEnabled={isMaintenanceModeEnabled}
+                            onMaintenanceModeEnabledChange={setIsMaintenanceModeEnabled}
+                            maintenanceMessageDraft={maintenanceMessageDraft}
+                            onMaintenanceMessageDraftChange={setMaintenanceMessageDraft}
+                            maintenanceWhitelistDraft={maintenanceWhitelistDraft}
+                            onMaintenanceWhitelistDraftChange={setMaintenanceWhitelistDraft}
+                            saveMaintenanceSettings={saveMaintenanceSettings}
                             saveAdminUserSettings={saveAdminUserSettings}
                             isAdminSaving={isAdminSaving}
                             isAdminQuotaSettingsOpen={isAdminQuotaSettingsOpen}

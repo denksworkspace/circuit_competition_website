@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MAX_MULTI_FILE_BATCH_COUNT } from "../constants/appConstants.js";
-import { fetchAdminUserById, updateAdminUserUploadSettings } from "../services/apiClient.js";
+import {
+    fetchAdminMaintenanceSettings,
+    fetchAdminUserById,
+    updateAdminMaintenanceSettings,
+    updateAdminUserUploadSettings,
+} from "../services/apiClient.js";
 
 export function useAdminUserSettings({
     isAdmin,
@@ -16,6 +21,9 @@ export function useAdminUserSettings({
     const [adminBatchCountDraft, setAdminBatchCountDraft] = useState("");
     const [adminVerifyTleSecondsDraft, setAdminVerifyTleSecondsDraft] = useState("");
     const [adminMetricsTleSecondsDraft, setAdminMetricsTleSecondsDraft] = useState("");
+    const [isMaintenanceModeEnabled, setIsMaintenanceModeEnabled] = useState(false);
+    const [maintenanceMessageDraft, setMaintenanceMessageDraft] = useState("Technical maintenance is in progress. Please try again later.");
+    const [maintenanceWhitelistDraft, setMaintenanceWhitelistDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
 
@@ -26,6 +34,23 @@ export function useAdminUserSettings({
         setAdminBatchCountDraft(String(user?.maxMultiFileBatchCount || MAX_MULTI_FILE_BATCH_COUNT));
         setAdminVerifyTleSecondsDraft(String(user?.abcVerifyTimeoutSeconds || 60));
         setAdminMetricsTleSecondsDraft(String(user?.abcMetricsTimeoutSeconds || 60));
+    }
+
+    function applyMaintenanceDrafts(maintenance) {
+        const row = maintenance && typeof maintenance === "object" ? maintenance : {};
+        setIsMaintenanceModeEnabled(Boolean(row.enabled));
+        setMaintenanceMessageDraft(String(row.message || "Technical maintenance is in progress. Please try again later."));
+        setMaintenanceWhitelistDraft(
+            Array.isArray(row.whitelistAdminIds)
+                ? row.whitelistAdminIds.join(", ")
+                : ""
+        );
+    }
+
+    async function loadMaintenanceSettings() {
+        if (!isAdmin) return;
+        const maintenancePayload = await fetchAdminMaintenanceSettings({ authKey: authKeyDraft });
+        applyMaintenanceDrafts(maintenancePayload?.maintenance || {});
     }
 
     async function loadAdminUser() {
@@ -42,6 +67,9 @@ export function useAdminUserSettings({
         try {
             const payload = await fetchAdminUserById({ authKey: authKeyDraft, userId });
             applyAdminUserDrafts(payload.user);
+            await loadMaintenanceSettings().catch(() => {
+                // Keep user settings usable even if maintenance endpoint is temporarily unavailable.
+            });
             refreshAdminLogs();
         } catch (error) {
             setAdminUser(null);
@@ -74,6 +102,37 @@ export function useAdminUserSettings({
         }
     }
 
+    async function saveMaintenanceSettings() {
+        if (!isAdmin) return;
+        setIsAdminSaving(true);
+        setAdminPanelError("");
+        try {
+            const whitelistAdminIds = String(maintenanceWhitelistDraft || "")
+                .split(/[,\s]+/)
+                .map((part) => Number(part))
+                .filter((id) => Number.isInteger(id) && id > 0);
+            const payload = await updateAdminMaintenanceSettings({
+                authKey: authKeyDraft,
+                enabled: isMaintenanceModeEnabled,
+                message: maintenanceMessageDraft,
+                whitelistAdminIds,
+            });
+            applyMaintenanceDrafts(payload?.maintenance || {});
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to save maintenance settings.");
+        } finally {
+            setIsAdminSaving(false);
+        }
+    }
+
+    useEffect(() => {
+        if (!isAdmin) return;
+        if (!String(authKeyDraft || "").trim()) return;
+        loadMaintenanceSettings().catch(() => {
+            // do not block main UI on maintenance read failures
+        });
+    }, [isAdmin, authKeyDraft]);
+
     return {
         adminUserIdDraft,
         setAdminUserIdDraft,
@@ -90,9 +149,16 @@ export function useAdminUserSettings({
         setAdminVerifyTleSecondsDraft,
         adminMetricsTleSecondsDraft,
         setAdminMetricsTleSecondsDraft,
+        isMaintenanceModeEnabled,
+        setIsMaintenanceModeEnabled,
+        maintenanceMessageDraft,
+        setMaintenanceMessageDraft,
+        maintenanceWhitelistDraft,
+        setMaintenanceWhitelistDraft,
         isAdminLoading,
         isAdminSaving,
         loadAdminUser,
         saveAdminUserSettings,
+        saveMaintenanceSettings,
     };
 }
