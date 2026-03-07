@@ -137,7 +137,10 @@ jobs:
               return 1
             fi
 
-            echo "$raw" | jq -c 'if type=="array" then .[0] elif .deploys then .deploys[0] elif .items then .items[0] else empty end'
+            echo "$raw" | jq -c '
+              (if type=="array" then .[0] elif .deploys then .deploys[0] elif .items then .items[0] else empty end)
+              | (if has("deploy") then .deploy else . end)
+            '
           }
 
           wait_for_service_live() {
