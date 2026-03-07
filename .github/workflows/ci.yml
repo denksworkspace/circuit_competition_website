@@ -89,12 +89,18 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
+          CLEAN_MAINT_URL="$(printf '%s' "${MAINTENANCE_API_URL}" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          if [[ ! "$CLEAN_MAINT_URL" =~ ^https?:// ]]; then
+            echo "::error::MAINTENANCE_API_URL must start with http:// or https://. Current value is invalid."
+            exit 1
+          fi
 
       - name: Enable maintenance mode
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+          CLEAN_MAINT_URL="$(printf '%s' "${MAINTENANCE_API_URL}" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          curl -fsS -X PATCH "$CLEAN_MAINT_URL" \
             -H "Content-Type: application/json" \
             --data "$(jq -cn \
               --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
@@ -243,7 +249,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+          CLEAN_MAINT_URL="$(printf '%s' "${MAINTENANCE_API_URL}" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          curl -fsS -X PATCH "$CLEAN_MAINT_URL" \
             -H "Content-Type: application/json" \
             --data "$(jq -cn \
               --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
@@ -256,7 +263,8 @@ jobs:
         run: |
           set -euo pipefail
           FAILURE_MESSAGE="Technical maintenance is still in progress due to deploy failure. Please try again later."
-          curl -fsS -X PATCH "$MAINTENANCE_API_URL" \
+          CLEAN_MAINT_URL="$(printf '%s' "${MAINTENANCE_API_URL}" | tr -d '\r\n' | sed 's/[[:space:]]*$//')"
+          curl -fsS -X PATCH "$CLEAN_MAINT_URL" \
             -H "Content-Type: application/json" \
             --data "$(jq -cn \
               --arg authKey "$MAINTENANCE_ADMIN_AUTH_KEY" \
