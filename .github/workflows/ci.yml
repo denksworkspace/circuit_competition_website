@@ -127,6 +127,9 @@ jobs:
             local raw
             raw="$(curl -fsS "https://api.render.com/v1/services/${service_id}/deploys?limit=1" \
               -H "Authorization: Bearer ${RENDER_API_KEY}")"
+            echo "RAW_RENDER_DEPLOYS_JSON_START"
+            echo "$raw"
+            echo "RAW_RENDER_DEPLOYS_JSON_END"
             echo "$raw" | jq -c 'if type=="array" then .[0] elif .deploys then .deploys[0] elif .items then .items[0] else empty end'
           }
 
