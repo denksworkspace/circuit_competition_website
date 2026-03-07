@@ -128,10 +128,6 @@ jobs:
             raw="$(curl -fsS "https://api.render.com/v1/services/${service_id}/deploys?limit=1" \
               -H "Authorization: Bearer ${RENDER_API_KEY}")"
 
-            echo "RAW_RENDER_DEPLOYS_JSON_START" >&2
-            echo "$raw" >&2
-            echo "RAW_RENDER_DEPLOYS_JSON_END" >&2
-
             if ! echo "$raw" | jq -e . >/dev/null 2>&1; then
               echo "::error::Render deploys API returned non-JSON payload for service ${service_id}" >&2
               return 1
