@@ -11,6 +11,7 @@ import { setExportProgress } from "./_lib/exportProgress.js";
 
 const MAX_TOTAL_FILES = 5000;
 const LOCAL_EXPORT_TRACK_ROOT = path.join(process.cwd(), ".local-exported-points");
+const DELETED_FILE_PREFIX = "deleted_";
 
 function buildFileName() {
     return `schemes-export-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
@@ -86,6 +87,71 @@ async function saveLocalExportedFiles(scope, filesRaw) {
             )
         )
     );
+}
+
+function toSanitizedFileSet(filesRaw) {
+    const files = Array.isArray(filesRaw) ? filesRaw : [];
+    const set = new Set();
+    for (const fileNameRaw of files) {
+        const fileName = sanitizeFileNamePart(fileNameRaw);
+        if (fileName) set.add(fileName);
+    }
+    return set;
+}
+
+async function pruneLocalScopeFiles(scope, keepFileNamesRaw) {
+    const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
+    const keepFileNames = toSanitizedFileSet(keepFileNamesRaw);
+    try {
+        const names = await fs.readdir(scopeDir, { withFileTypes: true });
+        let removed = 0;
+        for (const item of names) {
+            if (!item.isFile()) continue;
+            const fileName = String(item.name || "").trim();
+            if (!fileName || fileName === "manifest.json") continue;
+            if (keepFileNames.has(fileName)) continue;
+            await fs.rm(path.join(scopeDir, fileName), { force: true });
+            removed += 1;
+        }
+        return removed;
+    } catch {
+        return 0;
+    }
+}
+
+async function markDeletedLocalScopeFiles(scope, keepFileNamesRaw) {
+    const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
+    const keepFileNames = toSanitizedFileSet(keepFileNamesRaw);
+    try {
+        const names = await fs.readdir(scopeDir, { withFileTypes: true });
+        const occupiedNames = new Set(
+            names
+                .filter((item) => item?.isFile?.())
+                .map((item) => String(item.name || "").trim())
+                .filter(Boolean)
+        );
+        let renamed = 0;
+        for (const item of names) {
+            if (!item.isFile()) continue;
+            const fileName = String(item.name || "").trim();
+            if (!fileName || fileName === "manifest.json") continue;
+            if (keepFileNames.has(fileName)) continue;
+            if (fileName.startsWith(DELETED_FILE_PREFIX)) continue;
+            let targetName = `${DELETED_FILE_PREFIX}${fileName}`;
+            let suffix = 1;
+            while (occupiedNames.has(targetName) || keepFileNames.has(targetName)) {
+                targetName = `${DELETED_FILE_PREFIX}${suffix}_${fileName}`;
+                suffix += 1;
+            }
+            await fs.rename(path.join(scopeDir, fileName), path.join(scopeDir, targetName));
+            occupiedNames.delete(fileName);
+            occupiedNames.add(targetName);
+            renamed += 1;
+        }
+        return renamed;
+    } catch {
+        return 0;
+    }
 }
 
 function selectParetoRows(rowsRaw) {
@@ -185,6 +251,8 @@ export default async function handler(req, res) {
         const downloadedFiles = [];
         const errors = [];
         const downloadConcurrency = localExportMode ? 8 : 1;
+        let removedOutdatedParetoFiles = 0;
+        let renamedDeletedFiles = 0;
 
         async function processPointFile(fileName) {
             if (req?.abortSignal?.aborted) {
@@ -268,6 +336,23 @@ export default async function handler(req, res) {
                 total: totalFiles,
             });
             await saveLocalExportedFiles(exportScope, downloadedFiles);
+            if (exportScope === "pareto") {
+                setExportProgress(progressToken, {
+                    status: "cleaning_files",
+                    done: processedFiles,
+                    total: totalFiles,
+                });
+                removedOutdatedParetoFiles = await pruneLocalScopeFiles(exportScope, selectedFiles);
+            } else if (exportScope === "all") {
+                setExportProgress(progressToken, {
+                    status: "marking_deleted",
+                    done: processedFiles,
+                    total: totalFiles,
+                });
+                renamedDeletedFiles = await markDeletedLocalScopeFiles(exportScope, selectedFiles);
+            }
+            manifest.removedOutdatedParetoFiles = removedOutdatedParetoFiles;
+            manifest.renamedDeletedFiles = renamedDeletedFiles;
             await fs.writeFile(
                 path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope, "manifest.json"),
                 `${JSON.stringify(manifest, null, 2)}\n`,
@@ -285,6 +370,8 @@ export default async function handler(req, res) {
                 exportDir: path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope),
                 savedFiles: downloadedFiles.length,
                 skippedAlreadyExported,
+                removedOutdatedParetoFiles,
+                renamedDeletedFiles,
                 errors,
             });
             return;
