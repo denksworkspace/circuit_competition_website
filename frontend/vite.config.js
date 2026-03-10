@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_BUILD_TS__: JSON.stringify(Date.now()),
+  },
   plugins: [react()],
   server: {
     proxy: {

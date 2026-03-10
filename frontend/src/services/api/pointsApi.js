@@ -24,6 +24,152 @@ export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize 
     return data;
 }
 
+export async function createPointsUploadRequest({
+    authKey,
+    files,
+    description,
+    selectedParser,
+    selectedChecker,
+    parserTimeoutSeconds,
+    checkerTimeoutSeconds,
+    signal,
+}) {
+    const response = await fetch(apiUrl("/api/points-upload-request-create"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            files,
+            description,
+            selectedParser,
+            selectedChecker,
+            parserTimeoutSeconds,
+            checkerTimeoutSeconds,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to create upload request.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function fetchActivePointsUploadRequest({ authKey, signal }) {
+    const query = new URLSearchParams();
+    query.set("authKey", String(authKey || "").trim());
+    const response = await fetch(apiUrl(`/api/points-upload-request-active?${query.toString()}`), { signal });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to fetch active upload request.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function fetchPointsUploadRequestStatus({ authKey, requestId, signal }) {
+    const query = new URLSearchParams();
+    query.set("authKey", String(authKey || "").trim());
+    query.set("requestId", String(requestId || "").trim());
+    const response = await fetch(apiUrl(`/api/points-upload-request-status?${query.toString()}`), { signal });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to fetch upload request status.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function runPointsUploadRequest({ authKey, requestId, signal }) {
+    const response = await fetch(apiUrl("/api/points-upload-request-run"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            requestId,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to run upload request.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function stopPointsUploadRequest({ authKey, requestId, signal }) {
+    const response = await fetch(apiUrl("/api/points-upload-request-stop"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            requestId,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to stop upload request.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
+export async function applyPointsUploadRequestFiles({ authKey, requestId, fileIds, signal }) {
+    const response = await fetch(apiUrl("/api/points-upload-request-apply"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            requestId,
+            fileIds,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to apply upload request files.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+        savedPoints: Array.isArray(data?.savedPoints) ? data.savedPoints : [],
+        errors: Array.isArray(data?.errors) ? data.errors : [],
+    };
+}
+
+export async function closePointsUploadRequest({ authKey, requestId, signal }) {
+    const response = await fetch(apiUrl("/api/points-upload-request-close"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+            authKey,
+            requestId,
+        }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to close upload request.");
+    }
+    return {
+        request: data?.request || null,
+        files: Array.isArray(data?.files) ? data.files : [],
+    };
+}
+
 export async function savePoint(pointPayload, { signal } = {}) {
     const response = await fetch(apiUrl("/api/points"), {
         method: "POST",

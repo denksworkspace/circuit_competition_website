@@ -1,3 +1,5 @@
+import { withRuntimeBuildHeader } from "./http/runtimeBuild.js";
+
 const MAX_QUEUE_SIZE = 200;
 const FLUSH_INTERVAL_MS = 5000;
 const LOG_ENDPOINT_PATH = "/api/site-activity-log";
@@ -105,7 +107,8 @@ function installFetchPatch() {
             }, "http");
         }
         try {
-            const response = await originalFetch(...args);
+            const [nextInput, nextInit] = withRuntimeBuildHeader(args[0], args[1]);
+            const response = await originalFetch(nextInput, nextInit);
             if (shouldLog) {
                 pushActivity("api_request_finish", {
                     method: toTrimmed(args[1]?.method || "GET", 20),

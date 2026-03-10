@@ -1,18 +1,224 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_DESCRIPTION_LEN } from "../constants/appConstants.js";
 import { parsePosIntCapped } from "../utils/numberUtils.js";
-import { buildStoredFileName, parseBenchFileName, uid } from "../utils/pointUtils.js";
 import { getBenchFilesError } from "../utils/benchUploadValidation.js";
-import { requestUploadUrl, savePoint } from "../services/apiClient.js";
-import { runUploadSession } from "./benchUpload/runUploadSession.js";
+import {
+    applyPointsUploadRequestFiles,
+    closePointsUploadRequest,
+    createPointsUploadRequest,
+    fetchActivePointsUploadRequest,
+    fetchPoints,
+    runPointsUploadRequest,
+    stopPointsUploadRequest,
+} from "../services/apiClient.js";
+
+const RUNNABLE_REQUEST_STATUSES = new Set(["queued", "processing"]);
+const WAITING_MANUAL_REQUEST_STATUS = "waiting_manual_verdict";
+
+function isRunnableRequestStatus(statusRaw) {
+    return RUNNABLE_REQUEST_STATUSES.has(String(statusRaw || "").trim().toLowerCase());
+}
+
+function hasManualVerdictPending(row) {
+    return !row?.applied && Boolean(row?.canApply);
+}
+
+function mapPhase(phaseRaw, statusRaw) {
+    const phase = String(phaseRaw || "").trim().toLowerCase();
+    const status = String(statusRaw || "").trim().toLowerCase();
+    if (phase === "parser") return "parser";
+    if (phase === "checker") return "checker";
+    if (phase === "saving") return "saving";
+    if (phase === "download") return "preparing";
+    if (status === WAITING_MANUAL_REQUEST_STATUS) return "waiting-manual";
+    if (status === "queued") return "preparing";
+    if (status === "processing") return "processing";
+    return "preparing";
+}
+
+function buildUploadLogText(files) {
+    if (!Array.isArray(files) || files.length === 0) return "";
+    const rows = files
+        .filter((row) => ["processed", "non-processed"].includes(String(row?.processState || "").toLowerCase()))
+        .map((row) => {
+            const success = Boolean(row?.applied);
+            const verdict = hasManualVerdictPending(row) ? "waiting manual verdict" : String(row?.verdict || "pending");
+            const reason = String(row?.verdictReason || "").trim();
+            const tail = reason ? `verdict=${verdict}; ${reason}` : `verdict=${verdict}`;
+            return `file=${String(row?.originalFileName || "unknown")}; success=${success ? "true" : "false"}; reason=${tail}`;
+        });
+    return rows.join("\n");
+}
+
+function buildManualRows(files) {
+    if (!Array.isArray(files)) return [];
+    return files
+        .filter((row) => hasManualVerdictPending(row))
+        .map((row) => {
+            const verdict = String(row?.verdict || "pending");
+            return {
+                key: String(row.id || ""),
+                fileId: String(row.id || ""),
+                checked: Boolean(row?.defaultChecked) && verdict === "non-verified",
+                disabled: !row?.canApply,
+                bench: row?.parsedBenchmark || "-",
+                delay: Number.isFinite(Number(row?.parsedDelay)) ? Number(row.parsedDelay) : "-",
+                area: Number.isFinite(Number(row?.parsedArea)) ? Number(row.parsedArea) : "-",
+                statusLabel: "waiting manual verdict",
+                verdict,
+                verdictReason: String(row?.verdictReason || ""),
+                reason: `file=${String(row?.originalFileName || "unknown")}`,
+            };
+        });
+}
+
+function getUploadDisabledReason({
+    isUploading,
+    manualApplyRowsLength,
+    blockingRequestStatus,
+    waitManualRequestStatus,
+    benchFiles,
+    selectedChecker,
+    selectedParser,
+    normalizeCheckerForActor,
+    enabledCheckers,
+    checkerTleSecondsDraft,
+    verifyTimeoutQuotaSeconds,
+    parserTleSecondsDraft,
+    metricsTimeoutQuotaSeconds,
+    maxMultiFileBatchCount,
+    maxSingleUploadBytes,
+    remainingUploadBytes,
+    formatGb,
+    descriptionDraft,
+}) {
+    if (isUploading) return "Upload is already in progress.";
+    if (manualApplyRowsLength > 0 || blockingRequestStatus === waitManualRequestStatus) {
+        return "Resolve manual verdict for the previous upload first.";
+    }
+    if (benchFiles.length === 0) return "No files selected.";
+    if (selectedChecker === "select" || selectedParser === "select") {
+        return "Please configure checker and parser in settings.";
+    }
+    const checkerSelection = normalizeCheckerForActor(selectedChecker);
+    const checkerTleParsed = parsePosIntCapped(checkerTleSecondsDraft, verifyTimeoutQuotaSeconds);
+    if (enabledCheckers.has(checkerSelection) && checkerTleParsed === null) {
+        return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
+    }
+    const parserTleParsed = parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
+    if (selectedParser === "ABC" && parserTleParsed === null) {
+        return `Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`;
+    }
+    const filesError = getBenchFilesError({
+        files: benchFiles,
+        maxMultiFileBatchCount,
+        maxSingleUploadBytes,
+        remainingUploadBytes,
+        formatGb,
+    });
+    if (filesError) return filesError;
+    const description = descriptionDraft.trim() || "schema";
+    if (description.length > MAX_DESCRIPTION_LEN) {
+        return `Description is too long (max ${MAX_DESCRIPTION_LEN}).`;
+    }
+    return "";
+}
+
+function buildInitialQueueRows(files) {
+    return (Array.isArray(files) ? files : []).map((file, index) => ({
+        key: `queue:${index}:${String(file?.name || "file")}`,
+        fileName: String(file?.name || "unknown"),
+        statusLabel: "queue pending",
+        tone: "queued",
+        reason: "",
+    }));
+}
+
+function buildLiveRowStatus(row) {
+    const processState = String(row?.processState || "pending").trim().toLowerCase();
+    if (processState === "processing") {
+        return { statusLabel: "processing", tone: "processing" };
+    }
+    if (processState === "pending") {
+        return { statusLabel: "queued", tone: "queued" };
+    }
+    if (processState === "non-processed") {
+        return { statusLabel: "not processed", tone: "muted" };
+    }
+    const verdict = String(row?.verdict || "processed").trim().toLowerCase();
+    if (verdict === "verified") {
+        return { statusLabel: "verified", tone: "success" };
+    }
+    if (verdict === "failed") {
+        return { statusLabel: "failed", tone: "error" };
+    }
+    if (verdict === "non-verified") {
+        return { statusLabel: "non-verified", tone: "info" };
+    }
+    if (verdict === "duplicate") {
+        return { statusLabel: "duplicate", tone: "info" };
+    }
+    if (verdict === "blocked") {
+        return { statusLabel: "blocked", tone: "error" };
+    }
+    return { statusLabel: verdict || "processed", tone: "success" };
+}
+
+function buildLiveRows(files) {
+    if (!Array.isArray(files)) return [];
+    return files.map((row) => {
+        const status = buildLiveRowStatus(row);
+        const orderIndex = Number(row?.orderIndex);
+        const fileName = String(row?.originalFileName || "unknown");
+        return {
+            key: Number.isFinite(orderIndex)
+                ? `queue:${orderIndex}:${fileName}`
+                : `queue:${fileName}`,
+            fileName,
+            statusLabel: status.statusLabel,
+            tone: status.tone,
+            reason: String(row?.verdictReason || "").trim(),
+        };
+    });
+}
+
+function updateLocalQueueRow(rows, rowIndex, nextData) {
+    return rows.map((row, index) => (index === rowIndex ? { ...row, ...nextData } : row));
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function buildQueueUploadErrorMessage(response, fileName) {
+    const fallback = `Failed to upload ${fileName} to queue storage (HTTP ${Number(response?.status || 0)}).`;
+    if (!response || typeof response.text !== "function") return fallback;
+    try {
+        const raw = String(await response.text() || "");
+        if (!raw.trim()) return fallback;
+        const codeMatch = raw.match(/<Code>\s*([^<]+)\s*<\/Code>/i);
+        const messageMatch = raw.match(/<Message>\s*([^<]+)\s*<\/Message>/i);
+        const code = String(codeMatch?.[1] || "").trim();
+        const message = String(messageMatch?.[1] || "").trim();
+        if (code && message) {
+            return `Failed to upload ${fileName} to queue storage: ${code} - ${message}.`;
+        }
+        if (message) {
+            return `Failed to upload ${fileName} to queue storage: ${message}.`;
+        }
+        return `${fallback} ${raw.slice(0, 180)}`;
+    } catch {
+        return fallback;
+    }
+}
 
 export function useBenchUploadFlow({
     authKeyDraft,
     currentCommand,
-    setCurrentCommand,
     setPoints,
     setLastAddedId,
-    setBenchmarkFilter,
     maxSingleUploadBytes,
     remainingUploadBytes,
     maxMultiFileBatchCount,
@@ -29,6 +235,8 @@ export function useBenchUploadFlow({
     const [isUploading, setIsUploading] = useState(false);
     const [isUploadStopping, setIsUploadStopping] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
+    const [uploadLiveRows, setUploadLiveRows] = useState(() => []);
+    const [blockingRequestStatus, setBlockingRequestStatus] = useState("");
     const fileInputRef = useRef(null);
     const [uploadLogText, setUploadLogText] = useState("");
     const [uploadVerdictNote, setUploadVerdictNote] = useState("");
@@ -40,17 +248,27 @@ export function useBenchUploadFlow({
     const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
     const [isManualApplying, setIsManualApplying] = useState(false);
 
-    const uploadCountdownRef = useRef(null);
-    const uploadStopRequestedRef = useRef(false);
     const uploadAbortRef = useRef(null);
+    const activeRequestIdRef = useRef("");
+    const isResumingRef = useRef(false);
+    const isPageUnloadingRef = useRef(false);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return undefined;
+        const markPageUnloading = () => {
+            isPageUnloadingRef.current = true;
+        };
+        window.addEventListener("pagehide", markPageUnloading);
+        window.addEventListener("beforeunload", markPageUnloading);
+        return () => {
+            window.removeEventListener("pagehide", markPageUnloading);
+            window.removeEventListener("beforeunload", markPageUnloading);
+        };
+    }, []);
 
     useEffect(() => {
         return () => {
-            if (uploadCountdownRef.current) {
-                clearInterval(uploadCountdownRef.current);
-                uploadCountdownRef.current = null;
-            }
-            if (uploadAbortRef.current) {
+            if (uploadAbortRef.current && !isPageUnloadingRef.current) {
                 uploadAbortRef.current.abort();
                 uploadAbortRef.current = null;
             }
@@ -78,7 +296,6 @@ export function useBenchUploadFlow({
             maxSingleUploadBytes,
             remainingUploadBytes,
             formatGb,
-            parseBenchFileName,
         });
         setUploadError(filesError || " ");
     }
@@ -97,93 +314,120 @@ export function useBenchUploadFlow({
         return parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
     }
 
-    function stopUploadCountdown() {
-        if (uploadCountdownRef.current) {
-            clearInterval(uploadCountdownRef.current);
-            uploadCountdownRef.current = null;
+    const refreshPointsAfterRequest = useCallback(async () => {
+        try {
+            const rows = await fetchPoints();
+            setPoints(rows);
+            if (rows.length > 0) {
+                setLastAddedId(rows[0].id);
+            }
+        } catch {
+            // ignore transient refresh failure; request state is already persisted on server
         }
-    }
+    }, [setLastAddedId, setPoints]);
 
-    function startUploadCountdown(seconds) {
-        stopUploadCountdown();
-        setUploadProgress((prev) => (prev ? { ...prev, secondsRemaining: seconds } : prev));
-        uploadCountdownRef.current = setInterval(() => {
-            setUploadProgress((prev) => {
-                if (!prev) return prev;
-                const nextSeconds = Math.max(0, Number(prev.secondsRemaining || 0) - 1);
-                return { ...prev, secondsRemaining: nextSeconds };
+    const resetBlockingRequestState = useCallback(() => {
+        activeRequestIdRef.current = "";
+        setBlockingRequestStatus("");
+        setUploadProgress(null);
+        setUploadLiveRows([]);
+        setManualApplyRows([]);
+        setIsManualApplyOpen(false);
+    }, []);
+
+    const updateStateFromSnapshot = useCallback((snapshot) => {
+        const request = snapshot?.request || null;
+        const files = Array.isArray(snapshot?.files) ? snapshot.files : [];
+        if (!request) {
+            setIsUploading(false);
+            setIsUploadStopping(false);
+            resetBlockingRequestState();
+            return;
+        }
+
+        const lowerStatus = String(request.status || "").toLowerCase();
+        const runnable = isRunnableRequestStatus(lowerStatus);
+        const manualRows = runnable ? [] : buildManualRows(files);
+        const hasPendingManualVerdict = manualRows.length > 0;
+        const shouldKeepMonitor = runnable || hasPendingManualVerdict;
+
+        if (shouldKeepMonitor) {
+            activeRequestIdRef.current = String(request.id || "");
+            setBlockingRequestStatus(lowerStatus);
+            setUploadProgress({
+                done: Number(request.doneCount || 0),
+                total: Number(request.totalCount || 0),
+                verified: Number(request.verifiedCount || 0),
+                phase: hasPendingManualVerdict && !runnable ? "waiting-manual" : mapPhase(request.currentPhase, request.status),
+                currentFileName: String(request.currentFileName || ""),
+                secondsRemaining: null,
+                transitionTarget: "next-circuit",
             });
-        }, 1000);
-    }
-
-    function requestStopUpload() {
-        if (!isUploading) return;
-        uploadStopRequestedRef.current = true;
-        if (uploadAbortRef.current) {
-            uploadAbortRef.current.abort();
-            uploadAbortRef.current = null;
+            setUploadLiveRows(buildLiveRows(files));
+        } else {
+            resetBlockingRequestState();
         }
+
+        setIsUploading(runnable);
+        if (!runnable) {
+            setIsUploadStopping(false);
+        }
+        setUploadLogText(buildUploadLogText(files));
+        setManualApplyRows(manualRows);
+        if (hasPendingManualVerdict && (lowerStatus === "interrupted" || lowerStatus === "failed")) {
+            setIsManualApplyOpen(true);
+        } else if (!hasPendingManualVerdict) {
+            setIsManualApplyOpen(false);
+        }
+
+        if (lowerStatus === "interrupted") {
+            setUploadError(String(request.error || "Upload stopped."));
+        } else if (lowerStatus === "failed") {
+            setUploadError(String(request.error || "Upload request failed."));
+        } else {
+            setUploadError(" ");
+        }
+    }, [resetBlockingRequestState]);
+
+    const runRequestLoop = useCallback(async ({ requestId, controller }) => {
+        while (!controller.signal.aborted) {
+            const snapshot = await runPointsUploadRequest({
+                authKey: authKeyDraft,
+                requestId,
+                signal: controller.signal,
+            });
+            const nextStatus = String(snapshot?.request?.status || "").toLowerCase();
+            updateStateFromSnapshot(snapshot);
+            if (!isRunnableRequestStatus(nextStatus)) {
+                await refreshPointsAfterRequest();
+                return snapshot;
+            }
+            await sleep(150);
+        }
+        return null;
+    }, [authKeyDraft, refreshPointsAfterRequest, updateStateFromSnapshot]);
+
+    async function requestStopUpload() {
+        if (!isUploading || !activeRequestIdRef.current) return;
         setIsUploadStopping(true);
         setUploadError("Stopping upload after current step...");
-    }
-
-    async function createPointFromUploadedFile(sourceFile, parsed, description, verificationResult = null, { signal } = {}) {
-        const batchSize = Math.max(1, Number(benchFiles.length || 1));
-        const pointId = uid();
-        const storedFileName = buildStoredFileName({
-            benchmark: parsed.benchmark,
-            delay: parsed.delay,
-            area: parsed.area,
-            pointId,
-            sender: currentCommand.name,
-        });
-        const uploadMeta = await requestUploadUrl({
-            authKey: authKeyDraft,
-            fileName: storedFileName,
-            fileSize: sourceFile.size,
-            batchSize,
-            signal,
-        });
-        const putRes = await fetch(uploadMeta.uploadUrl, {
-            method: "PUT",
-            signal,
-            body: sourceFile,
-        });
-        if (!putRes.ok) {
-            throw new Error("Failed to upload file to S3.");
-        }
-
-        const point = {
-            id: pointId,
-            benchmark: parsed.benchmark,
-            delay: parsed.delay,
-            area: parsed.area,
-            description,
-            sender: currentCommand.name,
-            fileName: storedFileName,
-            status: verificationResult?.status || "non-verified",
-            checkerVersion: verificationResult?.checkerVersion || null,
-        };
-
-        const savedPayload = await savePoint(
-            {
-                ...point,
+        try {
+            await stopPointsUploadRequest({
                 authKey: authKeyDraft,
-                fileSize: sourceFile.size,
-                batchSize,
-            },
-            { signal }
-        );
-
-        if (savedPayload?.quota) {
-            setCurrentCommand((prev) => (prev ? { ...prev, ...savedPayload.quota } : prev));
+                requestId: activeRequestIdRef.current,
+            });
+        } catch (error) {
+            setUploadError(error?.message || "Failed to stop upload request.");
+            setIsUploadStopping(false);
         }
-
-        return savedPayload?.point || point;
     }
 
     async function addPointFromFile(e) {
         e.preventDefault();
+        if (manualApplyRows.length > 0 && activeRequestIdRef.current) {
+            setUploadError("Click Apply manual verdict to finish the previous upload.");
+            return;
+        }
         if (selectedChecker === "select" || selectedParser === "select") {
             setUploadError("Please select checker and parser settings.");
             setIsUploadSettingsOpen(true);
@@ -213,158 +457,251 @@ export function useBenchUploadFlow({
 
         setIsUploading(true);
         setIsUploadStopping(false);
-        uploadStopRequestedRef.current = false;
+        setBlockingRequestStatus("queued");
         setUploadProgress({
             done: 0,
             total: benchFiles.length,
             verified: 0,
-            phase: "preparing",
+            phase: "uploading",
             currentFileName: "",
+            queueUploaded: 0,
+            queueTotal: benchFiles.length,
             secondsRemaining: null,
             transitionTarget: "next-circuit",
         });
+        setUploadLiveRows(buildInitialQueueRows(benchFiles));
         setUploadLogText("");
         setUploadVerdictNote("");
+        setManualApplyRows([]);
+        setIsManualApplyOpen(false);
+
         const controller = new AbortController();
         uploadAbortRef.current = controller;
         try {
-            await runUploadSession({
-                benchFiles,
-                selectedParser,
-                checkerSelection,
-                checkerTimeoutSeconds,
-                parserTimeoutSeconds,
-                enabledCheckers,
-                authKeyDraft,
-                currentCommandName: currentCommand?.name,
+            const created = await createPointsUploadRequest({
+                authKey: authKeyDraft,
+                files: benchFiles.map((file) => ({
+                    originalFileName: file.name,
+                    fileSize: file.size,
+                })),
                 description,
-                controller,
-                uploadStopRequestedRef,
-                startUploadCountdown,
-                stopUploadCountdown,
-                setUploadProgress,
-                setUploadError,
-                setUploadLogText,
-                setUploadVerdictNote,
-                setManualApplyRows,
-                setIsManualApplyOpen,
-                setPoints,
-                setLastAddedId,
-                setBenchmarkFilter,
-                setDescriptionDraft,
-                clearFileInput,
-                createPointFromUploadedFile,
+                selectedParser,
+                selectedChecker: checkerSelection,
+                parserTimeoutSeconds,
+                checkerTimeoutSeconds,
+                signal: controller.signal,
             });
-        } finally {
-            stopUploadCountdown();
-            uploadStopRequestedRef.current = false;
+            const requestId = String(created?.request?.id || "");
+            if (!requestId) {
+                throw new Error("Failed to create upload request.");
+            }
+            activeRequestIdRef.current = requestId;
+
+            const uploadRows = Array.isArray(created?.files) ? created.files : [];
+            if (uploadRows.length !== benchFiles.length) {
+                throw new Error("Upload request payload mismatch.");
+            }
+
+            for (let index = 0; index < uploadRows.length; index += 1) {
+                const row = uploadRows[index];
+                const file = benchFiles[index];
+                setUploadProgress((prev) => (prev ? {
+                    ...prev,
+                    phase: "uploading",
+                    currentFileName: file.name,
+                    queueUploaded: index + 1,
+                } : prev));
+                setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
+                    statusLabel: "adding to queue",
+                    tone: "processing",
+                    reason: "",
+                }));
+                const putRes = await fetch(String(row.uploadUrl || ""), {
+                    method: "PUT",
+                    signal: controller.signal,
+                    body: file,
+                });
+                if (!putRes.ok) {
+                    const errorMessage = await buildQueueUploadErrorMessage(putRes, file.name);
+                    setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
+                        statusLabel: "queue upload failed",
+                        tone: "error",
+                        reason: errorMessage,
+                    }));
+                    throw new Error(errorMessage);
+                }
+                setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
+                    statusLabel: "queued",
+                    tone: "queued",
+                    reason: "",
+                }));
+            }
+
+            await runRequestLoop({ requestId, controller });
+            setDescriptionDraft("");
+            clearFileInput();
+        } catch (err) {
+            if (err?.name === "AbortError") {
+                setUploadError("Upload stopped.");
+            } else {
+                setUploadError(err?.message || "Failed to upload point.");
+            }
+            setIsUploading(false);
             setIsUploadStopping(false);
+            if (!manualApplyRows.length) {
+                setBlockingRequestStatus("");
+            }
+        } finally {
             if (uploadAbortRef.current === controller) {
                 uploadAbortRef.current = null;
             }
-            setIsUploading(false);
-            setUploadProgress(null);
         }
     }
 
-    const uploadDisabledReason = useMemo(() => {
-        if (isUploading) return "Upload is already in progress.";
-        if (benchFiles.length === 0) return "No files selected.";
-        if (selectedChecker === "select" || selectedParser === "select") {
-            return "Please configure checker and parser in settings.";
-        }
-        const checkerSelection = normalizeCheckerForActor(selectedChecker);
-        const checkerTleParsed = parsePosIntCapped(checkerTleSecondsDraft, verifyTimeoutQuotaSeconds);
-        if (enabledCheckers.has(checkerSelection) && checkerTleParsed === null) {
-            return `Checker TLE must be an integer from 1 to ${verifyTimeoutQuotaSeconds} seconds.`;
-        }
-        const parserTleParsed = parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
-        if (selectedParser === "ABC" && parserTleParsed === null) {
-            return `Parser TLE must be an integer from 1 to ${metricsTimeoutQuotaSeconds} seconds.`;
-        }
-        const filesError = getBenchFilesError({
-            files: benchFiles,
-            maxMultiFileBatchCount,
-            maxSingleUploadBytes,
-            remainingUploadBytes,
-            formatGb,
-            parseBenchFileName,
-        });
-        if (filesError) return filesError;
-        const description = descriptionDraft.trim() || "schema";
-        if (description.length > MAX_DESCRIPTION_LEN) {
-            return `Description is too long (max ${MAX_DESCRIPTION_LEN}).`;
-        }
-        return "";
-    }, [
+    const uploadDisabledReason = useMemo(() => getUploadDisabledReason({
         isUploading,
-        benchFiles,
+        manualApplyRowsLength: manualApplyRows.length,
+        blockingRequestStatus,
+        waitManualRequestStatus: WAITING_MANUAL_REQUEST_STATUS,
+        benchFiles: Array.isArray(benchFiles) ? benchFiles : [],
         selectedChecker,
         selectedParser,
+        normalizeCheckerForActor,
+        enabledCheckers,
+        checkerTleSecondsDraft,
+        parserTleSecondsDraft,
         verifyTimeoutQuotaSeconds,
         metricsTimeoutQuotaSeconds,
         maxMultiFileBatchCount,
         maxSingleUploadBytes,
         remainingUploadBytes,
         formatGb,
-        checkerTleSecondsDraft,
-        parserTleSecondsDraft,
         descriptionDraft,
+    }), [
+        isUploading,
+        manualApplyRows.length,
+        blockingRequestStatus,
+        benchFiles,
+        selectedChecker,
+        selectedParser,
         normalizeCheckerForActor,
         enabledCheckers,
+        checkerTleSecondsDraft,
+        parserTleSecondsDraft,
+        verifyTimeoutQuotaSeconds,
+        metricsTimeoutQuotaSeconds,
+        maxMultiFileBatchCount,
+        maxSingleUploadBytes,
+        remainingUploadBytes,
+        formatGb,
+        descriptionDraft,
     ]);
 
     function setManualApplyChecked(key, checked) {
         setManualApplyRows((prev) =>
-            prev.map((row) => (row.key === key ? { ...row, checked: Boolean(checked) } : row))
+            prev.map((row) => (row.key === key && !row.disabled ? { ...row, checked: Boolean(checked) } : row))
         );
     }
 
     async function applyManualRows() {
-        const selected = manualApplyRows.filter((row) => row.checked);
-        if (selected.length === 0) {
+        if (!activeRequestIdRef.current) {
             setIsManualApplyOpen(false);
             setManualApplyRows([]);
             return;
         }
+        const selected = manualApplyRows.filter((row) => row.checked && !row.disabled).map((row) => row.fileId);
 
         setIsManualApplying(true);
         try {
-            const savedPoints = [];
-            for (const row of selected) {
-                try {
-                    const saved = await createPointFromUploadedFile(
-                        row.candidate.file,
-                        row.candidate.parsed,
-                        String(row.candidate.description || "schema"),
-                        row.candidate.verificationResult
-                    );
-                    savedPoints.push(saved);
-                } catch {
-                    // Ignore failed rows here; detailed upload errors are still surfaced via upload log in main flow.
-                }
+            const applied = await applyPointsUploadRequestFiles({
+                authKey: authKeyDraft,
+                requestId: activeRequestIdRef.current,
+                fileIds: selected,
+            });
+            updateStateFromSnapshot(applied);
+            await refreshPointsAfterRequest();
+            if ((applied?.errors || []).length > 0) {
+                setUploadError(String(applied.errors[0] || "Failed to apply selected files."));
+            } else {
+                setUploadError(" ");
             }
-
-            if (savedPoints.length > 0) {
-                setPoints((prev) => [...savedPoints.reverse(), ...prev]);
-                const latestSaved = savedPoints[savedPoints.length - 1];
-                setLastAddedId(latestSaved.id);
-                setBenchmarkFilter(String(latestSaved.benchmark));
-            }
-            setUploadError(" ");
-            setIsManualApplyOpen(false);
-            setManualApplyRows([]);
         } finally {
             setIsManualApplying(false);
         }
     }
 
-    function closeManualApplyModal() {
+    async function closeManualApplyModal() {
         if (!isManualApplyOpen) return;
         const ok = window.confirm("If you close this window, selected points will not be added to the current view. Continue?");
         if (!ok) return;
+        const requestId = activeRequestIdRef.current;
         setIsManualApplyOpen(false);
         setManualApplyRows([]);
+        resetBlockingRequestState();
+        setUploadError(" ");
+        if (requestId) {
+            try {
+                await closePointsUploadRequest({
+                    authKey: authKeyDraft,
+                    requestId,
+                });
+            } catch {
+                setUploadError("Failed to close manual verdict request.");
+            }
+        }
+    }
+
+    useEffect(() => {
+        const authKey = String(authKeyDraft || "").trim();
+        if (!authKey || !currentCommand || isUploading || isResumingRef.current) return;
+        let cancelled = false;
+        const controller = new AbortController();
+        const resume = async () => {
+            isResumingRef.current = true;
+            try {
+                const active = await fetchActivePointsUploadRequest({
+                    authKey,
+                    signal: controller.signal,
+                });
+                if (cancelled) return;
+                if (!active?.request?.id) {
+                    return;
+                }
+
+                const lowerStatus = String(active.request.status || "").toLowerCase();
+                updateStateFromSnapshot(active);
+                if (!isRunnableRequestStatus(lowerStatus)) {
+                    return;
+                }
+
+                setIsUploading(true);
+                setIsUploadStopping(false);
+                uploadAbortRef.current = controller;
+                await runRequestLoop({ requestId: String(active.request.id), controller });
+            } catch {
+                // ignore resume errors
+            } finally {
+                if (uploadAbortRef.current === controller) {
+                    uploadAbortRef.current = null;
+                }
+                setIsUploading(false);
+                setIsUploadStopping(false);
+                isResumingRef.current = false;
+            }
+        };
+        void resume();
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [authKeyDraft, currentCommand, isUploading, runRequestLoop, updateStateFromSnapshot]);
+
+    const showUploadMonitor = Boolean(uploadProgress) || uploadLiveRows.length > 0;
+
+    function openManualApplyModal() {
+        if (manualApplyRows.length < 1) return;
+        setIsManualApplyOpen(true);
     }
 
     return {
@@ -378,6 +715,8 @@ export function useBenchUploadFlow({
         isUploading,
         isUploadStopping,
         uploadProgress,
+        uploadLiveRows,
+        showUploadMonitor,
         fileInputRef,
         uploadLogText,
         uploadVerdictNote,
@@ -392,6 +731,8 @@ export function useBenchUploadFlow({
         manualApplyRows,
         isManualApplyOpen,
         isManualApplying,
+        showManualApplyButton: manualApplyRows.length > 0 && !isManualApplyOpen,
+        openManualApplyModal,
         onFileChange,
         requestStopUpload,
         addPointFromFile,

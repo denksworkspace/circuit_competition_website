@@ -13,6 +13,7 @@ import {
 } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
+import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -62,6 +63,16 @@ export default async function handler(req, res) {
     }
     const actor = authRes.rows[0];
     const isActorAdmin = String(actor.role || "").toLowerCase() === ROLE_ADMIN;
+    const maintenance = await checkMaintenanceBlock({
+        ...req,
+        body,
+        urlPath: "/api/points-verify",
+    });
+    if (maintenance.blocked) {
+        report("error", { done: true, error: maintenance.state?.message || "Technical maintenance is in progress." });
+        res.status(503).json({ error: maintenance.state?.message || "Technical maintenance is in progress." });
+        return;
+    }
     if (checkerVersion === CHECKER_ABC_FAST_HEX && !isActorAdmin) {
         res.status(403).json({ error: "ABC fast hex checker is available for admin only." });
         return;

@@ -1,23 +1,8 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import crypto from "node:crypto";
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
-import { downloadPointCircuitText } from "./_lib/pointVerification.js";
-
-function normalizeCircuitTextForHash(textRaw) {
-    return String(textRaw || "")
-        .replace(/^\uFEFF/, "")
-        .replace(/\r\n?/g, "\n")
-        .trimEnd();
-}
-
-function sha256Hex(textRaw) {
-    return crypto
-        .createHash("sha256")
-        .update(normalizeCircuitTextForHash(textRaw), "utf8")
-        .digest("hex");
-}
+import { checkDuplicatePointByCircuit } from "./_lib/duplicateCheck.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -54,41 +39,21 @@ export default async function handler(req, res) {
         return;
     }
 
-    const candidateHash = sha256Hex(circuitText);
-    const sameMetricsRes = await sql`
-      select id, file_name, sender
-      from points
-      where benchmark = ${benchmark}
-        and delay = ${delay}
-        and area = ${area}
-      order by created_at desc
-    `;
-
-    for (const row of sameMetricsRes.rows) {
-        const fileName = String(row?.file_name || "").trim();
-        if (!fileName) continue;
-
-        const downloaded = await downloadPointCircuitText(fileName);
-        if (!downloaded.ok) {
-            res.status(422).json({
-                error: downloaded.reason || "Failed to verify duplicates against existing points.",
-                code: "DUPLICATE_CHECK_IO_FAILED",
-            });
-            return;
-        }
-
-        if (sha256Hex(downloaded.circuitText) === candidateHash) {
-            res.status(200).json({
-                duplicate: true,
-                point: {
-                    id: String(row.id || ""),
-                    fileName,
-                    sender: String(row.sender || ""),
-                },
-            });
-            return;
-        }
+    const duplicateResult = await checkDuplicatePointByCircuit({
+        benchmark,
+        delay,
+        area,
+        circuitText,
+    });
+    if (duplicateResult.blockedByCheckError) {
+        res.status(422).json({
+            error: duplicateResult.errorReason || "Failed to verify duplicates against existing points.",
+            code: "DUPLICATE_CHECK_IO_FAILED",
+        });
+        return;
     }
-
-    res.status(200).json({ duplicate: false, point: null });
+    res.status(200).json({
+        duplicate: Boolean(duplicateResult.duplicate),
+        point: duplicateResult.point || null,
+    });
 }

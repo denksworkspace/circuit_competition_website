@@ -25,10 +25,11 @@ export function ManualPointApplyModal({
                                 type="checkbox"
                                 checked={Boolean(row.checked)}
                                 onChange={(e) => onToggle(row.key, e.target.checked)}
-                                disabled={isApplying}
+                                disabled={isApplying || Boolean(row.disabled)}
                             />
                             <span>
-                                Add point with bench={row.bench}, delay={row.delay}, area={row.area}, verdict={row.verdict}
+                                Add point with bench={row.bench}, delay={row.delay}, area={row.area}, status={row.statusLabel}
+                                {row.verdict ? `, detected verdict=${row.verdict}` : ""}
                                 {row.verdictReason ? ` (${row.verdictReason})` : ""} to the chart?
                                 {row.reason ? ` ${row.reason}` : ""}
                             </span>

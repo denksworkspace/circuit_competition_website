@@ -90,7 +90,7 @@ function getPointAlongPareto(frontRaw, progressRaw) {
     return { x: last.x2, y: last.y2 };
 }
 
-export function MaintenanceScreen() {
+export function MaintenanceScreen({ message = "" }) {
     const [points, setPoints] = useState(() => generatePoints());
     const pareto = useMemo(() => computePareto(points), [points]);
     const pathD = useMemo(() => buildPath(pareto), [pareto]);
@@ -142,7 +142,7 @@ export function MaintenanceScreen() {
         <div className="maintenanceScreen">
             <div className="maintenanceContent">
                 <h1 className="maintenanceTitle">
-                    Technical maintenance is in progress, please try again in 5-10 minutes.
+                    {String(message || "").trim() || "Technical maintenance is in progress, please try again in 5-10 minutes."}
                 </h1>
                 <div className="maintenanceSketchWrap" aria-hidden="true">
                     <svg className="maintenanceSketch" viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}>

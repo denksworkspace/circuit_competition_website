@@ -16,14 +16,19 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
 vi.mock("../../api/_lib/abc.js", () => ({
     getAigStatsFromBenchText: vi.fn(),
 }));
+vi.mock("../../api/_lib/maintenanceMode.js", () => ({
+    checkMaintenanceBlock: vi.fn(async () => ({ blocked: false, state: null })),
+}));
 
 import { sql } from "@vercel/postgres";
 import { getAigStatsFromBenchText } from "../../api/_lib/abc.js";
 import handler from "../../api/points-validate-upload.js";
+import { checkMaintenanceBlock } from "../../api/_lib/maintenanceMode.js";
 
 describe("api/points-validate-upload", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        checkMaintenanceBlock.mockResolvedValue({ blocked: false, state: null });
     });
 
     it("rejects missing auth key", async () => {
@@ -165,5 +170,26 @@ describe("api/points-validate-upload", () => {
 
         expect(res.statusCode).toBe(200);
         expect(getAigStatsFromBenchText).toHaveBeenCalledWith("x", { timeoutMs: 7000 });
+    });
+
+    it("returns 503 during maintenance before metrics validation starts", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, abc_metrics_timeout_seconds: 7 }] });
+        checkMaintenanceBlock.mockResolvedValueOnce({
+            blocked: true,
+            state: { message: "Maintenance." },
+        });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "ok",
+                files: [{ fileName: "bench254_10_20.bench", circuitText: "x" }],
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(getAigStatsFromBenchText).not.toHaveBeenCalled();
     });
 });

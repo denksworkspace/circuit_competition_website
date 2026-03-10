@@ -51,6 +51,8 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
         "GET /api/commands": () => Promise.resolve(jsonResponse(200, { commands })),
         "POST /api/auth": () => Promise.resolve(jsonResponse(authStatus, authBody)),
         "POST /api/points-duplicate-check": () => Promise.resolve(jsonResponse(200, { duplicate: false, point: null })),
+        "GET /api/points-upload-request-active?authKey=key_ok": () =>
+            Promise.resolve(jsonResponse(200, { request: null, files: [] })),
         "GET /api/admin-users?authKey=key_ok&scope=all&limit=1000": () =>
             Promise.resolve(jsonResponse(200, { actionLogs: [] })),
     };
@@ -84,6 +86,11 @@ describe("App integration", () => {
         fireEvent.change(screen.getByLabelText("parser parameters"), {
             target: { value: parser },
         });
+    }
+
+    async function openManualVerdictModal() {
+        fireEvent.click(await screen.findByRole("button", { name: "Apply manual verdict" }));
+        await screen.findByText("Manual point apply");
     }
 
     it("logs in successfully with valid key", async () => {
@@ -141,7 +148,7 @@ describe("App integration", () => {
         expect(localStorage.getItem("bench_auth_key")).toBeNull();
     });
 
-    it("validates uploaded file name pattern", async () => {
+    it("does not validate uploaded file name pattern on client side", async () => {
         const routes = bootstrapRoutes({
             authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" }) },
         });
@@ -161,7 +168,7 @@ describe("App integration", () => {
         const invalidFile = new File(["x"], "invalid_name.bench", { type: "text/plain" });
         fireEvent.change(fileInput, { target: { files: [invalidFile] } });
 
-        expect(await screen.findByText(/Invalid file name pattern/)).toBeInTheDocument();
+        expect(screen.queryByText(/Invalid file name pattern/)).not.toBeInTheDocument();
     });
 
     it("validates multi-file count limit", async () => {
@@ -192,42 +199,115 @@ describe("App integration", () => {
     it("uploads valid file and creates point", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
+        let points = [];
+        const manualPoint = {
+            id: "p_manual_1",
+            benchmark: 254,
+            delay: 15,
+            area: 40,
+            description: "schema-test",
+            sender: "team1",
+            fileName: "bench254_15_40_team1_pid.bench",
+            status: "non-verified",
+            checkerVersion: null,
+            downloadUrl: "https://cdn.example/points/x.bench",
+        };
 
         installFetchRouter({
-            ...bootstrapRoutes({ authBody: { command } }),
-            "POST /api/points-validate-upload": () => {
-                calls.push("validate-upload");
-                return Promise.resolve(jsonResponse(200, { ok: true, files: [{ ok: true }] }));
-            },
-            "POST /api/points-upload-url": ({ init }) => {
-                calls.push("upload-url");
+            ...bootstrapRoutes({
+                authBody: { command },
+                points,
+            }),
+            "GET /api/points": () => Promise.resolve(jsonResponse(200, { points })),
+            "POST /api/points-upload-request-create": ({ init }) => {
+                calls.push("create-request");
                 const body = JSON.parse(init.body);
-                expect(body.fileName).toMatch(/^bench254_15_40_team1_/);
-                return Promise.resolve(jsonResponse(200, { uploadUrl: "https://s3.example/upload" }));
+                expect(body.files).toHaveLength(1);
+                return Promise.resolve(jsonResponse(201, {
+                    request: {
+                        id: "req1",
+                        status: "queued",
+                        totalCount: 1,
+                        doneCount: 0,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            fileId: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            queueFileKey: "queue/req1/f1.bench",
+                            uploadUrl: "https://s3.example/queue-upload",
+                            method: "PUT",
+                        },
+                    ],
+                }));
             },
-            "PUT https://s3.example/upload": () => {
-                calls.push("put-s3");
+            "PUT https://s3.example/queue-upload": () => {
+                calls.push("put-queue");
                 return Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) });
             },
-            "POST /api/points": ({ init }) => {
-                calls.push("save-point");
-                const body = JSON.parse(init.body);
-                return Promise.resolve(
-                    jsonResponse(201, {
-                        point: {
-                            id: body.id,
-                            benchmark: 254,
-                            delay: 15,
-                            area: 40,
-                            description: body.description,
-                            sender: "team1",
-                            fileName: body.fileName,
-                            status: "non-verified",
-                            checkerVersion: null,
-                            downloadUrl: "https://cdn.example/points/x.bench",
+            "POST /api/points-upload-request-run": () => {
+                calls.push("run-request");
+                return Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req1",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
                         },
-                    })
-                );
+                    ],
+                }));
+            },
+            "POST /api/points-upload-request-apply": () => {
+                calls.push("apply-request");
+                points = [manualPoint];
+                return Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req1",
+                        status: "completed",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: false,
+                            defaultChecked: false,
+                            applied: true,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                    savedPoints: [manualPoint],
+                    errors: [],
+                }));
             },
         });
 
@@ -253,13 +333,19 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         await waitFor(() => {
-            expect(calls).toEqual(["validate-upload"]);
+            expect(calls).toEqual(["create-request", "put-queue", "run-request"]);
         });
 
+        expect(screen.getByRole("button", { name: "1) Benchmark" })).toHaveTextContent("test");
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        await openManualVerdictModal();
+        expect(
+            screen.getByLabelText(/Add point with bench=254, delay=15, area=40, status=waiting manual verdict, detected verdict=non-verified/)
+        ).toBeChecked();
         const applyButtons = await screen.findAllByRole("button", { name: "Apply" });
         fireEvent.click(applyButtons[applyButtons.length - 1]);
         await waitFor(() => {
-            expect(calls).toEqual(["validate-upload", "upload-url", "put-s3", "save-point"]);
+            expect(calls).toEqual(["create-request", "put-queue", "run-request", "apply-request"]);
         });
         expect(await screen.findByText(/schema-test/)).toBeInTheDocument();
         expect(screen.getAllByText("delay=").length).toBeGreaterThan(0);
@@ -271,20 +357,61 @@ describe("App integration", () => {
 
         installFetchRouter({
             ...bootstrapRoutes({ authBody: { command } }),
-            "POST /api/points-validate-upload": () => {
-                calls.push("validate-upload");
-                return Promise.resolve(
-                    jsonResponse(422, {
-                        error: "Circuit metrics do not match file names.",
-                        files: [
-                            {
-                                fileName: "bench254_15_40.bench",
-                                ok: false,
-                                reason: "Metric mismatch: area expected 40, actual 41",
-                            },
-                        ],
-                    })
-                );
+            "POST /api/points-upload-request-create": () => {
+                calls.push("create-request");
+                return Promise.resolve(jsonResponse(201, {
+                    request: {
+                        id: "req_fail",
+                        status: "queued",
+                        totalCount: 1,
+                        doneCount: 0,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            fileId: "f_fail",
+                            originalFileName: "bench254_15_40.bench",
+                            queueFileKey: "queue/req_fail/f_fail.bench",
+                            uploadUrl: "https://s3.example/queue-upload-fail",
+                            method: "PUT",
+                        },
+                    ],
+                }));
+            },
+            "PUT https://s3.example/queue-upload-fail": () => {
+                calls.push("put-queue");
+                return Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) });
+            },
+            "POST /api/points-upload-request-run": () => {
+                calls.push("run-request");
+                return Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_fail",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f_fail",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "failed",
+                            verdictReason: "Metric mismatch: area expected 40, actual 41",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                }));
             },
         });
 
@@ -304,10 +431,348 @@ describe("App integration", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        await openManualVerdictModal();
         expect(
-            await screen.findByLabelText(/Add point with bench=254, delay=15, area=40, verdict=failed/)
-        ).toBeInTheDocument();
-        expect(calls).toEqual(["validate-upload"]);
+            await screen.findByLabelText(/Add point with bench=254, delay=15, area=40, status=waiting manual verdict, detected verdict=failed/)
+        ).not.toBeChecked();
+        expect(calls).toEqual(["create-request", "put-queue", "run-request"]);
+    });
+
+    it("restores waiting manual verdict after reload and blocks a new upload", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_restore",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f_restore",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        expect(await screen.findByText("Live processed")).toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [new File(["bench data"], "bench254_16_41.bench", { type: "text/plain" })] },
+        });
+
+        expect(screen.getByRole("button", { name: "Upload & create point" })).toBeDisabled();
+        expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute(
+            "title",
+            "Resolve manual verdict for the previous upload first.",
+        );
+    });
+
+    it("restores failed request with manual pending rows and keeps manual flow accessible", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_failed_restore",
+                        status: "failed",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                        error: "Failed to process upload request.",
+                    },
+                    files: [
+                        {
+                            id: "f_failed_restore",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "failed",
+                            verdictReason: "checker/parser failed with unknown reason",
+                            canApply: true,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        expect(await screen.findByText("Manual point apply")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Upload & create point" })).toBeDisabled();
+        expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute(
+            "title",
+            "Resolve manual verdict for the previous upload first.",
+        );
+    });
+
+    it("closes manual modal immediately without waiting for close request", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+        let resolveCloseRequest = null;
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_restore",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f_restore",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+            "POST /api/points-upload-request-close": () =>
+                new Promise((resolve) => {
+                    resolveCloseRequest = () => resolve(jsonResponse(200, {
+                        request: {
+                            id: "req_restore",
+                            status: "closed",
+                            totalCount: 1,
+                            doneCount: 1,
+                            verifiedCount: 0,
+                            currentFileName: "",
+                            currentPhase: "",
+                        },
+                        files: [],
+                    }));
+                }),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        await openManualVerdictModal();
+
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+        await waitFor(() => {
+            expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        });
+
+        await waitFor(() => {
+            expect(resolveCloseRequest).toEqual(expect.any(Function));
+        });
+        resolveCloseRequest();
+    });
+
+    it("opens manual modal only after all files finish processing", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        const calls = [];
+        let runCount = 0;
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "POST /api/points-upload-request-create": () => Promise.resolve(jsonResponse(201, {
+                request: {
+                    id: "req_batch",
+                    status: "queued",
+                    totalCount: 2,
+                    doneCount: 0,
+                    verifiedCount: 0,
+                    currentFileName: "",
+                    currentPhase: "",
+                },
+                files: [
+                    {
+                        fileId: "f1",
+                        originalFileName: "bench254_15_40.bench",
+                        queueFileKey: "queue/req_batch/f1.bench",
+                        uploadUrl: "https://s3.example/queue-upload-1",
+                        method: "PUT",
+                    },
+                    {
+                        fileId: "f2",
+                        originalFileName: "bench254_16_41.bench",
+                        queueFileKey: "queue/req_batch/f2.bench",
+                        uploadUrl: "https://s3.example/queue-upload-2",
+                        method: "PUT",
+                    },
+                ],
+            })),
+            "PUT https://s3.example/queue-upload-1": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
+            "PUT https://s3.example/queue-upload-2": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
+            "POST /api/points-upload-request-run": () => {
+                runCount += 1;
+                calls.push(`run-${runCount}`);
+                if (runCount === 1) {
+                    return Promise.resolve(jsonResponse(200, {
+                        request: {
+                            id: "req_batch",
+                            status: "processing",
+                            totalCount: 2,
+                            doneCount: 1,
+                            verifiedCount: 0,
+                            currentFileName: "",
+                            currentPhase: "",
+                        },
+                        files: [
+                            {
+                                id: "f1",
+                                originalFileName: "bench254_15_40.bench",
+                                processState: "processed",
+                                verdict: "non-verified",
+                                verdictReason: "verification skipped or checker unavailable",
+                                canApply: true,
+                                defaultChecked: true,
+                                applied: false,
+                                parsedBenchmark: "254",
+                                parsedDelay: 15,
+                                parsedArea: 40,
+                            },
+                            {
+                                id: "f2",
+                                originalFileName: "bench254_16_41.bench",
+                                processState: "pending",
+                                verdict: "pending",
+                                verdictReason: "",
+                                canApply: false,
+                                defaultChecked: false,
+                                applied: false,
+                            },
+                        ],
+                    }));
+                }
+                return Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_batch",
+                        status: "waiting_manual_verdict",
+                        totalCount: 2,
+                        doneCount: 2,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                        {
+                            id: "f2",
+                            originalFileName: "bench254_16_41.bench",
+                            processState: "processed",
+                            verdict: "failed",
+                            verdictReason: "Metric mismatch",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 16,
+                            parsedArea: 41,
+                        },
+                    ],
+                }));
+            },
+        });
+
+        render(<App />);
+
+        fireEvent.change(await screen.findByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Add a point");
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: {
+                files: [
+                    new File(["bench data"], "bench254_15_40.bench", { type: "text/plain" }),
+                    new File(["bench data"], "bench254_16_41.bench", { type: "text/plain" }),
+                ],
+            },
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
+
+        await waitFor(() => {
+            expect(calls).toContain("run-1");
+        });
+        expect(screen.getByText("Processing current file...")).toBeInTheDocument();
+        expect(screen.queryByText("Please wait, starting circuit upload may take up to a minute")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Apply manual verdict" })).not.toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        await openManualVerdictModal();
+        expect(
+            screen.getByLabelText(/Add point with bench=254, delay=15, area=40, status=waiting manual verdict, detected verdict=non-verified/)
+        ).toBeChecked();
+        expect(
+            await screen.findByLabelText(/Add point with bench=254, delay=16, area=41, status=waiting manual verdict, detected verdict=failed/)
+        ).not.toBeChecked();
     });
 
     it("shows truth conflict modal for admin when benchmark is missing", async () => {

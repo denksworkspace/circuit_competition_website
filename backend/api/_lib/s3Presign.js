@@ -43,6 +43,50 @@ export function buildPresignedPutUrl({
     objectKey,
     expiresSeconds,
 }) {
+    return buildPresignedUrl({
+        method: "PUT",
+        bucket,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+        objectKey,
+        expiresSeconds,
+    });
+}
+
+export function buildPresignedDeleteUrl({
+    bucket,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    objectKey,
+    expiresSeconds,
+}) {
+    return buildPresignedUrl({
+        method: "DELETE",
+        bucket,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+        objectKey,
+        expiresSeconds,
+    });
+}
+
+export function buildPresignedUrl({
+    method,
+    bucket,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    objectKey,
+    expiresSeconds,
+}) {
+    const requestMethod = String(method || "PUT").trim().toUpperCase();
     const service = "s3";
     const { shortDate, amzDate } = toAmzDate();
     const host = `${bucket}.s3.${region}.amazonaws.com`;
@@ -72,7 +116,7 @@ export function buildPresignedPutUrl({
     const payloadHash = "UNSIGNED-PAYLOAD";
 
     const canonicalRequest = [
-        "PUT",
+        requestMethod,
         canonicalUri,
         canonicalQueryString,
         canonicalHeaders,

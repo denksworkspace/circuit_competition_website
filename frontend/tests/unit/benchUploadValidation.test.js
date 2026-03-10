@@ -7,7 +7,6 @@ function file(name, size) {
 
 describe("getBenchFilesError", () => {
     const formatGb = (value) => String(value / 1024);
-    const parseOk = () => ({ ok: true });
 
     it("returns empty string for empty selection", () => {
         const result = getBenchFilesError({
@@ -16,7 +15,6 @@ describe("getBenchFilesError", () => {
             maxSingleUploadBytes: 100,
             remainingUploadBytes: 200,
             formatGb,
-            parseBenchFileName: parseOk,
         });
         expect(result).toBe("");
     });
@@ -28,21 +26,19 @@ describe("getBenchFilesError", () => {
             maxSingleUploadBytes: 100,
             remainingUploadBytes: 200,
             formatGb,
-            parseBenchFileName: parseOk,
         });
         expect(result).toBe("Too many files selected. Maximum is 2.");
     });
 
-    it("fails on invalid bench file name", () => {
+    it("does not validate bench file name pattern on client", () => {
         const result = getBenchFilesError({
             files: [file("bad.txt", 1)],
             maxMultiFileBatchCount: 2,
             maxSingleUploadBytes: 100,
             remainingUploadBytes: 200,
             formatGb,
-            parseBenchFileName: () => ({ ok: false, error: "Invalid name" }),
         });
-        expect(result).toBe("Invalid name");
+        expect(result).toBe("");
     });
 
     it("fails on single file size limit", () => {
@@ -52,7 +48,6 @@ describe("getBenchFilesError", () => {
             maxSingleUploadBytes: 100,
             remainingUploadBytes: 500,
             formatGb,
-            parseBenchFileName: parseOk,
         });
         expect(result).toBe("File is too large. Maximum size is 0.09765625 GB.");
     });
@@ -64,7 +59,6 @@ describe("getBenchFilesError", () => {
             maxSingleUploadBytes: 100,
             remainingUploadBytes: 100,
             formatGb,
-            parseBenchFileName: parseOk,
         });
         expect(result).toBe("Multi-file quota exceeded. Remaining: 0.09765625 GB.");
     });

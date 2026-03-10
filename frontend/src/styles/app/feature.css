@@ -300,6 +300,97 @@
     gap: 10px;
 }
 
+.uploadLivePanel {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fcfcfd;
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+    min-height: 178px;
+}
+
+.uploadLiveHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.uploadLiveList {
+    max-height: 260px;
+    min-height: 120px;
+    overflow: auto;
+    border: 1px solid #eef2f7;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.uploadLiveItem {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 10px;
+    align-items: start;
+    padding: 10px;
+    border-bottom: 1px solid #eef2f7;
+}
+
+.uploadLiveItem:last-child {
+    border-bottom: none;
+}
+
+.uploadLiveStatus {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: none;
+}
+
+.uploadLiveStatus.queued {
+    color: #64748b;
+}
+
+.uploadLiveStatus.processing {
+    color: #9a3412;
+}
+
+.uploadLiveStatus.success {
+    color: #166534;
+}
+
+.uploadLiveStatus.muted {
+    color: #64748b;
+}
+
+.uploadLiveStatus.info {
+    color: #1d4ed8;
+}
+
+.uploadLiveStatus.error {
+    color: #991b1b;
+}
+
+.uploadLiveMeta {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.uploadLiveFile {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
 .adminActionPicker .userList {
     max-height: 150px;
 }

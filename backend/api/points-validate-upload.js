@@ -5,6 +5,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { parseInputBenchFileName } from "./_lib/benchInputName.js";
 import { getAigStatsFromBenchText } from "./_lib/abc.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
+import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 
 const MAX_VERIFY_FILES = 100;
 
@@ -36,6 +37,15 @@ export default async function handler(req, res) {
     `;
     if (authRes.rows.length === 0) {
         res.status(401).json({ error: "Invalid auth key." });
+        return;
+    }
+    const maintenance = await checkMaintenanceBlock({
+        ...req,
+        body,
+        urlPath: "/api/points-validate-upload",
+    });
+    if (maintenance.blocked) {
+        res.status(503).json({ error: maintenance.state?.message || "Technical maintenance is in progress." });
         return;
     }
     const metricsTimeoutLimitSeconds = Math.max(1, Number(authRes.rows[0].abc_metrics_timeout_seconds || 60));

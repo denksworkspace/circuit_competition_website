@@ -69,7 +69,6 @@ export default function App() {
         authKeyDraft,
         setAuthKeyDraft,
         currentCommand,
-        setCurrentCommand,
         authError,
         isAuthChecking,
         isBootstrapping,
@@ -305,6 +304,8 @@ export default function App() {
         isUploading,
         isUploadStopping,
         uploadProgress,
+        uploadLiveRows,
+        showUploadMonitor,
         fileInputRef,
         uploadLogText,
         uploadVerdictNote,
@@ -319,6 +320,8 @@ export default function App() {
         manualApplyRows,
         isManualApplyOpen,
         isManualApplying,
+        showManualApplyButton,
+        openManualApplyModal,
         onFileChange,
         requestStopUpload,
         addPointFromFile,
@@ -330,10 +333,8 @@ export default function App() {
     } = useBenchUploadFlow({
         authKeyDraft,
         currentCommand,
-        setCurrentCommand,
         setPoints,
         setLastAddedId,
-        setBenchmarkFilter,
         maxSingleUploadBytes,
         remainingUploadBytes,
         maxMultiFileBatchCount,
@@ -821,7 +822,7 @@ export default function App() {
     }
 
     if (maintenanceStatus.activeForUser && !isLocalRuntime) {
-        return <MaintenanceScreen />;
+        return <MaintenanceScreen message={maintenanceStatus.message} />;
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";
@@ -957,12 +958,14 @@ export default function App() {
                         }}
                         uploadError={uploadError}
                         uploadVerdictNote={uploadVerdictNote}
-                        isUploading={isUploading}
-                        isUploadStopping={isUploadStopping}
-                        uploadProgress={uploadProgress}
-                        uploadLogText={uploadLogText}
-                        onDownloadUploadLog={downloadUploadLog}
-                        onStopUpload={requestStopUpload}
+                            isUploading={isUploading}
+                            isUploadStopping={isUploadStopping}
+                            uploadProgress={uploadProgress}
+                            uploadLiveRows={uploadLiveRows}
+                            showUploadMonitor={showUploadMonitor}
+                            uploadLogText={uploadLogText}
+                            onDownloadUploadLog={downloadUploadLog}
+                            onStopUpload={requestStopUpload}
                         selectedChecker={selectedChecker}
                         onSelectedCheckerChange={setSelectedChecker}
                         canUseFastHex={canUseFastHex}
@@ -976,6 +979,8 @@ export default function App() {
                         parserTleMaxSeconds={metricsTimeoutQuotaSeconds}
                         isUploadSettingsOpen={isUploadSettingsOpen}
                         onToggleUploadSettings={() => setIsUploadSettingsOpen((v) => !v)}
+                        showManualApplyButton={showManualApplyButton}
+                        onOpenManualApply={openManualApplyModal}
                         uploadDisabledReason={uploadDisabledReason}
                     />
 

@@ -23,14 +23,19 @@ vi.mock("../../api/_lib/pointVerification.js", async (importOriginal) => {
         verifyCircuitWithTruth: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/maintenanceMode.js", () => ({
+    checkMaintenanceBlock: vi.fn(async () => ({ blocked: false, state: null })),
+}));
 
 import { sql } from "@vercel/postgres";
 import { verifyCircuitWithTruth } from "../../api/_lib/pointVerification.js";
 import handler from "../../api/points-verify.js";
+import { checkMaintenanceBlock } from "../../api/_lib/maintenanceMode.js";
 
 describe("api/points-verify", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        checkMaintenanceBlock.mockResolvedValue({ blocked: false, state: null });
     });
 
     it("rejects when truth is missing", async () => {
@@ -164,5 +169,23 @@ describe("api/points-verify", () => {
                 timeoutSeconds: 5,
             })
         );
+    });
+
+    it("returns 503 during maintenance before verification starts", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "participant", name: "u1", abc_verify_timeout_seconds: 9 }] });
+        checkMaintenanceBlock.mockResolvedValueOnce({
+            blocked: true,
+            state: { message: "Maintenance." },
+        });
+
+        const req = createMockReq({
+            method: "POST",
+            body: { authKey: "k", benchmark: "254", circuitText: "x", checkerVersion: "ABC" },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(verifyCircuitWithTruth).not.toHaveBeenCalled();
     });
 });

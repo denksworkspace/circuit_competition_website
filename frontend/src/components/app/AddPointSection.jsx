@@ -19,6 +19,8 @@ export function AddPointSection({
     isUploading,
     isUploadStopping,
     uploadProgress,
+    uploadLiveRows,
+    showUploadMonitor,
     uploadLogText,
     onDownloadUploadLog,
     onStopUpload,
@@ -35,6 +37,8 @@ export function AddPointSection({
     parserTleMaxSeconds,
     isUploadSettingsOpen,
     onToggleUploadSettings,
+    showManualApplyButton,
+    onOpenManualApply,
     uploadDisabledReason,
 }) {
     return (
@@ -172,7 +176,12 @@ export function AddPointSection({
                 {uploadError.trim() ? <div className="error">{uploadError}</div> : null}
                 {uploadVerdictNote.trim() ? <div className="cardHint">{uploadVerdictNote}</div> : null}
 
-                <span className={!canAdd ? "disabledHintWrap" : ""} title={!canAdd ? uploadDisabledReason : ""}>
+                <span
+                    className={!canAdd ? "disabledHintWrap" : ""}
+                    title={!canAdd ? uploadDisabledReason : ""}
+                    aria-label={!canAdd ? uploadDisabledReason : ""}
+                    data-testid="upload-submit-wrap"
+                >
                     <button className="btn primary" type="submit" disabled={!canAdd}>
                         {isUploading ? "Uploading..." : "Upload & create point"}
                     </button>
@@ -183,19 +192,36 @@ export function AddPointSection({
                     </button>
                 ) : null}
 
-                {isUploading && uploadProgress ? (
+                {showUploadMonitor && uploadProgress ? (
                     <>
-                        <div className="uploadProgressStats">
-                            <div className="cardHint">
-                                Processed {uploadProgress.done} / {uploadProgress.total} files
+                        {uploadProgress.phase !== "uploading" ? (
+                            <div className="uploadProgressStats">
+                                <div className="cardHint">
+                                    Processed {uploadProgress.done} / {uploadProgress.total} files
+                                </div>
+                                <div className="cardHint">
+                                    Verified {Number(uploadProgress.verified || 0)} / {uploadProgress.total}
+                                </div>
                             </div>
-                            <div className="cardHint">
-                                Verified {Number(uploadProgress.verified || 0)} / {uploadProgress.total}
-                            </div>
-                        </div>
+                        ) : null}
                         {uploadProgress.phase === "preparing" ? (
                             <div className="cardHint">
                                 Please wait, starting circuit upload may take up to a minute
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "uploading" ? (
+                            <div className="cardHint">
+                                adding files to queue... {Number(uploadProgress.queueUploaded || 0)} / {Number(uploadProgress.queueTotal || uploadProgress.total || 0)}
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "waiting-manual" ? (
+                            <div className="cardHint">
+                                Waiting for manual verdict before the upload can finish.
+                            </div>
+                        ) : null}
+                        {uploadProgress.phase === "processing" ? (
+                            <div className="cardHint">
+                                Processing {uploadProgress.currentFileName || "current file"}...
                             </div>
                         ) : null}
                         {uploadProgress.phase === "parser" ? (
@@ -226,6 +252,31 @@ export function AddPointSection({
                     </>
                 ) : null}
 
+                {showUploadMonitor && uploadLiveRows.length > 0 ? (
+                    <div className="uploadLivePanel" role="status" aria-live="polite">
+                        <div className="uploadLiveHeader">
+                            <div className="pointModalTitle">Live processed</div>
+                            <div className="cardHint">{uploadLiveRows.length} files in current upload</div>
+                        </div>
+                            <div className="uploadLiveList">
+                                {uploadLiveRows.map((row) => (
+                                    <div key={row.key} className="uploadLiveItem">
+                                        <span className={`uploadLiveStatus ${row.tone || "muted"}`}>{row.statusLabel}</span>
+                                        <div className="uploadLiveMeta">
+                                            <div className="uploadLiveFile">{row.fileName}</div>
+                                            {row.reason ? <div className="cardHint">{row.reason}</div> : null}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
+
+                {showManualApplyButton ? (
+                    <button className="btn primary" type="button" onClick={onOpenManualApply}>
+                        Apply manual verdict
+                    </button>
+                ) : null}
                 {uploadLogText ? (
                     <button className="btn ghost" type="button" onClick={onDownloadUploadLog}>
                         Download upload log

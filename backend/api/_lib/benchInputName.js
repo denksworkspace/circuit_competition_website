@@ -3,8 +3,15 @@
 const BENCH_INPUT_NAME_RE = /^(bench|ex)(2\d\d)_(\d+)_(\d+)\.bench$/i;
 const MAX_VALUE = 1_000_000_000;
 
+function normalizeQueuedFileName(fileNameRaw) {
+    const fileName = String(fileNameRaw || "").trim().split(/[\\/]/).pop() || "";
+    if (BENCH_INPUT_NAME_RE.test(fileName)) return fileName;
+    const prefixedMatch = fileName.match(/^.+_((?:bench|ex)(?:2\d\d)_(?:\d+)_(?:\d+)\.bench)$/i);
+    return String(prefixedMatch?.[1] || fileName);
+}
+
 export function parseInputBenchFileName(fileNameRaw) {
-    const fileName = String(fileNameRaw || "").trim();
+    const fileName = normalizeQueuedFileName(fileNameRaw);
     if (!fileName) {
         return { ok: false, error: "Empty file name." };
     }

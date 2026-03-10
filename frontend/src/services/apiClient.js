@@ -3,6 +3,13 @@ export { fetchCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./
 export {
     fetchPoints,
     requestUploadUrl,
+    createPointsUploadRequest,
+    fetchActivePointsUploadRequest,
+    fetchPointsUploadRequestStatus,
+    runPointsUploadRequest,
+    stopPointsUploadRequest,
+    applyPointsUploadRequestFiles,
+    closePointsUploadRequest,
     savePoint,
     validateUploadCircuits,
     testPointCircuit,

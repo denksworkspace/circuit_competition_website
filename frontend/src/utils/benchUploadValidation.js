@@ -4,7 +4,6 @@ export function getBenchFilesError({
     maxSingleUploadBytes,
     remainingUploadBytes,
     formatGb,
-    parseBenchFileName,
 }) {
     if (!Array.isArray(files) || files.length === 0) return "";
     if (files.length > maxMultiFileBatchCount) {
@@ -12,8 +11,6 @@ export function getBenchFilesError({
     }
 
     for (const file of files) {
-        const parsed = parseBenchFileName(file.name);
-        if (!parsed.ok) return parsed.error;
         if (file.size > maxSingleUploadBytes) {
             return `File is too large. Maximum size is ${formatGb(maxSingleUploadBytes)} GB.`;
         }
