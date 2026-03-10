@@ -60,11 +60,4 @@ S3_BUCKET=primary-points-bucket
 QUEUE_S3_BUCKET=queue-temp-bucket
 QUEUE_CLOUDFRONT_DOMAIN=your-cloudfront-domain.example.com
 QUEUE_S3_PREFIX=queue
-APP_DEPLOY_MAX_DRIFT_SECONDS=1800
-# Optional explicit backend build timestamp (ms). If unset, backend start time is used.
-APP_BUILD_TS=
 ```
-
-- Frontend adds `x-frontend-build-ts` automatically for `/api/*`.
-- Backend compares it with backend build/start timestamp and enters maintenance mode on large drift.
-- Drift threshold is controlled by `APP_DEPLOY_MAX_DRIFT_SECONDS` (set `0` to disable this guard).

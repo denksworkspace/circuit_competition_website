@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockReq, createMockRes } from "../helpers/mockHttp.js";
 
 vi.mock("../../api/_lib/maintenanceMode.js", () => ({
-    resolveMaintenanceStatus: vi.fn(),
+    getMaintenanceState: vi.fn(),
+    canBypassMaintenance: vi.fn(),
 }));
 
-import { resolveMaintenanceStatus } from "../../api/_lib/maintenanceMode.js";
+import { canBypassMaintenance, getMaintenanceState } from "../../api/_lib/maintenanceMode.js";
 import handler from "../../api/maintenance-status.js";
 
 describe("api/maintenance-status handler", () => {
@@ -22,13 +23,10 @@ describe("api/maintenance-status handler", () => {
     });
 
     it("returns maintenance disabled when flag is off", async () => {
-        resolveMaintenanceStatus.mockResolvedValueOnce({
+        getMaintenanceState.mockResolvedValueOnce({
             enabled: false,
             message: "x",
-            bypass: false,
-            activeForUser: false,
-            reason: "none",
-            compatibility: null,
+            whitelistAdminIds: [1],
         });
         const req = createMockReq({ method: "GET" });
         req.query = {};
@@ -45,61 +43,25 @@ describe("api/maintenance-status handler", () => {
     });
 
     it("returns activeForUser=false for whitelisted admin", async () => {
-        resolveMaintenanceStatus.mockResolvedValueOnce({
+        getMaintenanceState.mockResolvedValueOnce({
             enabled: true,
             message: "maintenance",
-            bypass: true,
-            activeForUser: false,
-            reason: "manual",
-            compatibility: null,
+            whitelistAdminIds: [1],
         });
+        canBypassMaintenance.mockResolvedValueOnce(true);
         const req = createMockReq({ method: "GET" });
         req.query = { authKey: "admin-key" };
         const res = createMockRes();
 
         await handler(req, res);
 
-        expect(resolveMaintenanceStatus).toHaveBeenCalledTimes(1);
+        expect(canBypassMaintenance).toHaveBeenCalledTimes(1);
         expect(res.statusCode).toBe(200);
         expect(res.body.maintenance).toMatchObject({
             enabled: true,
             bypass: true,
             activeForUser: false,
             message: "maintenance",
-        });
-    });
-
-    it("returns deploy mismatch state when compatibility guard is active", async () => {
-        resolveMaintenanceStatus.mockResolvedValueOnce({
-            enabled: true,
-            bypass: false,
-            activeForUser: true,
-            message: "Deployment mismatch detected.",
-            reason: "deploy_mismatch",
-            compatibility: {
-                mismatch: true,
-                reason: "deploy-drift",
-                frontendBuildTs: 100,
-                backendBuildTs: 200,
-                driftSeconds: 0.1,
-                maxDriftSeconds: 0,
-            },
-        });
-        const req = createMockReq({ method: "GET" });
-        req.query = {};
-        const res = createMockRes();
-
-        await handler(req, res);
-
-        expect(res.statusCode).toBe(200);
-        expect(res.body.maintenance).toMatchObject({
-            enabled: true,
-            activeForUser: true,
-            bypass: false,
-            reason: "deploy_mismatch",
-        });
-        expect(res.body.maintenance.compatibility).toMatchObject({
-            mismatch: true,
         });
     });
 });

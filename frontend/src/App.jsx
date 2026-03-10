@@ -822,7 +822,7 @@ export default function App() {
     }
 
     if (maintenanceStatus.activeForUser && !isLocalRuntime) {
-        return <MaintenanceScreen message={maintenanceStatus.message} />;
+        return <MaintenanceScreen />;
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";
