@@ -98,10 +98,14 @@ describe("api/admin-export-schemes-zip handler", () => {
         });
         fs.readdir.mockResolvedValueOnce([
             { isFile: () => true, name: "bench200_1_1_keep.bench" },
+            { isFile: () => true, name: "manifest.json" },
+        ]);
+        fs.readdir.mockResolvedValueOnce([
+            { isFile: () => true, name: "bench200_1_1_keep.bench" },
+            { isFile: () => true, name: "bench200_2_2_drop.bench" },
             { isFile: () => true, name: "bench201_6_9_deleted.bench" },
             { isFile: () => true, name: "manifest.json" },
         ]);
-
         const req = {
             method: "GET",
             query: { authKey: "k", scope: "pareto" },
@@ -112,9 +116,12 @@ describe("api/admin-export-schemes-zip handler", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.mode).toBe("local_files");
-        expect(res.body.savedFiles).toBe(2);
-        expect(fs.rm).toHaveBeenCalledTimes(1);
-        expect(String(fs.rm.mock.calls[0][0])).toContain("bench201_6_9_deleted.bench");
+        expect(res.body.savedFiles).toBe(1);
+        expect(res.body.skippedAlreadyExported).toBe(1);
+        expect(fs.rm).toHaveBeenCalledTimes(2);
+        const removedPaths = fs.rm.mock.calls.map((call) => String(call[0]));
+        expect(removedPaths.some((p) => p.includes("bench201_6_9_deleted.bench"))).toBe(true);
+        expect(removedPaths.some((p) => p.includes("bench200_2_2_drop.bench"))).toBe(true);
         expect(fs.rename).not.toHaveBeenCalled();
     });
 
@@ -144,5 +151,36 @@ describe("api/admin-export-schemes-zip handler", () => {
         expect(writtenTargets.some((target) => target.includes("deleted_bench200_2_2_old.bench"))).toBe(true);
         expect(fs.rm).not.toHaveBeenCalled();
         expect(fs.rename).not.toHaveBeenCalled();
+    });
+
+    it("skips already exported deleted_ files in local all export", async () => {
+        authenticateAdmin.mockResolvedValueOnce({ id: 99 });
+        sql.mockResolvedValueOnce({
+            rows: [
+                { benchmark: "200", delay: 1, area: 1, file_name: "bench200_1_1_keep.bench", status: "verified", lifecycle_status: "main" },
+                { benchmark: "200", delay: 2, area: 2, file_name: "bench200_2_2_old.bench", status: "verified", lifecycle_status: "deleted" },
+            ],
+        });
+        fs.readdir.mockResolvedValueOnce([
+            { isFile: () => true, name: "deleted_bench200_2_2_old.bench" },
+            { isFile: () => true, name: "manifest.json" },
+        ]);
+
+        const req = {
+            method: "GET",
+            query: { authKey: "k", scope: "all" },
+            headers: { host: "localhost:3000" },
+        };
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.mode).toBe("local_files");
+        expect(res.body.savedFiles).toBe(1);
+        expect(res.body.skippedAlreadyExported).toBe(1);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const writtenTargets = fs.writeFile.mock.calls.map((args) => String(args[0]));
+        expect(writtenTargets.some((target) => target.includes("bench200_1_1_keep.bench"))).toBe(true);
+        expect(writtenTargets.some((target) => target.includes("deleted_bench200_2_2_old.bench"))).toBe(false);
     });
 });

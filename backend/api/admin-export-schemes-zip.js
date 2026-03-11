@@ -59,6 +59,23 @@ function isVerifyStatus(statusRaw) {
     return status === "verify" || status === "verified";
 }
 
+async function listAlreadyExportedFiles(scope) {
+    const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
+    try {
+        const names = await fs.readdir(scopeDir, { withFileTypes: true });
+        const result = new Set();
+        for (const item of names) {
+            if (!item.isFile()) continue;
+            const fileName = String(item.name || "").trim();
+            if (!fileName || fileName === "manifest.json") continue;
+            result.add(fileName);
+        }
+        return result;
+    } catch {
+        return new Set();
+    }
+}
+
 async function saveLocalExportedFiles(scope, filesRaw) {
     const files = Array.isArray(filesRaw) ? filesRaw : [];
     if (files.length === 0) return;
@@ -82,13 +99,12 @@ function applyLifecyclePrefix(fileNameRaw, lifecycleStatusRaw) {
     return `${DELETED_FILE_PREFIX}${fileName}`;
 }
 
-async function removeLocalFilesByNames(scope, sourceFileNamesRaw) {
-    const sourceFileNames = new Set(
-        (Array.isArray(sourceFileNamesRaw) ? sourceFileNamesRaw : [])
+async function removeLocalFilesNotInSet(scope, keepFileNamesRaw) {
+    const keepFileNames = new Set(
+        (Array.isArray(keepFileNamesRaw) ? keepFileNamesRaw : [])
             .map((name) => sanitizeFileNamePart(name))
             .filter(Boolean)
     );
-    if (sourceFileNames.size === 0) return 0;
     const scopeDir = path.join(LOCAL_EXPORT_TRACK_ROOT, scope);
     try {
         const names = await fs.readdir(scopeDir, { withFileTypes: true });
@@ -97,10 +113,7 @@ async function removeLocalFilesByNames(scope, sourceFileNamesRaw) {
             if (!item.isFile()) continue;
             const fileName = String(item.name || "").trim();
             if (!fileName || fileName === "manifest.json") continue;
-            const normalized = fileName.startsWith(DELETED_FILE_PREFIX)
-                ? fileName.slice(DELETED_FILE_PREFIX.length)
-                : fileName;
-            if (!sourceFileNames.has(normalized)) continue;
+            if (keepFileNames.has(fileName)) continue;
             await fs.rm(path.join(scopeDir, fileName), { force: true });
             removed += 1;
         }
@@ -190,13 +203,20 @@ export default async function handler(req, res) {
             }))
             .filter((row) => row.sourceFileName && row.exportFileName);
         const localExportMode = isLocalExportRequest(req);
+        const alreadyExportedFiles = localExportMode
+            ? await listAlreadyExportedFiles(exportScope)
+            : new Set();
+        const filesToDownload = localExportMode
+            ? selectedFiles.filter((row) => !alreadyExportedFiles.has(row.exportFileName))
+            : selectedFiles;
         const pointFiles = Array.from(
-            selectedFiles.reduce((acc, row) => {
+            filesToDownload.reduce((acc, row) => {
                 const key = `${row.exportFileName}::${row.sourceFileName}`;
                 if (!acc.has(key)) acc.set(key, row);
                 return acc;
             }, new Map()).values()
         ).slice(0, MAX_TOTAL_FILES);
+        const skippedAlreadyExported = selectedFiles.length - filesToDownload.length;
 
         const totalFiles = pointFiles.length;
         let processedFiles = 0;
@@ -283,6 +303,7 @@ export default async function handler(req, res) {
             included: {
                 points: pointFiles.length,
             },
+            skippedAlreadyExported,
             archivedEntries: downloadedFiles.length,
             errors,
             mode: {
@@ -300,18 +321,15 @@ export default async function handler(req, res) {
             });
             await saveLocalExportedFiles(exportScope, downloadedFiles);
             if (exportScope === "pareto") {
-                const deletedSourceFiles = pointsRes.rows
-                    .filter((row) => String(row?.lifecycle_status || "").trim().toLowerCase() === "deleted")
+                setExportProgress(progressToken, {
+                    status: "cleaning_files",
+                    done: processedFiles,
+                    total: totalFiles,
+                });
+                const currentParetoFileNames = selectedRows
                     .map((row) => String(row?.file_name || "").trim())
                     .filter(Boolean);
-                if (deletedSourceFiles.length > 0) {
-                    setExportProgress(progressToken, {
-                        status: "cleaning_files",
-                        done: processedFiles,
-                        total: totalFiles,
-                    });
-                    await removeLocalFilesByNames(exportScope, deletedSourceFiles);
-                }
+                await removeLocalFilesNotInSet(exportScope, currentParetoFileNames);
             }
             await fs.writeFile(
                 path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope, "manifest.json"),
@@ -329,6 +347,7 @@ export default async function handler(req, res) {
                 mode: "local_files",
                 exportDir: path.join(LOCAL_EXPORT_TRACK_ROOT, exportScope),
                 savedFiles: downloadedFiles.length,
+                skippedAlreadyExported,
                 errors,
             });
             return;
