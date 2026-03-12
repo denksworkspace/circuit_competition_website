@@ -53,6 +53,7 @@ function shouldLogFetchUrl(urlRaw) {
     const url = String(urlRaw || "");
     if (!url) return false;
     if (url.includes(LOG_ENDPOINT_PATH)) return false;
+    if (url.includes("/api/maintenance-status")) return false;
     return url.includes("/api/");
 }
 

@@ -1,5 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { sql } from "@vercel/postgres";
+import { withDbRetry } from "./dbRetry.js";
 import {
     FILE_PROCESS_STATE_NON_PROCESSED,
     FILE_PROCESS_STATE_PENDING,
@@ -13,42 +14,42 @@ import {
 } from "./uploadQueue.js";
 
 export async function getCommandByAuthKey(authKey) {
-    const result = await sql`
+    const result = await withDbRetry(() => sql`
       select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
              abc_verify_timeout_seconds, abc_metrics_timeout_seconds
       from commands
       where auth_key = ${authKey}
       limit 1
-    `;
+    `);
     if (result.rows.length === 0) return null;
     return result.rows[0];
 }
 
 export async function loadUploadRequestSnapshot({ requestId, commandId, includeFiles = true }) {
-    const requestRes = await sql`
+    const requestRes = await withDbRetry(() => sql`
       select *
       from upload_requests
       where id = ${requestId}
         and command_id = ${commandId}
       limit 1
-    `;
+    `);
     if (requestRes.rows.length === 0) return null;
     const request = normalizeUploadRequestRow(requestRes.rows[0]);
     let files = [];
     if (includeFiles) {
-        const filesRes = await sql`
+        const filesRes = await withDbRetry(() => sql`
           select *
           from upload_request_files
           where request_id = ${requestId}
           order by order_index asc
-        `;
+        `);
         files = filesRes.rows.map(normalizeUploadRequestFileRow);
     }
     return { request, files };
 }
 
 export async function refreshUploadRequestCounters(requestId) {
-    const counters = await sql`
+    const counters = await withDbRetry(() => sql`
       select
         count(*)::int as total_count,
         count(*) filter (where lower(coalesce(process_state, '')) in ('processed', 'non-processed'))::int as done_count,
@@ -57,7 +58,7 @@ export async function refreshUploadRequestCounters(requestId) {
         count(*) filter (where not applied and can_apply)::int as manual_pending_count
       from upload_request_files
       where request_id = ${requestId}
-    `;
+    `);
     const row = counters.rows[0] || {};
     const totalCount = Math.max(0, Number(row.total_count || 0));
     const doneCount = Math.max(0, Number(row.done_count || 0));
@@ -70,7 +71,7 @@ export async function refreshUploadRequestCounters(requestId) {
     } else if (pendingCount <= 0) {
         nextStatus = REQUEST_STATUS_COMPLETED;
     }
-    await sql`
+    await withDbRetry(() => sql`
       update upload_requests
       set total_count = ${totalCount},
           done_count = ${doneCount},
@@ -87,11 +88,11 @@ export async function refreshUploadRequestCounters(requestId) {
               else finished_at
           end
       where id = ${requestId}
-    `;
+    `);
 }
 
 export async function markRemainingAsNonProcessed(requestId) {
-    await sql`
+    await withDbRetry(() => sql`
       update upload_request_files
       set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
           verdict = ${FILE_VERDICT_NON_PROCESSED},
@@ -105,9 +106,9 @@ export async function markRemainingAsNonProcessed(requestId) {
           processed_at = now()
       where request_id = ${requestId}
         and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}
-    `;
+    `);
     await refreshUploadRequestCounters(requestId);
-    await sql`
+    await withDbRetry(() => sql`
       update upload_requests
       set status = ${REQUEST_STATUS_INTERRUPTED},
           finished_at = coalesce(finished_at, now()),
@@ -115,11 +116,11 @@ export async function markRemainingAsNonProcessed(requestId) {
           current_file_name = '',
           updated_at = now()
       where id = ${requestId}
-    `;
+    `);
 }
 
 export async function findLatestBlockingUploadRequest(commandId) {
-    const requestRes = await sql`
+    const requestRes = await withDbRetry(() => sql`
       select
         upload_requests.id,
         upload_requests.status,
@@ -134,7 +135,7 @@ export async function findLatestBlockingUploadRequest(commandId) {
       where command_id = ${commandId}
       order by created_at desc
       limit 20
-    `;
+    `);
     return requestRes.rows.find((row) => (
         isActiveRequestStatus(row.status)
         || String(row?.status || "").toLowerCase() === REQUEST_STATUS_WAITING_MANUAL_VERDICT
@@ -143,14 +144,14 @@ export async function findLatestBlockingUploadRequest(commandId) {
 }
 
 export async function findNextPendingUploadFile(requestId) {
-    const result = await sql`
+    const result = await withDbRetry(() => sql`
       select *
       from upload_request_files
       where request_id = ${requestId}
         and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}
       order by order_index asc
       limit 1
-    `;
+    `);
     if (result.rows.length === 0) return null;
     return normalizeUploadRequestFileRow(result.rows[0]);
 }

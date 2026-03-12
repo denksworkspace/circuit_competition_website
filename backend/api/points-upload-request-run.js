@@ -5,8 +5,10 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import {
+    FILE_PROCESS_STATE_NON_PROCESSED,
     FILE_PROCESS_STATE_PROCESSING,
     FILE_VERDICT_FAILED,
+    FILE_VERDICT_NON_PROCESSED,
     REQUEST_STATUS_COMPLETED,
     REQUEST_STATUS_FAILED,
     REQUEST_STATUS_INTERRUPTED,
@@ -14,6 +16,7 @@ import {
     REQUEST_STATUS_WAITING_MANUAL_VERDICT,
     ensureUploadQueueSchema,
 } from "./_lib/uploadQueue.js";
+import { isRetryableDbError } from "./_lib/dbRetry.js";
 import {
     findNextPendingUploadFile,
     getCommandByAuthKey,
@@ -191,6 +194,31 @@ export default async function handler(req, res) {
         }
         await refreshUploadRequestCounters(requestId);
     } catch (error) {
+        if (isRetryableDbError(error)) {
+            await sql`
+              update upload_request_files
+              set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
+                  verdict = ${FILE_VERDICT_NON_PROCESSED},
+                  verdict_reason = ${String(error?.message || "Skipped due to temporary database connectivity issue.")},
+                  can_apply = false,
+                  default_checked = false,
+                  processed_at = now(),
+                  updated_at = now()
+              where id = ${nextFile.id}
+            `;
+            await refreshUploadRequestCounters(requestId);
+            await sql`
+              update upload_requests
+              set error = ${String(error?.message || "Temporary database connectivity issue; file skipped.")},
+                  current_phase = '',
+                  current_file_name = '',
+                  updated_at = now()
+              where id = ${requestId}
+            `;
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            res.status(200).json(ready);
+            return;
+        }
         await sql`
           update upload_request_files
           set process_state = 'processed',
