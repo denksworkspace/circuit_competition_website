@@ -4,6 +4,7 @@ import { authenticateAdmin } from "./adminUsers/utils.js";
 
 const SETTINGS_KEY = "maintenance_mode";
 const DEFAULT_MESSAGE = "Technical maintenance is in progress. Please try again later.";
+const ENABLED_REFRESH_MS = Math.max(1000, Number(process.env.MAINTENANCE_ENABLED_REFRESH_MS || 15000));
 const EXEMPT_MUTATION_PATHS = new Set([
     "/api/auth",
     "/api/site-activity-log",
@@ -11,6 +12,10 @@ const EXEMPT_MUTATION_PATHS = new Set([
 ]);
 
 let maintenanceSettingsReadyPromise = null;
+let maintenanceStateCache = normalizeMaintenanceState({});
+let maintenanceStateLoaded = false;
+let maintenanceStateLoadedAtMs = 0;
+let maintenanceStateLoadPromise = null;
 
 function normalizeWhitelist(rawList) {
     if (!Array.isArray(rawList)) return [];
@@ -81,7 +86,19 @@ export async function ensureMaintenanceSettingsSchema() {
     return maintenanceSettingsReadyPromise;
 }
 
-export async function getMaintenanceState() {
+function setMaintenanceStateCache(state) {
+    maintenanceStateCache = normalizeMaintenanceState(state);
+    maintenanceStateLoaded = true;
+    maintenanceStateLoadedAtMs = Date.now();
+}
+
+function shouldRefreshEnabledState() {
+    if (!maintenanceStateLoaded) return true;
+    if (!maintenanceStateCache.enabled) return false;
+    return Date.now() - maintenanceStateLoadedAtMs >= ENABLED_REFRESH_MS;
+}
+
+async function readMaintenanceStateFromDb() {
     await ensureMaintenanceSettingsSchema();
     const result = await sql`
       select value
@@ -91,6 +108,27 @@ export async function getMaintenanceState() {
     `;
     if (result.rows.length === 0) return normalizeMaintenanceState({});
     return normalizeMaintenanceState(result.rows[0]?.value || {});
+}
+
+async function loadMaintenanceState({ force = false } = {}) {
+    if (!force && maintenanceStateLoaded && !shouldRefreshEnabledState()) {
+        return maintenanceStateCache;
+    }
+    if (maintenanceStateLoadPromise) {
+        return maintenanceStateLoadPromise;
+    }
+    maintenanceStateLoadPromise = (async () => {
+        const state = await readMaintenanceStateFromDb();
+        setMaintenanceStateCache(state);
+        return state;
+    })().finally(() => {
+        maintenanceStateLoadPromise = null;
+    });
+    return maintenanceStateLoadPromise;
+}
+
+export async function getMaintenanceState() {
+    return loadMaintenanceState({ force: shouldRefreshEnabledState() });
 }
 
 export async function setMaintenanceState({ enabled, message, whitelistAdminIds }) {
@@ -104,6 +142,7 @@ export async function setMaintenanceState({ enabled, message, whitelistAdminIds 
         value = excluded.value,
         updated_at = now()
     `;
+    setMaintenanceStateCache(nextState);
     return nextState;
 }
 

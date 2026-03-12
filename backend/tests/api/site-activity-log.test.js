@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockReq, createMockRes } from "../helpers/mockHttp.js";
 
 vi.mock("../../api/_lib/siteActivityLogs.js", () => ({
@@ -12,7 +12,11 @@ import handler from "../../api/site-activity-log.js";
 describe("api/site-activity-log handler", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        process.env.SITE_ACTIVITY_LOGGING_ENABLED = "1";
         addSiteActivityLogs.mockResolvedValue(0);
+    });
+    afterEach(() => {
+        delete process.env.SITE_ACTIVITY_LOGGING_ENABLED;
     });
 
     it("rejects non-POST method", async () => {
@@ -76,5 +80,20 @@ describe("api/site-activity-log handler", () => {
 
         expect(res.statusCode).toBe(500);
         expect(res.body.error).toContain("Failed to persist site activity logs.");
+    });
+
+    it("returns no-op result when logging is disabled", async () => {
+        process.env.SITE_ACTIVITY_LOGGING_ENABLED = "0";
+        const req = createMockReq({
+            method: "POST",
+            body: { eventType: "ui_click" },
+        });
+        const res = createMockRes();
+
+        await handler(req, res);
+
+        expect(addSiteActivityLogs).not.toHaveBeenCalled();
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toMatchObject({ ok: true, inserted: 0 });
     });
 });

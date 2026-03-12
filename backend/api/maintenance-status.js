@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
     const state = await getMaintenanceState();
     const authKey = String(req.query?.authKey || "").trim();
-    const bypass = authKey
+    const bypass = state.enabled && authKey
         ? await canBypassMaintenance({ query: { authKey }, body: {} }, state.whitelistAdminIds)
         : false;
 

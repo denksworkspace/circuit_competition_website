@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
     DEFAULT_TEST_COMMAND_COUNT,
@@ -97,6 +97,7 @@ export default function App() {
         bypass: false,
         message: "",
     }));
+    const maintenancePollRef = useRef(null);
 
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
@@ -769,10 +770,18 @@ export default function App() {
 
     useEffect(() => {
         let cancelled = false;
-        let timer = null;
-        async function poll() {
+
+        const clearPoll = () => {
+            if (!maintenancePollRef.current) return;
+            clearInterval(maintenancePollRef.current);
+            maintenancePollRef.current = null;
+        };
+
+        const pollOnce = async () => {
             try {
-                const status = await fetchMaintenanceStatus({ authKey: authKeyDraft });
+                const status = await fetchMaintenanceStatus({
+                    authKey: currentCommand?.role === ROLE_ADMIN ? authKeyDraft : "",
+                });
                 if (!cancelled) {
                     setMaintenanceStatus({
                         enabled: Boolean(status?.enabled),
@@ -781,6 +790,9 @@ export default function App() {
                         message: String(status?.message || ""),
                     });
                 }
+                return {
+                    enabled: Boolean(status?.enabled),
+                };
             } catch {
                 if (!cancelled) {
                     setMaintenanceStatus((prev) => ({
@@ -789,15 +801,35 @@ export default function App() {
                         activeForUser: false,
                     }));
                 }
+                return { enabled: false };
             }
+        };
+
+        if (!currentCommand?.id) {
+            clearPoll();
+            return () => {
+                cancelled = true;
+                clearPoll();
+            };
         }
-        poll();
-        timer = setInterval(poll, 15000);
+
+        clearPoll();
+        void (async () => {
+            const initial = await pollOnce();
+            if (cancelled || !initial.enabled) return;
+            maintenancePollRef.current = setInterval(async () => {
+                const next = await pollOnce();
+                if (!next.enabled) {
+                    clearPoll();
+                }
+            }, 15000);
+        })();
+
         return () => {
             cancelled = true;
-            if (timer) clearInterval(timer);
+            clearPoll();
         };
-    }, [authKeyDraft, currentCommand?.id]);
+    }, [authKeyDraft, currentCommand?.id, currentCommand?.role]);
 
     function focusPoint(p) {
         if (!p) return;

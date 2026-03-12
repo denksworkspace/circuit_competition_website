@@ -29,11 +29,12 @@ describe("api/maintenance-status handler", () => {
             whitelistAdminIds: [1],
         });
         const req = createMockReq({ method: "GET" });
-        req.query = {};
+        req.query = { authKey: "admin-key" };
         const res = createMockRes();
 
         await handler(req, res);
 
+        expect(canBypassMaintenance).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
         expect(res.body.maintenance).toMatchObject({
             enabled: false,

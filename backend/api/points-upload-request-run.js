@@ -278,3 +278,4 @@ export default async function handler(req, res) {
     const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
     res.status(200).json(ready);
 }
+

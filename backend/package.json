@@ -7,6 +7,7 @@
     "dev": "node server/render-api.mjs",
     "start": "npm run db:migrate && node server/render-api.mjs",
     "db:migrate": "node scripts/migrate-points-schema.mjs",
+    "simulate:cu": "node scripts/simulate-cu.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:run:fast": "vitest run --exclude tests/security/**",

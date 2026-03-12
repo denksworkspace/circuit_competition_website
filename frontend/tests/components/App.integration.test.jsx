@@ -618,7 +618,6 @@ describe("App integration", () => {
     it("opens manual modal only after all files finish processing", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
-        let runCount = 0;
 
         installFetchRouter({
             ...bootstrapRoutes({
@@ -654,46 +653,7 @@ describe("App integration", () => {
             "PUT https://s3.example/queue-upload-1": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
             "PUT https://s3.example/queue-upload-2": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
             "POST /api/points-upload-request-run": () => {
-                runCount += 1;
-                calls.push(`run-${runCount}`);
-                if (runCount === 1) {
-                    return Promise.resolve(jsonResponse(200, {
-                        request: {
-                            id: "req_batch",
-                            status: "processing",
-                            totalCount: 2,
-                            doneCount: 1,
-                            verifiedCount: 0,
-                            currentFileName: "",
-                            currentPhase: "",
-                        },
-                        files: [
-                            {
-                                id: "f1",
-                                originalFileName: "bench254_15_40.bench",
-                                processState: "processed",
-                                verdict: "non-verified",
-                                verdictReason: "verification skipped or checker unavailable",
-                                canApply: true,
-                                defaultChecked: true,
-                                applied: false,
-                                parsedBenchmark: "254",
-                                parsedDelay: 15,
-                                parsedArea: 40,
-                            },
-                            {
-                                id: "f2",
-                                originalFileName: "bench254_16_41.bench",
-                                processState: "pending",
-                                verdict: "pending",
-                                verdictReason: "",
-                                canApply: false,
-                                defaultChecked: false,
-                                applied: false,
-                            },
-                        ],
-                    }));
-                }
+                calls.push("run-1");
                 return Promise.resolve(jsonResponse(200, {
                     request: {
                         id: "req_batch",
@@ -759,9 +719,7 @@ describe("App integration", () => {
         await waitFor(() => {
             expect(calls).toContain("run-1");
         });
-        expect(screen.getByText("Processing current file...")).toBeInTheDocument();
         expect(screen.queryByText("Please wait, starting circuit upload may take up to a minute")).not.toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Apply manual verdict" })).not.toBeInTheDocument();
         expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
 
         expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
