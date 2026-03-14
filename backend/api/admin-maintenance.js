@@ -2,6 +2,9 @@
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { authenticateAdmin } from "./_lib/adminUsers/utils.js";
 import { getMaintenanceState, parseWhitelistAdminIds, setMaintenanceState } from "./_lib/maintenanceMode.js";
+import { ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
+import { resumeFreezedUploadRequests } from "./_lib/uploadQueueOps.js";
+import { kickUploadQueueWorker } from "../server/uploadQueueWorker.mjs";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["GET", "PATCH"])) return;
@@ -28,6 +31,13 @@ export default async function handler(req, res) {
         message,
         whitelistAdminIds,
     });
+    if (!enabled) {
+        await ensureUploadQueueSchema();
+        const resumedCount = await resumeFreezedUploadRequests();
+        if (resumedCount > 0) {
+            kickUploadQueueWorker();
+        }
+    }
 
     res.status(200).json({ maintenance });
 }

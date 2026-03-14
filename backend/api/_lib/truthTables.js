@@ -12,7 +12,9 @@ function normalizeCloudFrontDomain(raw) {
     return trimmed.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
 }
 
-const cloudFrontDomain = normalizeCloudFrontDomain(process.env.CLOUDFRONT_DOMAIN);
+function getCloudFrontDomain() {
+    return normalizeCloudFrontDomain(process.env.CLOUDFRONT_DOMAIN);
+}
 
 export function parseTruthFileName(fileNameRaw) {
     const fileName = String(fileNameRaw || "").trim();
@@ -39,6 +41,7 @@ export function buildTruthObjectKey(fileName) {
 }
 
 export function buildTruthDownloadUrl(fileName) {
+    const cloudFrontDomain = getCloudFrontDomain();
     if (!cloudFrontDomain || !fileName) return null;
     const encodedKey = buildTruthObjectKey(fileName)
         .split("/")

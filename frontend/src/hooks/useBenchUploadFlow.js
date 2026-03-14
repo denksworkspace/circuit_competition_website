@@ -13,6 +13,7 @@ import {
 } from "../services/apiClient.js";
 
 const RUNNABLE_REQUEST_STATUSES = new Set(["queued", "processing"]);
+const FREEZED_REQUEST_STATUS = "freezed";
 const WAITING_MANUAL_REQUEST_STATUS = "waiting_manual_verdict";
 
 function isRunnableRequestStatus(statusRaw) {
@@ -33,6 +34,7 @@ function mapPhase(phaseRaw, statusRaw) {
     if (status === WAITING_MANUAL_REQUEST_STATUS) return "waiting-manual";
     if (status === "queued") return "preparing";
     if (status === "processing") return "processing";
+    if (status === FREEZED_REQUEST_STATUS) return "paused";
     return "preparing";
 }
 
@@ -93,6 +95,12 @@ function getUploadDisabledReason({
     descriptionDraft,
 }) {
     if (isUploading) return "Upload is already in progress.";
+    if (blockingRequestStatus === FREEZED_REQUEST_STATUS) {
+        return "Upload queue is paused by maintenance mode.";
+    }
+    if (isRunnableRequestStatus(blockingRequestStatus)) {
+        return "An upload request is already in progress.";
+    }
     if (manualApplyRowsLength > 0 || blockingRequestStatus === waitManualRequestStatus) {
         return "Resolve manual verdict for the previous upload first.";
     }
@@ -186,13 +194,7 @@ function updateLocalQueueRow(rows, rowIndex, nextData) {
     return rows.map((row, index) => (index === rowIndex ? { ...row, ...nextData } : row));
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
-const FAST_QUEUE_POLL_MS = 150;
+const ACTIVE_QUEUE_STATUS_POLL_MS = 2000;
 const IDLE_QUEUE_CHECK_MS = 60 * 60 * 1000;
 
 async function buildQueueUploadErrorMessage(response, fileName) {
@@ -253,8 +255,6 @@ export function useBenchUploadFlow({
 
     const uploadAbortRef = useRef(null);
     const activeRequestIdRef = useRef("");
-    const isQueueRunnerActiveRef = useRef(false);
-    const isUploadingRef = useRef(false);
     const isPageUnloadingRef = useRef(false);
 
     useEffect(() => {
@@ -269,10 +269,6 @@ export function useBenchUploadFlow({
             window.removeEventListener("beforeunload", markPageUnloading);
         };
     }, []);
-
-    useEffect(() => {
-        isUploadingRef.current = isUploading;
-    }, [isUploading]);
 
     useEffect(() => {
         return () => {
@@ -396,27 +392,6 @@ export function useBenchUploadFlow({
             setUploadError(" ");
         }
     }, [resetBlockingRequestState]);
-
-    const runRequestUntilSettled = useCallback(async ({ requestId, controller }) => {
-        let currentRequestId = String(requestId || "").trim();
-        let snapshot = null;
-        while (!controller.signal.aborted && currentRequestId) {
-            snapshot = await runPointsUploadRequest({
-                authKey: authKeyDraft,
-                requestId: currentRequestId,
-                signal: controller.signal,
-            });
-            updateStateFromSnapshot(snapshot);
-            const nextStatus = String(snapshot?.request?.status || "").toLowerCase();
-            if (!isRunnableRequestStatus(nextStatus)) {
-                await refreshPointsAfterRequest();
-                return snapshot;
-            }
-            await sleep(FAST_QUEUE_POLL_MS);
-        }
-        if (controller.signal.aborted) return snapshot;
-        throw new Error("Upload request was interrupted.");
-    }, [authKeyDraft, refreshPointsAfterRequest, updateStateFromSnapshot]);
 
     async function requestStopUpload() {
         if (!isUploading || !activeRequestIdRef.current) return;
@@ -548,8 +523,16 @@ export function useBenchUploadFlow({
                 }));
             }
 
-            isQueueRunnerActiveRef.current = true;
-            await runRequestUntilSettled({ requestId, controller });
+            const started = await runPointsUploadRequest({
+                authKey: authKeyDraft,
+                requestId,
+                signal: controller.signal,
+            });
+            updateStateFromSnapshot(started);
+            const startedStatus = String(started?.request?.status || "").toLowerCase();
+            if (!isRunnableRequestStatus(startedStatus)) {
+                await refreshPointsAfterRequest();
+            }
             setDescriptionDraft("");
             clearFileInput();
         } catch (err) {
@@ -564,7 +547,6 @@ export function useBenchUploadFlow({
                 setBlockingRequestStatus("");
             }
         } finally {
-            isQueueRunnerActiveRef.current = false;
             if (uploadAbortRef.current === controller) {
                 uploadAbortRef.current = null;
             }
@@ -669,52 +651,47 @@ export function useBenchUploadFlow({
         if (!authKey || !currentCommand) return;
         let cancelled = false;
         let timer = null;
+        let inFlightController = null;
         const poll = async () => {
-            if (cancelled || isQueueRunnerActiveRef.current || isUploadingRef.current) return;
+            if (cancelled) return;
             const controller = new AbortController();
+            inFlightController = controller;
             try {
                 const active = await fetchActivePointsUploadRequest({
                     authKey,
                     signal: controller.signal,
                 });
                 if (cancelled) return;
-                if (!active?.request?.id) {
-                    return;
-                }
-
-                const lowerStatus = String(active.request.status || "").toLowerCase();
                 updateStateFromSnapshot(active);
-                if (!isRunnableRequestStatus(lowerStatus)) {
-                    return;
+                const status = String(active?.request?.status || "").toLowerCase();
+                const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
+                const hasBlockingRequest = Boolean(active?.request?.id);
+                const nextDelay = hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS;
+                timer = setTimeout(() => {
+                    void poll();
+                }, nextDelay);
+                if (!hasRunnableRequest && status !== FREEZED_REQUEST_STATUS) {
+                    setIsUploadStopping(false);
                 }
-
-                setIsUploading(true);
-                setIsUploadStopping(false);
-                isQueueRunnerActiveRef.current = true;
-                uploadAbortRef.current = controller;
-                await runRequestUntilSettled({ requestId: String(active.request.id), controller });
             } catch {
-                // ignore resume errors
+                if (cancelled) return;
+                timer = setTimeout(() => {
+                    void poll();
+                }, IDLE_QUEUE_CHECK_MS);
             } finally {
-                isQueueRunnerActiveRef.current = false;
-                if (uploadAbortRef.current === controller) {
-                    uploadAbortRef.current = null;
+                if (inFlightController === controller) {
+                    inFlightController = null;
                 }
-                setIsUploading(false);
-                setIsUploadStopping(false);
-                controller.abort();
             }
         };
         void poll();
-        timer = setInterval(() => {
-            void poll();
-        }, IDLE_QUEUE_CHECK_MS);
 
         return () => {
             cancelled = true;
-            if (timer) clearInterval(timer);
+            if (timer) clearTimeout(timer);
+            if (inFlightController) inFlightController.abort();
         };
-    }, [authKeyDraft, currentCommand, runRequestUntilSettled, updateStateFromSnapshot]);
+    }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
 
     const showUploadMonitor = Boolean(uploadProgress) || uploadLiveRows.length > 0;
 

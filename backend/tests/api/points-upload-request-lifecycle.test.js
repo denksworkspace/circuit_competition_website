@@ -21,6 +21,7 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
     FILE_VERDICT_FAILED: "failed",
     REQUEST_STATUS_COMPLETED: "completed",
     REQUEST_STATUS_FAILED: "failed",
+    REQUEST_STATUS_FREEZED: "freezed",
     REQUEST_STATUS_INTERRUPTED: "interrupted",
     REQUEST_STATUS_PROCESSING: "processing",
     REQUEST_STATUS_WAITING_MANUAL_VERDICT: "waiting_manual_verdict",
@@ -117,7 +118,7 @@ describe("upload request lifecycle handlers", () => {
         expect(res.body.request.id).toBe("req_1");
     });
 
-    it("run interrupts request during maintenance and returns snapshot", async () => {
+    it("run freezes request during maintenance and returns snapshot", async () => {
         getCommandByAuthKey.mockResolvedValueOnce({ id: 10 });
         loadUploadRequestSnapshot
             .mockResolvedValueOnce({
@@ -125,7 +126,7 @@ describe("upload request lifecycle handlers", () => {
                 files: [],
             })
             .mockResolvedValueOnce({
-                request: { id: "req_1", status: "interrupted", error: "Maintenance." },
+                request: { id: "req_1", status: "freezed", error: "Maintenance." },
                 files: [{ id: "f1" }],
             });
         checkMaintenanceBlock.mockResolvedValueOnce({
@@ -141,9 +142,9 @@ describe("upload request lifecycle handlers", () => {
         const res = createMockRes();
         await runHandler(req, res);
 
-        expect(markRemainingAsNonProcessed).toHaveBeenCalledWith("req_1");
+        expect(markRemainingAsNonProcessed).not.toHaveBeenCalled();
         expect(res.statusCode).toBe(200);
-        expect(res.body.request.status).toBe("interrupted");
+        expect(res.body.request.status).toBe("freezed");
     });
 
     it("run marks failed processing exceptions as non-applyable", async () => {

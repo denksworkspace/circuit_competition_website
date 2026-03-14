@@ -6,7 +6,9 @@ import {
     FILE_PROCESS_STATE_PENDING,
     FILE_VERDICT_NON_PROCESSED,
     REQUEST_STATUS_COMPLETED,
+    REQUEST_STATUS_FREEZED,
     REQUEST_STATUS_INTERRUPTED,
+    REQUEST_STATUS_PROCESSING,
     REQUEST_STATUS_WAITING_MANUAL_VERDICT,
     normalizeUploadRequestFileRow,
     normalizeUploadRequestRow,
@@ -154,4 +156,19 @@ export async function findNextPendingUploadFile(requestId) {
     `);
     if (result.rows.length === 0) return null;
     return normalizeUploadRequestFileRow(result.rows[0]);
+}
+
+export async function resumeFreezedUploadRequests() {
+    const resumed = await withDbRetry(() => sql`
+      update upload_requests
+      set status = ${REQUEST_STATUS_PROCESSING},
+          error = null,
+          finished_at = null,
+          current_phase = '',
+          current_file_name = '',
+          updated_at = now()
+      where lower(coalesce(status, '')) = ${REQUEST_STATUS_FREEZED}
+      returning id
+    `);
+    return resumed.rows.length;
 }

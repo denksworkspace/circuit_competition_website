@@ -11,6 +11,7 @@ import {
     FILE_VERDICT_NON_PROCESSED,
     REQUEST_STATUS_COMPLETED,
     REQUEST_STATUS_FAILED,
+    REQUEST_STATUS_FREEZED,
     REQUEST_STATUS_INTERRUPTED,
     REQUEST_STATUS_PROCESSING,
     REQUEST_STATUS_WAITING_MANUAL_VERDICT,
@@ -77,10 +78,13 @@ export default async function handler(req, res) {
         urlPath: "/api/points-upload-request-run",
     });
     if (maintenance.blocked) {
-        await markRemainingAsNonProcessed(requestId);
         await sql`
           update upload_requests
-          set error = ${String(maintenance.state?.message || "Technical maintenance is in progress.")},
+          set status = ${REQUEST_STATUS_FREEZED},
+              error = ${String(maintenance.state?.message || "Technical maintenance is in progress.")},
+              finished_at = null,
+              current_phase = '',
+              current_file_name = '',
               updated_at = now()
           where id = ${requestId}
         `;
@@ -278,4 +282,3 @@ export default async function handler(req, res) {
     const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
     res.status(200).json(ready);
 }
-

@@ -4,6 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkMaintenanceBlock } from "../api/_lib/maintenanceMode.js";
 import { ensurePointsStatusConstraint } from "../api/_lib/pointsStatus.js";
+import { kickUploadQueueWorker, startUploadQueueWorker } from "./uploadQueueWorker.mjs";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(serverDir, "../api");
@@ -215,6 +216,9 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         await handler(reqAny, resAny);
+        if (resAny.statusCode < 400 && url.pathname === "/api/points-upload-request-run") {
+            kickUploadQueueWorker();
+        }
     } catch (error) {
         console.error(error);
         if (!res.headersSent) {
@@ -225,6 +229,7 @@ const server = http.createServer(async (req, res) => {
 
 await bootstrapEnv();
 await ensurePointsStatusConstraint();
+startUploadQueueWorker();
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => {

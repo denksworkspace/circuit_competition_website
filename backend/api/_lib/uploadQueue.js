@@ -3,6 +3,7 @@ import { sql } from "@vercel/postgres";
 
 export const REQUEST_STATUS_QUEUED = "queued";
 export const REQUEST_STATUS_PROCESSING = "processing";
+export const REQUEST_STATUS_FREEZED = "freezed";
 export const REQUEST_STATUS_WAITING_MANUAL_VERDICT = "waiting_manual_verdict";
 export const REQUEST_STATUS_COMPLETED = "completed";
 export const REQUEST_STATUS_INTERRUPTED = "interrupted";
@@ -22,7 +23,7 @@ export const FILE_VERDICT_DUPLICATE = "duplicate";
 export const FILE_VERDICT_BLOCKED = "blocked";
 export const FILE_VERDICT_NON_PROCESSED = "non-processed";
 
-const ACTIVE_REQUEST_STATUSES = new Set([REQUEST_STATUS_QUEUED, REQUEST_STATUS_PROCESSING]);
+const ACTIVE_REQUEST_STATUSES = new Set([REQUEST_STATUS_QUEUED, REQUEST_STATUS_PROCESSING, REQUEST_STATUS_FREEZED]);
 
 let uploadQueueSchemaReadyPromise = null;
 
@@ -62,6 +63,7 @@ export async function ensureUploadQueueSchema() {
                 lower(coalesce(status, '')) in (
                     'queued',
                     'processing',
+                    'freezed',
                     'waiting_manual_verdict',
                     'completed',
                     'interrupted',

@@ -10,9 +10,21 @@ vi.mock("../../api/_lib/maintenanceMode.js", () => ({
     parseWhitelistAdminIds: vi.fn((value) => value),
     setMaintenanceState: vi.fn(),
 }));
+vi.mock("../../api/_lib/uploadQueue.js", () => ({
+    ensureUploadQueueSchema: vi.fn(),
+}));
+vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
+    resumeFreezedUploadRequests: vi.fn(),
+}));
+vi.mock("../../server/uploadQueueWorker.mjs", () => ({
+    kickUploadQueueWorker: vi.fn(),
+}));
 
 import { authenticateAdmin } from "../../api/_lib/adminUsers/utils.js";
 import { getMaintenanceState, parseWhitelistAdminIds, setMaintenanceState } from "../../api/_lib/maintenanceMode.js";
+import { ensureUploadQueueSchema } from "../../api/_lib/uploadQueue.js";
+import { resumeFreezedUploadRequests } from "../../api/_lib/uploadQueueOps.js";
+import { kickUploadQueueWorker } from "../../server/uploadQueueWorker.mjs";
 import handler from "../../api/admin-maintenance.js";
 
 describe("api/admin-maintenance handler", () => {
@@ -75,5 +87,33 @@ describe("api/admin-maintenance handler", () => {
         });
         expect(res.statusCode).toBe(200);
         expect(res.body.maintenance).toMatchObject({ enabled: true, whitelistAdminIds: [1, 2] });
+        expect(ensureUploadQueueSchema).not.toHaveBeenCalled();
+        expect(resumeFreezedUploadRequests).not.toHaveBeenCalled();
+        expect(kickUploadQueueWorker).not.toHaveBeenCalled();
+    });
+
+    it("resumes freezed queues and kicks worker when maintenance is disabled", async () => {
+        authenticateAdmin.mockResolvedValueOnce({ id: 1 });
+        parseWhitelistAdminIds.mockReturnValueOnce([]);
+        setMaintenanceState.mockResolvedValueOnce({ enabled: false, message: "ok", whitelistAdminIds: [] });
+        resumeFreezedUploadRequests.mockResolvedValueOnce(3);
+        const req = createMockReq({
+            method: "PATCH",
+            body: {
+                authKey: "k",
+                enabled: false,
+                message: "ok",
+                whitelistAdminIds: "",
+            },
+        });
+        req.query = {};
+        const res = createMockRes();
+
+        await handler(req, res);
+
+        expect(ensureUploadQueueSchema).toHaveBeenCalledTimes(1);
+        expect(resumeFreezedUploadRequests).toHaveBeenCalledTimes(1);
+        expect(kickUploadQueueWorker).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(200);
     });
 });
