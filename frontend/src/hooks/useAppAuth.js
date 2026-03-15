@@ -20,12 +20,17 @@ export function useAppAuth({ setPoints, setCommands }) {
         try {
             const cmd = await fetchCommandByAuthKey(k);
             if (!cmd) throw new Error("Invalid key.");
+            const [rows, dbCommands] = await Promise.all([fetchPoints(k), fetchCommands(k)]);
             localStorage.setItem("bench_auth_key", k);
+            setPoints(rows);
+            setCommands(dbCommands);
             setCurrentCommand(cmd);
             setAuthError("");
         } catch (err) {
             setAuthError(err?.message || "Invalid key.");
             setCurrentCommand(null);
+            setPoints([]);
+            setCommands([]);
         } finally {
             setIsAuthChecking(false);
         }
@@ -36,29 +41,39 @@ export function useAppAuth({ setPoints, setCommands }) {
         setCurrentCommand(null);
         setAuthKeyDraft("");
         setAuthError("");
+        setPoints([]);
+        setCommands([]);
     }
 
     useEffect(() => {
         let alive = true;
         const savedKey = (localStorage.getItem("bench_auth_key") || "").trim();
-        const authPromise = savedKey ? fetchCommandByAuthKey(savedKey).catch(() => null) : Promise.resolve(null);
-        Promise.all([fetchPoints(), fetchCommands(), authPromise])
-            .then(([rows, dbCommands, authedCommand]) => {
+        if (!savedKey) {
+            setPoints([]);
+            setCommands([]);
+            setIsBootstrapping(false);
+            return () => {
+                alive = false;
+            };
+        }
+
+        fetchCommandByAuthKey(savedKey)
+            .then(async (authedCommand) => {
+                if (!authedCommand) throw new Error("Saved key is no longer valid.");
+                const [rows, dbCommands] = await Promise.all([fetchPoints(savedKey), fetchCommands(savedKey)]);
                 if (!alive) return;
                 setPoints(rows);
                 setCommands(dbCommands);
-                if (authedCommand) {
-                    setCurrentCommand(authedCommand);
-                    setAuthError("");
-                } else if (savedKey) {
-                    localStorage.removeItem("bench_auth_key");
-                    setAuthError("Saved key is no longer valid.");
-                }
+                setCurrentCommand(authedCommand);
+                setAuthError("");
             })
-            .catch((e) => {
+            .catch(() => {
                 if (!alive) return;
-                console.error(e);
-                setAuthError(String(e?.message || "Failed to load initial data."));
+                localStorage.removeItem("bench_auth_key");
+                setCurrentCommand(null);
+                setPoints([]);
+                setCommands([]);
+                setAuthError("Saved key is no longer valid.");
             })
             .finally(() => {
                 if (!alive) return;

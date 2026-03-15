@@ -1,7 +1,9 @@
 import { apiUrl, parseJsonSafe } from "../http/client.js";
 
-export async function fetchCommands() {
-    const response = await fetch(apiUrl("/api/commands"));
+export async function fetchCommands(authKey) {
+    const query = new URLSearchParams();
+    query.set("authKey", String(authKey || "").trim());
+    const response = await fetch(apiUrl(`/api/commands?${query.toString()}`));
     const data = await parseJsonSafe(response);
     if (!response.ok) {
         throw new Error(data?.error || "Failed to load commands.");

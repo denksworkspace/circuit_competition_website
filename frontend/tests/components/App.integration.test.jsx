@@ -47,8 +47,8 @@ function installFetchRouter(routes) {
 
 function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBody = { command: null } } = {}) {
     return {
-        "GET /api/points": () => Promise.resolve(jsonResponse(200, { points })),
-        "GET /api/commands": () => Promise.resolve(jsonResponse(200, { commands })),
+        "GET /api/points?authKey=key_ok": () => Promise.resolve(jsonResponse(200, { points })),
+        "GET /api/commands?authKey=key_ok": () => Promise.resolve(jsonResponse(200, { commands })),
         "POST /api/auth": () => Promise.resolve(jsonResponse(authStatus, authBody)),
         "POST /api/points-duplicate-check": () => Promise.resolve(jsonResponse(200, { duplicate: false, point: null })),
         "GET /api/points-upload-request-active?authKey=key_ok": () =>
@@ -218,7 +218,7 @@ describe("App integration", () => {
                 authBody: { command },
                 points,
             }),
-            "GET /api/points": () => Promise.resolve(jsonResponse(200, { points })),
+            "GET /api/points?authKey=key_ok": () => Promise.resolve(jsonResponse(200, { points })),
             "POST /api/points-upload-request-create": ({ init }) => {
                 calls.push("create-request");
                 const body = JSON.parse(init.body);

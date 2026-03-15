@@ -320,7 +320,7 @@ export function useBenchUploadFlow({
 
     const refreshPointsAfterRequest = useCallback(async () => {
         try {
-            const rows = await fetchPoints();
+            const rows = await fetchPoints(authKeyDraft);
             setPoints(rows);
             if (rows.length > 0) {
                 setLastAddedId(rows[0].id);
@@ -328,7 +328,7 @@ export function useBenchUploadFlow({
         } catch {
             // ignore transient refresh failure; request state is already persisted on server
         }
-    }, [setLastAddedId, setPoints]);
+    }, [authKeyDraft, setLastAddedId, setPoints]);
 
     const resetBlockingRequestState = useCallback(() => {
         activeRequestIdRef.current = "";

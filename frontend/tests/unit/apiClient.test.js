@@ -32,12 +32,12 @@ describe("apiClient", () => {
 
     it("fetchCommands returns command list", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ body: { commands: [{ id: 1 }] } }));
-        await expect(fetchCommands()).resolves.toEqual([{ id: 1 }]);
+        await expect(fetchCommands("k")).resolves.toEqual([{ id: 1 }]);
     });
 
     it("fetchCommands throws server error message", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ ok: false, body: { error: "boom" } }));
-        await expect(fetchCommands()).rejects.toThrow("boom");
+        await expect(fetchCommands("k")).rejects.toThrow("boom");
     });
 
     it("fetchCommandByAuthKey sends request body and returns command", async () => {
@@ -51,7 +51,7 @@ describe("apiClient", () => {
 
     it("fetchPoints handles invalid JSON fallback", async () => {
         fetch.mockResolvedValueOnce(mockResponse({ ok: false, jsonReject: true }));
-        await expect(fetchPoints()).rejects.toThrow("Failed to load points.");
+        await expect(fetchPoints("k")).rejects.toThrow("Failed to load points.");
     });
 
     it("requestUploadUrl throws API message", async () => {

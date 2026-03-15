@@ -31,6 +31,7 @@ describe("api/commands handler", () => {
     });
 
     it("returns normalized command list", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: "1" }] });
         sql.mockResolvedValueOnce({
             rows: [
                 { id: "2", name: "alpha", color: "#111", role: "admin" },
@@ -38,7 +39,7 @@ describe("api/commands handler", () => {
             ],
         });
 
-        const req = createMockReq({ method: "GET" });
+        const req = createMockReq({ method: "GET", query: { authKey: "k" } });
         const res = createMockRes();
 
         await handler(req, res);
@@ -49,5 +50,27 @@ describe("api/commands handler", () => {
             { id: 2, name: "alpha", color: "#111", role: "admin" },
             { id: 3, name: "beta", color: "#222", role: "participant" },
         ]);
+    });
+
+    it("rejects missing auth key", async () => {
+        const req = createMockReq({ method: "GET" });
+        const res = createMockRes();
+
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body.error).toBe("Missing auth key.");
+    });
+
+    it("rejects invalid auth key", async () => {
+        sql.mockResolvedValueOnce({ rows: [] });
+
+        const req = createMockReq({ method: "GET", query: { authKey: "bad" } });
+        const res = createMockRes();
+
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body.error).toBe("Invalid auth key.");
     });
 });

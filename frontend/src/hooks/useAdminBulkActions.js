@@ -401,7 +401,7 @@ export function useAdminBulkActions({
                 deletedPoints += Number(result?.deletedPoints || 0);
                 setBulkIdenticalApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
             }
-            const freshPoints = await fetchPoints();
+            const freshPoints = await fetchPoints(authKeyDraft);
             setPoints(freshPoints);
             setIsBulkIdenticalApplyModalOpen(false);
             setBulkIdenticalPickerGroupId("");
@@ -485,7 +485,7 @@ export function useAdminBulkActions({
                     setBulkVerifyApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
                 }
             }
-            const freshPoints = await fetchPoints();
+            const freshPoints = await fetchPoints(authKeyDraft);
             setPoints(freshPoints);
             setIsBulkVerifyApplyModalOpen(false);
             setBulkVerifyCandidates([]);

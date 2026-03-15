@@ -41,6 +41,7 @@ describe("api/points handler", () => {
     });
 
     it("GET returns normalized points", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: "1" }] });
         sql.mockResolvedValueOnce({
             rows: [
                 {
@@ -57,13 +58,33 @@ describe("api/points handler", () => {
             ],
         });
 
-        const req = createMockReq({ method: "GET" });
+        const req = createMockReq({ method: "GET", query: { authKey: "k" } });
         const res = createMockRes();
         await handler(req, res);
 
         expect(res.statusCode).toBe(200);
         expect(res.body.points[0].delay).toBe(10);
         expect(res.body.points[0].area).toBe(20);
+    });
+
+    it("GET rejects missing auth key", async () => {
+        const req = createMockReq({ method: "GET" });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body.error).toBe("Missing auth key.");
+    });
+
+    it("GET rejects invalid auth key", async () => {
+        sql.mockResolvedValueOnce({ rows: [] });
+
+        const req = createMockReq({ method: "GET", query: { authKey: "bad" } });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body.error).toBe("Invalid auth key.");
     });
 
     it("POST rejects missing auth key", async () => {

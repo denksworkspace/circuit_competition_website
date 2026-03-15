@@ -1,6 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-export function createMockReq({ method = "GET", body } = {}) {
-    return { method, body };
+export function createMockReq({ method = "GET", body, query } = {}) {
+    return { method, body, query: query || {} };
 }
 
 export function createMockRes() {

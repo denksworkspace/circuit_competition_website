@@ -5,6 +5,23 @@ import { ensureTruthTablesSchema } from "../truthTables.js";
 import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 
 export async function handleGetPoints(req, res) {
+    const authKey = String(req?.query?.authKey || "").trim();
+    if (!authKey) {
+        res.status(401).json({ error: "Missing auth key." });
+        return;
+    }
+
+    const authRes = await sql`
+      select id
+      from commands
+      where auth_key = ${authKey}
+      limit 1
+    `;
+    if (authRes.rows.length === 0) {
+        res.status(401).json({ error: "Invalid auth key." });
+        return;
+    }
+
     await ensureTruthTablesSchema();
     await ensurePointsStatusConstraint();
     const { rows } = await sql`
