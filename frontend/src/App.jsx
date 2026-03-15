@@ -49,6 +49,7 @@ const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
 const ENABLED_CHECKERS = new Set([CHECKER_ABC, CHECKER_ABC_FAST_HEX]);
 const DATE_SLIDER_MIN_UTC_MS = Date.UTC(2026, 1, 1);
 const DAY_MS = 24 * 60 * 60 * 1000;
+const INITIAL_DATE_SLIDER_MAX_UTC_MS = Math.max(DATE_SLIDER_MIN_UTC_MS, toUtcDayStartMs(Date.now()));
 
 function toUtcDayStartMs(input) {
     const date = new Date(input);
@@ -387,7 +388,7 @@ export default function App() {
     const [areaMax, setAreaMax] = useState(1000);
     const [delayMaxDraft, setDelayMaxDraft] = useState("50");
     const [areaMaxDraft, setAreaMaxDraft] = useState("1000");
-    const dateSliderMaxUtcMs = useMemo(() => Math.max(DATE_SLIDER_MIN_UTC_MS, toUtcDayStartMs(Date.now())), []);
+    const dateSliderMaxUtcMs = INITIAL_DATE_SLIDER_MAX_UTC_MS;
     const dateSliderMaxDays = useMemo(
         () => Math.floor((dateSliderMaxUtcMs - DATE_SLIDER_MIN_UTC_MS) / DAY_MS),
         [dateSliderMaxUtcMs]
