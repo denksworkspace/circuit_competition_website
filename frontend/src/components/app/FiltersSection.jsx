@@ -20,6 +20,8 @@ export function FiltersSection({
     removeSelectedCommand,
     statusFilter,
     toggleStatus,
+    showParetoOnly,
+    onShowParetoOnlyChange,
 }) {
     return (
         <section className="card">
@@ -184,6 +186,15 @@ export function FiltersSection({
                                     <span className="dot" style={{ background: statusColor("failed") }} />
                                 ) : null}
                                 <span>failed</span>
+                            </label>
+
+                            <label className="check">
+                                <input
+                                    type="checkbox"
+                                    checked={showParetoOnly}
+                                    onChange={(e) => onShowParetoOnlyChange(e.target.checked)}
+                                />
+                                <span>Pareto front only</span>
                             </label>
                         </div>
                     </div>

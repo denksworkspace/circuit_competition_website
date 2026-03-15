@@ -7,8 +7,12 @@ export function AdminModals({
     clearAllTruthConflicts,
     applyTruthConflicts,
     closeTruthConflictModal,
+    isTruthUploading,
+    truthUploadProgress,
     bulkVerifyCandidates,
     isBulkVerifyApplyModalOpen,
+    isBulkVerifyApplying,
+    bulkVerifyApplyProgress,
     setBulkVerifyCandidateChecked,
     selectAllBulkVerifyCandidates,
     clearAllBulkVerifyCandidates,
@@ -17,6 +21,7 @@ export function AdminModals({
     bulkIdenticalGroups,
     isBulkIdenticalApplyModalOpen,
     isBulkIdenticalApplying,
+    bulkIdenticalApplyProgress,
     setBulkIdenticalGroupKeepPoint,
     applySelectedBulkIdenticalGroups,
     closeBulkIdenticalApplyModal,
@@ -44,6 +49,7 @@ export function AdminModals({
                                             type="checkbox"
                                             checked={Boolean(item.checked)}
                                             onChange={(e) => setTruthConflictChecked(item.fileName, e.target.checked)}
+                                            disabled={isTruthUploading}
                                         />
                                         <span>
                                             {item.action === "requires_replace"
@@ -58,16 +64,21 @@ export function AdminModals({
                             <button className="btn ghost small" type="button" onClick={selectAllTruthConflicts}>
                                 Select all
                             </button>
-                            <button className="btn ghost small" type="button" onClick={clearAllTruthConflicts}>
+                            <button className="btn ghost small" type="button" onClick={clearAllTruthConflicts} disabled={isTruthUploading}>
                                 Clear all
                             </button>
-                            <button className="btn primary small" type="button" onClick={applyTruthConflicts}>
-                                Apply
+                            <button className="btn primary small" type="button" onClick={applyTruthConflicts} disabled={isTruthUploading}>
+                                {isTruthUploading ? "Applying..." : "Apply"}
                             </button>
-                            <button className="btn small" type="button" onClick={closeTruthConflictModal}>
+                            <button className="btn small" type="button" onClick={closeTruthConflictModal} disabled={isTruthUploading}>
                                 Close
                             </button>
                         </div>
+                        {isTruthUploading && truthUploadProgress ? (
+                            <div className="cardHint">
+                                processed {Number(truthUploadProgress.done || 0)} / {Number(truthUploadProgress.total || 0)}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -86,28 +97,36 @@ export function AdminModals({
                                             type="checkbox"
                                             checked={Boolean(item.checked)}
                                             onChange={(e) => setBulkVerifyCandidateChecked(item.pointId, e.target.checked)}
+                                            disabled={isBulkVerifyApplying}
                                         />
                                         <span>
                                             point {item.pointId} ({item.fileName}) -&gt; {item.status}
+                                            {item.verdict ? `; verdict=${item.verdict}` : ""}
+                                            {item.reason ? `; reason=${item.reason}` : ""}
                                         </span>
                                     </label>
                                 ))
                             )}
                         </div>
                         <div className="pointModalActions">
-                            <button className="btn ghost small" type="button" onClick={selectAllBulkVerifyCandidates}>
+                            <button className="btn ghost small" type="button" onClick={selectAllBulkVerifyCandidates} disabled={isBulkVerifyApplying}>
                                 Select all
                             </button>
-                            <button className="btn ghost small" type="button" onClick={clearAllBulkVerifyCandidates}>
+                            <button className="btn ghost small" type="button" onClick={clearAllBulkVerifyCandidates} disabled={isBulkVerifyApplying}>
                                 Clear all
                             </button>
-                            <button className="btn primary small" type="button" onClick={applySelectedBulkVerifyCandidates}>
-                                Apply selected
+                            <button className="btn primary small" type="button" onClick={applySelectedBulkVerifyCandidates} disabled={isBulkVerifyApplying}>
+                                {isBulkVerifyApplying ? "Applying..." : "Apply selected"}
                             </button>
-                            <button className="btn small" type="button" onClick={closeBulkVerifyApplyModal}>
+                            <button className="btn small" type="button" onClick={closeBulkVerifyApplyModal} disabled={isBulkVerifyApplying}>
                                 Close
                             </button>
                         </div>
+                        {isBulkVerifyApplying && bulkVerifyApplyProgress ? (
+                            <div className="cardHint">
+                                processed {Number(bulkVerifyApplyProgress.processed || 0)} / {Number(bulkVerifyApplyProgress.total || 0)}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -131,6 +150,7 @@ export function AdminModals({
                                                 <span className="pill subtle">bench {group.benchmark}</span>
                                                 <span className="pill subtle">duplicates {points.length}</span>
                                             </div>
+                                            <div className="cardHint">reason: identical content hash</div>
                                             <label className="field identicalResolveField">
                                                 <span>Keep point</span>
                                                 <select
@@ -161,6 +181,11 @@ export function AdminModals({
                                 Close
                             </button>
                         </div>
+                        {isBulkIdenticalApplying && bulkIdenticalApplyProgress ? (
+                            <div className="cardHint">
+                                processed {Number(bulkIdenticalApplyProgress.processed || 0)} / {Number(bulkIdenticalApplyProgress.total || 0)}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             ) : null}

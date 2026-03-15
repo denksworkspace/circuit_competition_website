@@ -145,7 +145,6 @@ export function AddPointSection({
                             <span>parser parameters</span>
                             <select value={selectedParser} onChange={(e) => onSelectedParserChange(e.target.value)}>
                                 <option value="select">Select</option>
-                                <option value="none">Do not parse (non-verified)</option>
                                 <option value="ABC">ABC</option>
                             </select>
                         </label>

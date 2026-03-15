@@ -18,6 +18,7 @@ export async function handleGetPoints(req, res) {
         p.file_name,
         p.status,
         p.checker_version,
+        p.created_at,
         (t.benchmark is not null) as has_truth
       from points p
       left join truth_tables t on t.benchmark = p.benchmark

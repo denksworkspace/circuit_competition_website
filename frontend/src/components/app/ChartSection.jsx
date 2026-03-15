@@ -41,10 +41,20 @@ export function ChartSection({
     delayViewValid,
     areaViewValid,
     canApplyView,
+    dateSliderMaxDays,
+    dateSliderDayOffset,
+    onDateSliderDayOffsetChange,
+    dateSliderMinLabel,
+    dateSliderCurrentLabel,
+    dateSliderMaxLabel,
     onFitViewToPareto,
     onFitViewToAllVisiblePoints,
     truthTableOn,
 }) {
+    const sliderPercent = dateSliderMaxDays > 0
+        ? Math.min(100, Math.max(0, (dateSliderDayOffset / dateSliderMaxDays) * 100))
+        : 100;
+
     return (
         <section className="card chartCard">
             <div className="cardHeader">
@@ -214,6 +224,23 @@ export function ChartSection({
             </div>
 
             <form className="viewControls" onSubmit={applyView}>
+                <label className="field compact dateSliderField">
+                    <span>Show points added up to {dateSliderCurrentLabel}</span>
+                    <input
+                        className="dateSliderInput"
+                        type="range"
+                        min={0}
+                        max={dateSliderMaxDays}
+                        step={1}
+                        value={dateSliderDayOffset}
+                        onChange={(e) => onDateSliderDayOffsetChange(Number(e.target.value))}
+                        style={{ "--slider-progress": `${sliderPercent}%` }}
+                    />
+                    <div className="dateSliderTicks">
+                        <span>{dateSliderMinLabel}</span>
+                        <span>{dateSliderMaxLabel}</span>
+                    </div>
+                </label>
                 <div className="viewTitle">View rectange</div>
 
                 <label className="field compact">

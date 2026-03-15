@@ -13,12 +13,15 @@ export function SentPointsSection({
     onFocusPoint,
     onDownloadCircuit,
     getPointDownloadUrl,
+    paretoTransitionByPointId,
+    myNewParetoPointsCount,
 }) {
     return (
         <section className="card listCard sentCard">
             <div className="cardHeader tight">
                 <div>
                     <div className="cardTitle">Sended points</div>
+                    <div className="cardHint">New Pareto-front points: {myNewParetoPointsCount}</div>
                 </div>
             </div>
 
@@ -28,6 +31,12 @@ export function SentPointsSection({
                 ) : (
                     sentPageItems.map((p, i) => {
                         const globalIndex = sentTotal - (sentStart + i);
+                        const paretoTransition = paretoTransitionByPointId.get(p.id) || { becameFront: false, replaced: [] };
+                        const replacedLabel = paretoTransition.replaced.length > 0
+                            ? paretoTransition.replaced
+                                .map((item) => `${item.fileName || item.id} (${item.delay}, ${item.area})`)
+                                .join("; ")
+                            : "";
                         return (
                             <div className="row compactRow" key={p.id}>
                                 <div className="compactMain">
@@ -47,6 +56,14 @@ export function SentPointsSection({
                                             area=<b>{formatIntNoGrouping(p.area)}</b>
                                         </span>
                                     </div>
+                                    {paretoTransition.becameFront ? (
+                                        <div className="cardHint">
+                                            New Pareto-front point.
+                                            {replacedLabel
+                                                ? ` Replaced: ${replacedLabel}`
+                                                : " Replaced: none."}
+                                        </div>
+                                    ) : null}
                                 </div>
 
                                 <div className="sentActions">

@@ -112,6 +112,7 @@ describe("upload request core handlers", () => {
             body: {
                 authKey: "k",
                 files: [{ originalFileName: "bench254_10_20.bench", fileSize: 1 }],
+                selectedParser: "ABC",
             },
         });
         const res = createMockRes();
@@ -133,6 +134,7 @@ describe("upload request core handlers", () => {
             body: {
                 authKey: "k",
                 files: [{ originalFileName: "bench254_10_20.bench", fileSize: 1 }],
+                selectedParser: "ABC",
             },
         });
         const res = createMockRes();

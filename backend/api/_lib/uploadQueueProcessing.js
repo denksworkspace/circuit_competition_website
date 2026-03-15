@@ -244,7 +244,15 @@ export async function processUploadQueueFile({
         verdict = FILE_VERDICT_DUPLICATE;
         verdictReason = `Identical file hash for same delay+area already exists: ${duplicateCheck?.point?.fileName || duplicateCheck?.point?.id || "existing point"}.`;
     } else if (finalStatus === FILE_VERDICT_FAILED) {
-        verdictReason = checkerOut.checkerErrorReason || parserOut.reason || "checker/parser failed with unknown reason";
+        if (parserOut.parserKind === "failed") {
+            verdictReason = `parser: ${parserOut.reason || "failed to parse metrics"}`;
+        } else if (checkerOut.checkerVerdict === false) {
+            verdictReason = "checker: schemes are not equivalent";
+        } else if (checkerOut.checkerErrorReason) {
+            verdictReason = `checker: ${checkerOut.checkerErrorReason}`;
+        } else {
+            verdictReason = "checker/parser failed";
+        }
     } else if (finalStatus === FILE_VERDICT_NON_VERIFIED) {
         verdictReason = checkerOut.checkerErrorReason || parserOut.reason || "verification skipped or checker unavailable";
     }

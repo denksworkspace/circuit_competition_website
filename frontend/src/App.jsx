@@ -47,6 +47,35 @@ const CHECKER_ABC = "ABC";
 const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
 const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
 const ENABLED_CHECKERS = new Set([CHECKER_ABC, CHECKER_ABC_FAST_HEX]);
+const DATE_SLIDER_MIN_UTC_MS = Date.UTC(2026, 1, 1);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function toUtcDayStartMs(input) {
+    const date = new Date(input);
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function toIsoDateLabel(utcMs) {
+    return new Date(utcMs).toISOString().slice(0, 10);
+}
+
+function getPointCreatedAtMs(point) {
+    const value = Date.parse(String(point?.createdAt || ""));
+    if (!Number.isFinite(value)) return null;
+    return value;
+}
+
+function dominatesPoint(lhs, rhs) {
+    if (!lhs || !rhs) return false;
+    const lhsDelay = Number(lhs.delay);
+    const lhsArea = Number(lhs.area);
+    const rhsDelay = Number(rhs.delay);
+    const rhsArea = Number(rhs.area);
+    if (!Number.isFinite(lhsDelay) || !Number.isFinite(lhsArea) || !Number.isFinite(rhsDelay) || !Number.isFinite(rhsArea)) {
+        return false;
+    }
+    return lhsDelay <= rhsDelay && lhsArea <= rhsArea && (lhsDelay < rhsDelay || lhsArea < rhsArea);
+}
 
 export default function App() {
     const isLocalRuntime = typeof window !== "undefined"
@@ -188,6 +217,8 @@ export default function App() {
         bulkMetricsAuditProgress,
         bulkVerifyCandidates,
         isBulkVerifyApplyModalOpen,
+        isBulkVerifyApplying,
+        bulkVerifyApplyProgress,
         isBulkIdenticalAuditRunning,
         bulkIdenticalAuditSummary,
         bulkIdenticalAuditLogText,
@@ -196,6 +227,7 @@ export default function App() {
         bulkIdenticalGroups,
         isBulkIdenticalApplyModalOpen,
         isBulkIdenticalApplying,
+        bulkIdenticalApplyProgress,
         bulkIdenticalPickerGroupId,
         runBulkVerifyAllPoints,
         runBulkMetricsAudit,
@@ -294,6 +326,7 @@ export default function App() {
         verified: true,
         failed: true,
     });
+    const [showParetoOnly, setShowParetoOnly] = useState(false);
     const {
         benchFiles,
         descriptionDraft,
@@ -321,6 +354,7 @@ export default function App() {
         manualApplyRows,
         isManualApplyOpen,
         isManualApplying,
+        manualApplyProgress,
         showManualApplyButton,
         openManualApplyModal,
         onFileChange,
@@ -353,25 +387,44 @@ export default function App() {
     const [areaMax, setAreaMax] = useState(1000);
     const [delayMaxDraft, setDelayMaxDraft] = useState("50");
     const [areaMaxDraft, setAreaMaxDraft] = useState("1000");
+    const dateSliderMaxUtcMs = useMemo(() => Math.max(DATE_SLIDER_MIN_UTC_MS, toUtcDayStartMs(Date.now())), []);
+    const dateSliderMaxDays = useMemo(
+        () => Math.floor((dateSliderMaxUtcMs - DATE_SLIDER_MIN_UTC_MS) / DAY_MS),
+        [dateSliderMaxUtcMs]
+    );
+    const [dateSliderDayOffset, setDateSliderDayOffset] = useState(() => dateSliderMaxDays);
+    const dateSliderCurrentUtcMs = DATE_SLIDER_MIN_UTC_MS + clamp(dateSliderDayOffset, 0, dateSliderMaxDays) * DAY_MS;
+    const dateSliderCurrentLabel = toIsoDateLabel(dateSliderCurrentUtcMs);
+    const dateSliderMaxLabel = toIsoDateLabel(dateSliderMaxUtcMs);
+    const dateSliderCutoffMs = dateSliderCurrentUtcMs + DAY_MS - 1;
 
     const delayAxis = useMemo(() => buildAxis(delayMax, DIVISIONS, MAX_VALUE), [delayMax]);
     const areaAxis = useMemo(() => buildAxis(areaMax, DIVISIONS, MAX_VALUE), [areaMax]);
     const delayOverflowLane = delayAxis.overflow;
     const areaOverflowLane = areaAxis.overflow;
+    const pointsUpToSliderDate = useMemo(
+        () =>
+            points.filter((point) => {
+                const createdAtMs = getPointCreatedAtMs(point);
+                if (createdAtMs == null) return true;
+                return createdAtMs <= dateSliderCutoffMs;
+            }),
+        [points, dateSliderCutoffMs]
+    );
     const availableBenchmarks = useMemo(() => {
         const numeric = new Set();
-        for (const p of points) {
+        for (const p of pointsUpToSliderDate) {
             if (p.benchmark !== "test") numeric.add(Number(p.benchmark));
         }
         return Array.from(numeric).sort((a, b) => a - b);
-    }, [points]);
+    }, [pointsUpToSliderDate]);
 
     // Commands shown in the "Users" picker:
     // show ONLY senders that have at least one point in the currently selected benchmark.
     // (If benchmark is "test" -> only test points; otherwise only that numeric benchmark.)
     const availableCommandNames = useMemo(() => {
         const set = new Set();
-        for (const p of points) {
+        for (const p of pointsUpToSliderDate) {
             if (benchmarkFilter === "test") {
                 if (p.benchmark === "test") set.add(p.sender);
             } else {
@@ -379,13 +432,13 @@ export default function App() {
             }
         }
         return Array.from(set).sort((a, b) => a.localeCompare(b));
-    }, [points, benchmarkFilter]);
+    }, [pointsUpToSliderDate, benchmarkFilter]);
 
 
 
     // Visible points = benchmark filter + status filter (NOT dependent on view rectangle)
     const visiblePoints = useMemo(() => {
-        return points.filter((p) => {
+        return pointsUpToSliderDate.filter((p) => {
             if (benchmarkFilter === "test") {
                 if (p.benchmark !== "test") return false;
             } else {
@@ -395,7 +448,7 @@ export default function App() {
             if (selectedCommands.length > 0 && !selectedCommandSet.has(p.sender)) return false;
             return true;
         });
-    }, [points, benchmarkFilter, statusFilter, selectedCommands, selectedCommandSet]);
+    }, [pointsUpToSliderDate, benchmarkFilter, statusFilter, selectedCommands, selectedCommandSet]);
 
     // Pareto computed ONLY from visible points (does NOT depend on view rectangle)
     const paretoBase = useMemo(() => {
@@ -432,7 +485,7 @@ export default function App() {
         setBenchmarkFilter(nextBenchmark);
         setBenchmarkMenuOpen(false);
 
-        const nextVisible = points.filter((p) => {
+        const nextVisible = pointsUpToSliderDate.filter((p) => {
             if (nextBenchmark === "test") {
                 if (p.benchmark !== "test") return false;
             } else {
@@ -447,7 +500,7 @@ export default function App() {
         if (!fitViewToPoints(nextPareto)) {
             fitViewToPoints(nextVisible);
         }
-    }, [fitViewToPoints, points, selectedCommandSet, selectedCommands.length, setBenchmarkMenuOpen, statusFilter]);
+    }, [fitViewToPoints, pointsUpToSliderDate, selectedCommandSet, selectedCommands.length, setBenchmarkMenuOpen, statusFilter]);
 
     // Pareto DISPLAY points: show only the segment inside the current rectangle
     // (no recomputation of membership, only cropping for display)
@@ -463,7 +516,7 @@ export default function App() {
     // Display mapping for all visible points (includes overflow lane mapping)
     const plottedPoints = useMemo(
         () =>
-            visiblePoints.map((p) =>
+            (showParetoOnly ? paretoBase : visiblePoints).map((p) =>
                 computePlottedPoint(
                     p,
                     delayMax,
@@ -474,7 +527,7 @@ export default function App() {
                     areaOverflowLane
                 )
             ),
-        [visiblePoints, delayMax, areaMax, delayAxis.step, areaAxis.step, delayOverflowLane, areaOverflowLane]
+        [showParetoOnly, paretoBase, visiblePoints, delayMax, areaMax, delayAxis.step, areaAxis.step, delayOverflowLane, areaOverflowLane]
     );
     const pointsRenderKey = useMemo(
         () =>
@@ -486,9 +539,11 @@ export default function App() {
                 statusFilter["non-verified"] ? 1 : 0,
                 statusFilter.verified ? 1 : 0,
                 statusFilter.failed ? 1 : 0,
+                showParetoOnly ? 1 : 0,
+                dateSliderDayOffset,
                 selectedCommands.join("|"),
             ].join(":"),
-        [delayMax, areaMax, colorMode, benchmarkFilter, statusFilter, selectedCommands]
+        [delayMax, areaMax, colorMode, benchmarkFilter, statusFilter, showParetoOnly, dateSliderDayOffset, selectedCommands]
     );
 
     const areaAxisWidth = useMemo(() => {
@@ -502,6 +557,46 @@ export default function App() {
         if (!currentCommand) return [];
         return points.filter((p) => p.sender === currentCommand.name);
     }, [points, currentCommand]);
+    const paretoTransitionByPointId = useMemo(() => {
+        const transitions = new Map();
+        const frontByBenchmark = new Map();
+        const ordered = [...points]
+            .map((point, index) => ({ point, index }))
+            .sort((lhs, rhs) => {
+                const lhsMs = getPointCreatedAtMs(lhs.point);
+                const rhsMs = getPointCreatedAtMs(rhs.point);
+                if (lhsMs != null && rhsMs != null && lhsMs !== rhsMs) return lhsMs - rhsMs;
+                if (lhsMs != null && rhsMs == null) return -1;
+                if (lhsMs == null && rhsMs != null) return 1;
+                return rhs.index - lhs.index;
+            });
+
+        for (const entry of ordered) {
+            const point = entry.point;
+            const benchmark = String(point?.benchmark || "");
+            const front = frontByBenchmark.get(benchmark) || [];
+            const dominatedByFront = front.some((frontPoint) => dominatesPoint(frontPoint, point));
+            if (dominatedByFront) {
+                transitions.set(point.id, { becameFront: false, replaced: [] });
+                continue;
+            }
+
+            const replaced = front.filter((frontPoint) => dominatesPoint(point, frontPoint));
+            const nextFront = front.filter((frontPoint) => !dominatesPoint(point, frontPoint));
+            nextFront.push(point);
+            frontByBenchmark.set(benchmark, nextFront);
+            transitions.set(point.id, { becameFront: true, replaced });
+        }
+        return transitions;
+    }, [points]);
+    const myNewParetoPointsCount = useMemo(
+        () =>
+            myPoints.reduce((count, point) => {
+                if (paretoTransitionByPointId.get(point.id)?.becameFront) return count + 1;
+                return count;
+            }, 0),
+        [myPoints, paretoTransitionByPointId]
+    );
 
     function clearAllTestNoConfirm() {
         setPoints((prev) => prev.filter((p) => p.benchmark !== "test"));
@@ -555,6 +650,7 @@ export default function App() {
                 sender,
                 status,
                 fileName,
+                createdAt: new Date().toISOString(),
             };
 
             next.push(p);
@@ -931,6 +1027,12 @@ export default function App() {
                         delayViewValid={delayViewValid}
                         areaViewValid={areaViewValid}
                         canApplyView={canApplyView}
+                        dateSliderMaxDays={dateSliderMaxDays}
+                        dateSliderDayOffset={dateSliderDayOffset}
+                        onDateSliderDayOffsetChange={setDateSliderDayOffset}
+                        dateSliderMinLabel={toIsoDateLabel(DATE_SLIDER_MIN_UTC_MS)}
+                        dateSliderCurrentLabel={dateSliderCurrentLabel}
+                        dateSliderMaxLabel={dateSliderMaxLabel}
                         onFitViewToPareto={fitViewToPareto}
                         onFitViewToAllVisiblePoints={fitViewToAllVisiblePoints}
                         truthTableOn={truthTableOn}
@@ -947,6 +1049,8 @@ export default function App() {
                         onFocusPoint={focusPoint}
                         onDownloadCircuit={downloadCircuit}
                         getPointDownloadUrl={getPointDownloadUrl}
+                        paretoTransitionByPointId={paretoTransitionByPointId}
+                        myNewParetoPointsCount={myNewParetoPointsCount}
                     />
                 </div>
 
@@ -970,6 +1074,8 @@ export default function App() {
                         removeSelectedCommand={removeSelectedCommand}
                         statusFilter={statusFilter}
                         toggleStatus={toggleStatus}
+                        showParetoOnly={showParetoOnly}
+                        onShowParetoOnlyChange={setShowParetoOnly}
                     />
 
                     <AddPointSection
@@ -1127,11 +1233,14 @@ export default function App() {
                             closeBulkIdenticalApplyModal={closeBulkIdenticalApplyModal}
                             bulkVerifyCandidates={bulkVerifyCandidates}
                             isBulkVerifyApplyModalOpen={isBulkVerifyApplyModalOpen}
+                            isBulkVerifyApplying={isBulkVerifyApplying}
+                            bulkVerifyApplyProgress={bulkVerifyApplyProgress}
                             setBulkVerifyCandidateChecked={setBulkVerifyCandidateChecked}
                             selectAllBulkVerifyCandidates={selectAllBulkVerifyCandidates}
                             clearAllBulkVerifyCandidates={clearAllBulkVerifyCandidates}
                             applySelectedBulkVerifyCandidates={applySelectedBulkVerifyCandidates}
                             closeBulkVerifyApplyModal={closeBulkVerifyApplyModal}
+                            bulkIdenticalApplyProgress={bulkIdenticalApplyProgress}
                         />
                     ) : null}
 
@@ -1181,6 +1290,7 @@ export default function App() {
                 onApply={applyManualRows}
                 onClose={closeManualApplyModal}
                 isApplying={isManualApplying}
+                applyProgress={manualApplyProgress}
             />
 
             {navigateNotice ? (

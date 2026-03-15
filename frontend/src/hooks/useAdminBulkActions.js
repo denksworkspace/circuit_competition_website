@@ -31,6 +31,8 @@ export function useAdminBulkActions({
     const [bulkMetricsAuditProgress, setBulkMetricsAuditProgress] = useState(null);
     const [bulkVerifyCandidates, setBulkVerifyCandidates] = useState(() => []);
     const [isBulkVerifyApplyModalOpen, setIsBulkVerifyApplyModalOpen] = useState(false);
+    const [isBulkVerifyApplying, setIsBulkVerifyApplying] = useState(false);
+    const [bulkVerifyApplyProgress, setBulkVerifyApplyProgress] = useState(null);
     const [isBulkIdenticalAuditRunning, setIsBulkIdenticalAuditRunning] = useState(false);
     const [bulkIdenticalAuditSummary, setBulkIdenticalAuditSummary] = useState(null);
     const [bulkIdenticalAuditLogText, setBulkIdenticalAuditLogText] = useState("");
@@ -39,6 +41,7 @@ export function useAdminBulkActions({
     const [bulkIdenticalGroups, setBulkIdenticalGroups] = useState(() => []);
     const [isBulkIdenticalApplyModalOpen, setIsBulkIdenticalApplyModalOpen] = useState(false);
     const [isBulkIdenticalApplying, setIsBulkIdenticalApplying] = useState(false);
+    const [bulkIdenticalApplyProgress, setBulkIdenticalApplyProgress] = useState(null);
     const [bulkIdenticalPickerGroupId, setBulkIdenticalPickerGroupId] = useState("");
 
     const bulkVerifyAbortRef = useRef(null);
@@ -141,6 +144,8 @@ export function useAdminBulkActions({
                     status: row.recommendedStatus,
                     benchmark: row.benchmark,
                     fileName: row.fileName,
+                    verdict: row.recommendedStatus,
+                    reason: String(row.reason || ""),
                     checked: true,
                 }));
 
@@ -351,6 +356,7 @@ export function useAdminBulkActions({
         if (isBulkIdenticalApplying) return;
         setBulkIdenticalPickerGroupId("");
         setIsBulkIdenticalApplyModalOpen(false);
+        setBulkIdenticalApplyProgress(null);
     }
 
     async function applySelectedBulkIdenticalGroups() {
@@ -380,24 +386,34 @@ export function useAdminBulkActions({
         }
 
         setIsBulkIdenticalApplying(true);
+        setBulkIdenticalApplyProgress({ processed: 0, total: resolutions.length });
         setAdminPanelError("");
         try {
-            const result = await applyAdminIdenticalResolutions({
-                authKey: authKeyDraft,
-                resolutions,
-            });
+            let appliedGroups = 0;
+            let deletedPoints = 0;
+            for (let index = 0; index < resolutions.length; index += 1) {
+                const resolution = resolutions[index];
+                const result = await applyAdminIdenticalResolutions({
+                    authKey: authKeyDraft,
+                    resolutions: [resolution],
+                });
+                appliedGroups += Number(result?.appliedGroups || 0);
+                deletedPoints += Number(result?.deletedPoints || 0);
+                setBulkIdenticalApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
+            }
             const freshPoints = await fetchPoints();
             setPoints(freshPoints);
             setIsBulkIdenticalApplyModalOpen(false);
             setBulkIdenticalPickerGroupId("");
             setBulkIdenticalGroups([]);
             window.alert(
-                `Identical groups applied: ${Number(result?.appliedGroups || 0)}. Deleted points: ${Number(result?.deletedPoints || 0)}.`
+                `Identical groups applied: ${appliedGroups}. Deleted points: ${deletedPoints}.`
             );
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to apply identical points resolutions.");
         } finally {
             setIsBulkIdenticalApplying(false);
+            setBulkIdenticalApplyProgress(null);
         }
     }
 
@@ -432,7 +448,9 @@ export function useAdminBulkActions({
     }
 
     function closeBulkVerifyApplyModal() {
+        if (isBulkVerifyApplying) return;
         setIsBulkVerifyApplyModalOpen(false);
+        setBulkVerifyApplyProgress(null);
     }
 
     async function applySelectedBulkVerifyCandidates() {
@@ -444,27 +462,43 @@ export function useAdminBulkActions({
             return;
         }
 
-        setIsBulkVerifyRunning(true);
+        setIsBulkVerifyApplying(true);
+        setBulkVerifyApplyProgress({ processed: 0, total: updates.length });
         setAdminPanelError("");
         try {
             const normalizedChecker = normalizeCheckerForActor(selectedBulkVerifyChecker);
             const checkerVersion = enabledCheckers.has(normalizedChecker)
                 ? normalizedChecker
                 : defaultCheckerVersion;
-            await applyAdminPointStatuses({
-                authKey: authKeyDraft,
-                updates,
-                checkerVersion,
-            });
+            const errors = [];
+            for (let index = 0; index < updates.length; index += 1) {
+                const update = updates[index];
+                try {
+                    await applyAdminPointStatuses({
+                        authKey: authKeyDraft,
+                        updates: [update],
+                        checkerVersion,
+                    });
+                } catch (error) {
+                    errors.push(String(error?.message || `Failed to apply status for point ${update.pointId}.`));
+                } finally {
+                    setBulkVerifyApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
+                }
+            }
             const freshPoints = await fetchPoints();
             setPoints(freshPoints);
             setIsBulkVerifyApplyModalOpen(false);
             setBulkVerifyCandidates([]);
-            window.alert(`Applied statuses for ${updates.length} points.`);
+            if (errors.length > 0) {
+                setAdminPanelError(errors[0]);
+            } else {
+                window.alert(`Applied statuses for ${updates.length} points.`);
+            }
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to apply statuses.");
         } finally {
-            setIsBulkVerifyRunning(false);
+            setIsBulkVerifyApplying(false);
+            setBulkVerifyApplyProgress(null);
         }
     }
 
@@ -483,6 +517,8 @@ export function useAdminBulkActions({
         bulkMetricsAuditProgress,
         bulkVerifyCandidates,
         isBulkVerifyApplyModalOpen,
+        isBulkVerifyApplying,
+        bulkVerifyApplyProgress,
         isBulkIdenticalAuditRunning,
         bulkIdenticalAuditSummary,
         bulkIdenticalAuditLogText,
@@ -491,6 +527,7 @@ export function useAdminBulkActions({
         bulkIdenticalGroups,
         isBulkIdenticalApplyModalOpen,
         isBulkIdenticalApplying,
+        bulkIdenticalApplyProgress,
         bulkIdenticalPickerGroupId,
         runBulkVerifyAllPoints,
         runBulkMetricsAudit,

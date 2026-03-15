@@ -16,7 +16,7 @@ import { normalizeCheckerVersion } from "./_lib/pointVerification.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 
 function normalizeParserSelection(raw) {
-    return String(raw || "").trim().toUpperCase() === "ABC" ? "ABC" : "none";
+    return String(raw || "").trim().toUpperCase() === "ABC" ? "ABC" : null;
 }
 
 function parseTimeoutSeconds(raw, fallback, cap) {
@@ -45,6 +45,10 @@ export default async function handler(req, res) {
     }
     if (files.length < 1) {
         res.status(400).json({ error: "At least one file is required." });
+        return;
+    }
+    if (!selectedParser) {
+        res.status(400).json({ error: "Parser must be ABC." });
         return;
     }
     if (!getQueueBucketName()) {

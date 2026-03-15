@@ -46,8 +46,7 @@ function buildUploadLogText(files) {
             const success = Boolean(row?.applied);
             const verdict = hasManualVerdictPending(row) ? "waiting manual verdict" : String(row?.verdict || "pending");
             const reason = String(row?.verdictReason || "").trim();
-            const tail = reason ? `verdict=${verdict}; ${reason}` : `verdict=${verdict}`;
-            return `file=${String(row?.originalFileName || "unknown")}; success=${success ? "true" : "false"}; reason=${tail}`;
+            return `file=${String(row?.originalFileName || "unknown")}; success=${success ? "true" : "false"}; verdict=${verdict}; reason=${reason || "-"}`;
         });
     return rows.join("\n");
 }
@@ -252,6 +251,7 @@ export function useBenchUploadFlow({
     const [manualApplyRows, setManualApplyRows] = useState(() => []);
     const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
     const [isManualApplying, setIsManualApplying] = useState(false);
+    const [manualApplyProgress, setManualApplyProgress] = useState(null);
 
     const uploadAbortRef = useRef(null);
     const activeRequestIdRef = useRef("");
@@ -336,6 +336,7 @@ export function useBenchUploadFlow({
         setUploadProgress(null);
         setUploadLiveRows([]);
         setManualApplyRows([]);
+        setManualApplyProgress(null);
         setIsManualApplyOpen(false);
     }, []);
 
@@ -607,21 +608,38 @@ export function useBenchUploadFlow({
         const selected = manualApplyRows.filter((row) => row.checked && !row.disabled).map((row) => row.fileId);
 
         setIsManualApplying(true);
+        setManualApplyProgress({ processed: 0, total: selected.length });
         try {
-            const applied = await applyPointsUploadRequestFiles({
-                authKey: authKeyDraft,
-                requestId: activeRequestIdRef.current,
-                fileIds: selected,
-            });
-            updateStateFromSnapshot(applied);
+            const errors = [];
+            let processed = 0;
+            for (const fileId of selected) {
+                if (!activeRequestIdRef.current) break;
+                try {
+                    const applied = await applyPointsUploadRequestFiles({
+                        authKey: authKeyDraft,
+                        requestId: activeRequestIdRef.current,
+                        fileIds: [fileId],
+                    });
+                    updateStateFromSnapshot(applied);
+                    if ((applied?.errors || []).length > 0) {
+                        errors.push(...applied.errors.map((message) => String(message || "Failed to apply selected file.")));
+                    }
+                } catch (error) {
+                    errors.push(String(error?.message || "Failed to apply selected file."));
+                } finally {
+                    processed += 1;
+                    setManualApplyProgress((prev) => (prev ? { ...prev, processed } : prev));
+                }
+            }
             await refreshPointsAfterRequest();
-            if ((applied?.errors || []).length > 0) {
-                setUploadError(String(applied.errors[0] || "Failed to apply selected files."));
+            if (errors.length > 0) {
+                setUploadError(errors[0]);
             } else {
                 setUploadError(" ");
             }
         } finally {
             setIsManualApplying(false);
+            setManualApplyProgress(null);
         }
     }
 
@@ -727,6 +745,7 @@ export function useBenchUploadFlow({
         manualApplyRows,
         isManualApplyOpen,
         isManualApplying,
+        manualApplyProgress,
         showManualApplyButton: manualApplyRows.length > 0 && !isManualApplyOpen,
         openManualApplyModal,
         onFileChange,

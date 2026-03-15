@@ -5,6 +5,7 @@ export function ManualPointApplyModal({
     onApply,
     onClose,
     isApplying,
+    applyProgress,
 }) {
     if (!open) return null;
 
@@ -30,8 +31,8 @@ export function ManualPointApplyModal({
                             <span>
                                 Add point with bench={row.bench}, delay={row.delay}, area={row.area}, status={row.statusLabel}
                                 {row.verdict ? `, detected verdict=${row.verdict}` : ""}
-                                {row.verdictReason ? ` (${row.verdictReason})` : ""} to the chart?
-                                {row.reason ? ` ${row.reason}` : ""}
+                                {row.verdictReason ? `, reason=${row.verdictReason}` : ""}
+                                {row.reason ? `, source=${row.reason}` : ""}?
                             </span>
                         </label>
                     ))}
@@ -42,6 +43,11 @@ export function ManualPointApplyModal({
                         {isApplying ? "Applying..." : "Apply"}
                     </button>
                 </div>
+                {isApplying && applyProgress ? (
+                    <div className="cardHint">
+                        processed {Number(applyProgress.processed || 0)} / {Number(applyProgress.total || 0)}
+                    </div>
+                ) : null}
             </div>
         </div>
     );
