@@ -7,6 +7,7 @@ import {
     closePointsUploadRequest,
     createPointsUploadRequest,
     fetchActivePointsUploadRequest,
+    fetchPointsUploadRequestStatus,
     fetchPoints,
     runPointsUploadRequest,
     stopPointsUploadRequest,
@@ -255,8 +256,14 @@ export function useBenchUploadFlow({
 
     const uploadAbortRef = useRef(null);
     const activeRequestIdRef = useRef("");
+    const isPreRunUploadRef = useRef(false);
+    const hiddenRequestIdRef = useRef("");
     const dismissedManualRequestIdRef = useRef("");
-    const activeRequestMissingPollsRef = useRef(0);
+    const pollGenerationRef = useRef(0);
+    const lastSnapshotRef = useRef({ request: null, files: [] });
+    const pollTimerRef = useRef(null);
+    const pollInFlightControllerRef = useRef(null);
+    const pollLoopRef = useRef(null);
     const isPageUnloadingRef = useRef(false);
 
     useEffect(() => {
@@ -320,6 +327,25 @@ export function useBenchUploadFlow({
         return parsePosIntCapped(parserTleSecondsDraft, metricsTimeoutQuotaSeconds);
     }
 
+    function bumpPollGeneration() {
+        pollGenerationRef.current += 1;
+        return pollGenerationRef.current;
+    }
+
+    const wakePolling = useCallback(() => {
+        if (pollTimerRef.current) {
+            clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
+        if (pollInFlightControllerRef.current) {
+            pollInFlightControllerRef.current.abort();
+            pollInFlightControllerRef.current = null;
+        }
+        if (typeof pollLoopRef.current === "function") {
+            void pollLoopRef.current();
+        }
+    }, []);
+
     const refreshPointsAfterRequest = useCallback(async () => {
         try {
             const rows = await fetchPoints(authKeyDraft);
@@ -332,7 +358,7 @@ export function useBenchUploadFlow({
         }
     }, [authKeyDraft, setLastAddedId, setPoints]);
 
-    const resetBlockingRequestState = useCallback(() => {
+    const clearVisibleBlockingRequestState = useCallback(() => {
         activeRequestIdRef.current = "";
         setBlockingRequestStatus("");
         setUploadProgress(null);
@@ -345,11 +371,16 @@ export function useBenchUploadFlow({
     const updateStateFromSnapshot = useCallback((snapshot) => {
         const request = snapshot?.request || null;
         const files = Array.isArray(snapshot?.files) ? snapshot.files : [];
+        lastSnapshotRef.current = { request, files };
         if (!request) {
+            if (isPreRunUploadRef.current) {
+                return;
+            }
             dismissedManualRequestIdRef.current = "";
+            hiddenRequestIdRef.current = "";
             setIsUploading(false);
             setIsUploadStopping(false);
-            resetBlockingRequestState();
+            clearVisibleBlockingRequestState();
             return;
         }
         const requestId = String(request.id || "");
@@ -362,6 +393,20 @@ export function useBenchUploadFlow({
         const manualRows = runnable ? [] : buildManualRows(files);
         const hasPendingManualVerdict = manualRows.length > 0;
         const shouldKeepMonitor = runnable || hasPendingManualVerdict;
+        const hiddenRequestId = String(hiddenRequestIdRef.current || "");
+        const isHiddenRequest = hiddenRequestId && hiddenRequestId === requestId;
+
+        if (isHiddenRequest) {
+            // Keep polling this request in background while close/apply finalization settles,
+            // but do not re-open monitor/modal from stale snapshots.
+            setIsUploading(false);
+            setIsUploadStopping(false);
+            clearVisibleBlockingRequestState();
+            if (!runnable && !hasPendingManualVerdict) {
+                hiddenRequestIdRef.current = "";
+            }
+            return;
+        }
 
         if (shouldKeepMonitor) {
             activeRequestIdRef.current = requestId;
@@ -377,7 +422,7 @@ export function useBenchUploadFlow({
             });
             setUploadLiveRows(buildLiveRows(files));
         } else {
-            resetBlockingRequestState();
+            clearVisibleBlockingRequestState();
         }
 
         setIsUploading(runnable);
@@ -401,12 +446,12 @@ export function useBenchUploadFlow({
         } else {
             setUploadError(" ");
         }
-    }, [resetBlockingRequestState]);
+    }, [clearVisibleBlockingRequestState]);
 
     async function requestStopUpload() {
         if (!isUploading || !activeRequestIdRef.current) return;
         setIsUploadStopping(true);
-        setUploadError("Stopping upload after current step...");
+        setUploadError("Stopping upload...");
         try {
             await stopPointsUploadRequest({
                 authKey: authKeyDraft,
@@ -453,6 +498,10 @@ export function useBenchUploadFlow({
 
         setIsUploading(true);
         setIsUploadStopping(false);
+        isPreRunUploadRef.current = true;
+        hiddenRequestIdRef.current = "";
+        dismissedManualRequestIdRef.current = "";
+        bumpPollGeneration();
         setBlockingRequestStatus("queued");
         setUploadProgress({
             done: 0,
@@ -492,6 +541,8 @@ export function useBenchUploadFlow({
                 throw new Error("Failed to create upload request.");
             }
             activeRequestIdRef.current = requestId;
+            isPreRunUploadRef.current = false;
+            wakePolling();
 
             const uploadRows = Array.isArray(created?.files) ? created.files : [];
             if (uploadRows.length !== benchFiles.length) {
@@ -546,6 +597,7 @@ export function useBenchUploadFlow({
             setDescriptionDraft("");
             clearFileInput();
         } catch (err) {
+            isPreRunUploadRef.current = false;
             if (err?.name === "AbortError") {
                 setUploadError("Upload stopped.");
             } else {
@@ -557,6 +609,7 @@ export function useBenchUploadFlow({
                 setBlockingRequestStatus("");
             }
         } finally {
+            isPreRunUploadRef.current = false;
             if (uploadAbortRef.current === controller) {
                 uploadAbortRef.current = null;
             }
@@ -619,6 +672,8 @@ export function useBenchUploadFlow({
             await closeManualApplyModal({ skipConfirm: true });
             return;
         }
+        bumpPollGeneration();
+        wakePolling();
         dismissedManualRequestIdRef.current = "";
 
         setIsManualApplying(true);
@@ -664,18 +719,31 @@ export function useBenchUploadFlow({
             if (!ok) return;
         }
         const requestId = activeRequestIdRef.current;
-        dismissedManualRequestIdRef.current = String(requestId || "");
+        const normalizedRequestId = String(requestId || "");
+        dismissedManualRequestIdRef.current = normalizedRequestId;
+        hiddenRequestIdRef.current = normalizedRequestId;
+        bumpPollGeneration();
+        wakePolling();
         setIsManualApplyOpen(false);
         setManualApplyRows([]);
-        resetBlockingRequestState();
+        clearVisibleBlockingRequestState();
         setUploadError(" ");
         if (requestId) {
             try {
-                await closePointsUploadRequest({
+                const closed = await closePointsUploadRequest({
                     authKey: authKeyDraft,
                     requestId,
                 });
+                updateStateFromSnapshot(closed);
             } catch {
+                hiddenRequestIdRef.current = "";
+                dismissedManualRequestIdRef.current = "";
+                const fallbackSnapshot = lastSnapshotRef.current;
+                const fallbackRequestId = String(fallbackSnapshot?.request?.id || "");
+                if (fallbackRequestId && fallbackRequestId === normalizedRequestId) {
+                    updateStateFromSnapshot(fallbackSnapshot);
+                    setIsManualApplyOpen(true);
+                }
                 setUploadError("Failed to close manual verdict request.");
             }
         }
@@ -685,58 +753,143 @@ export function useBenchUploadFlow({
         const authKey = String(authKeyDraft || "").trim();
         if (!authKey || !currentCommand) return;
         let cancelled = false;
-        let timer = null;
-        let inFlightController = null;
+        const scheduleByCurrentState = () => {
+            const delay = (hiddenRequestIdRef.current || activeRequestIdRef.current)
+                ? ACTIVE_QUEUE_STATUS_POLL_MS
+                : IDLE_QUEUE_CHECK_MS;
+            scheduleNext(delay);
+        };
+        const scheduleNext = (ms) => {
+            if (cancelled) return;
+            if (pollTimerRef.current) {
+                clearTimeout(pollTimerRef.current);
+            }
+            pollTimerRef.current = setTimeout(() => {
+                void poll();
+            }, ms);
+        };
+        const isStalePoll = (generation) => cancelled || generation !== pollGenerationRef.current;
         const poll = async () => {
             if (cancelled) return;
+            const generation = pollGenerationRef.current;
             const controller = new AbortController();
-            inFlightController = controller;
+            pollInFlightControllerRef.current = controller;
             try {
+                const hiddenRequestId = String(hiddenRequestIdRef.current || "");
+                const trackedRequestId = String(activeRequestIdRef.current || "");
+                if (hiddenRequestId) {
+                    try {
+                        const hiddenSnapshot = await fetchPointsUploadRequestStatus({
+                            authKey,
+                            requestId: hiddenRequestId,
+                            signal: controller.signal,
+                        });
+                        if (isStalePoll(generation)) {
+                            scheduleByCurrentState();
+                            return;
+                        }
+                        const status = String(hiddenSnapshot?.request?.status || "").toLowerCase();
+                        const hasManual = buildManualRows(hiddenSnapshot?.files || []).length > 0;
+                        if (!status || (!isRunnableRequestStatus(status) && !hasManual)) {
+                            hiddenRequestIdRef.current = "";
+                        }
+                        scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
+                    } catch (error) {
+                        if (isStalePoll(generation)) {
+                            scheduleByCurrentState();
+                            return;
+                        }
+                        if (Number(error?.code || 0) === 404) {
+                            hiddenRequestIdRef.current = "";
+                            updateStateFromSnapshot({ request: null, files: [] });
+                            scheduleNext(IDLE_QUEUE_CHECK_MS);
+                            return;
+                        }
+                        scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
+                    }
+                    return;
+                }
+
+                if (trackedRequestId) {
+                    try {
+                        const trackedSnapshot = await fetchPointsUploadRequestStatus({
+                            authKey,
+                            requestId: trackedRequestId,
+                            signal: controller.signal,
+                        });
+                        if (isStalePoll(generation)) {
+                            scheduleByCurrentState();
+                            return;
+                        }
+                        updateStateFromSnapshot(trackedSnapshot);
+                        const status = String(trackedSnapshot?.request?.status || "").toLowerCase();
+                        const hasRunnableRequest = Boolean(trackedSnapshot?.request?.id) && isRunnableRequestStatus(status);
+                        const hasBlockingRequest = Boolean(trackedSnapshot?.request?.id);
+                        scheduleNext(hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS);
+                        if (!hasRunnableRequest && status !== FREEZED_REQUEST_STATUS) {
+                            setIsUploadStopping(false);
+                        }
+                    } catch (error) {
+                        if (isStalePoll(generation)) {
+                            scheduleByCurrentState();
+                            return;
+                        }
+                        if (Number(error?.code || 0) === 404) {
+                            updateStateFromSnapshot({ request: null, files: [] });
+                            scheduleNext(IDLE_QUEUE_CHECK_MS);
+                            return;
+                        }
+                        scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
+                    }
+                    return;
+                }
+
                 const active = await fetchActivePointsUploadRequest({
                     authKey,
                     signal: controller.signal,
                 });
-                if (cancelled) return;
-                const hasServerRequest = Boolean(active?.request?.id);
-                const hasLocalBlockingRequest = Boolean(activeRequestIdRef.current);
-                if (!hasServerRequest && hasLocalBlockingRequest) {
-                    activeRequestMissingPollsRef.current += 1;
-                    const nextDelay = activeRequestMissingPollsRef.current >= 3 ? ACTIVE_QUEUE_STATUS_POLL_MS : 600;
-                    timer = setTimeout(() => {
-                        void poll();
-                    }, nextDelay);
+                if (isStalePoll(generation)) {
+                    scheduleByCurrentState();
                     return;
                 }
-                activeRequestMissingPollsRef.current = 0;
                 updateStateFromSnapshot(active);
                 const status = String(active?.request?.status || "").toLowerCase();
                 const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
                 const hasBlockingRequest = Boolean(active?.request?.id);
-                const nextDelay = hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS;
-                timer = setTimeout(() => {
-                    void poll();
-                }, nextDelay);
+                scheduleNext(hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS);
                 if (!hasRunnableRequest && status !== FREEZED_REQUEST_STATUS) {
                     setIsUploadStopping(false);
                 }
             } catch {
                 if (cancelled) return;
-                const retryDelay = activeRequestIdRef.current ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS;
-                timer = setTimeout(() => {
-                    void poll();
-                }, retryDelay);
+                if (isStalePoll(generation)) {
+                    scheduleByCurrentState();
+                    return;
+                }
+                const retryDelay = (hiddenRequestIdRef.current || activeRequestIdRef.current)
+                    ? ACTIVE_QUEUE_STATUS_POLL_MS
+                    : IDLE_QUEUE_CHECK_MS;
+                scheduleNext(retryDelay);
             } finally {
-                if (inFlightController === controller) {
-                    inFlightController = null;
+                if (pollInFlightControllerRef.current === controller) {
+                    pollInFlightControllerRef.current = null;
                 }
             }
         };
+        pollLoopRef.current = poll;
         void poll();
 
         return () => {
             cancelled = true;
-            if (timer) clearTimeout(timer);
-            if (inFlightController) inFlightController.abort();
+            if (pollTimerRef.current) {
+                clearTimeout(pollTimerRef.current);
+                pollTimerRef.current = null;
+            }
+            if (pollInFlightControllerRef.current) {
+                pollInFlightControllerRef.current.abort();
+                pollInFlightControllerRef.current = null;
+            }
+            pollLoopRef.current = null;
         };
     }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
 

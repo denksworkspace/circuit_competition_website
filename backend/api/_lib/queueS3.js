@@ -100,6 +100,9 @@ export async function downloadQueueFileText(objectKey, { signal = null } = {}) {
         }
         return { ok: true, circuitText: await response.text() };
     } catch (error) {
+        if (error?.name === "AbortError" || error?.code === "ABORT_ERR" || signal?.aborted) {
+            return { ok: false, aborted: true, reason: "Queue file download was aborted." };
+        }
         return { ok: false, reason: String(error?.message || "Failed to download queue file.") };
     }
 }

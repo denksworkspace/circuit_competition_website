@@ -53,7 +53,7 @@ export async function verifyCircuitWithTruth({
         };
     }
 
-    const truthRes = await fetch(truth.downloadUrl);
+    const truthRes = await fetch(truth.downloadUrl, signal ? { signal } : undefined);
     if (!truthRes.ok) {
         return {
             ok: false,

@@ -39,7 +39,20 @@ function isParserNonVerdictReason(reasonRaw) {
     );
 }
 
-async function runParser({ circuitText, originalFileName, timeoutMs, reportPhase }) {
+function toAbortError(message = "Upload processing aborted.") {
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+}
+
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        throw toAbortError();
+    }
+}
+
+async function runParser({ circuitText, originalFileName, timeoutMs, reportPhase, signal }) {
+    throwIfAborted(signal);
     const parsed = parseInputBenchFileName(originalFileName);
     if (!parsed.ok) {
         return {
@@ -50,7 +63,10 @@ async function runParser({ circuitText, originalFileName, timeoutMs, reportPhase
     }
 
     reportPhase("parser");
-    const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs });
+    const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs, signal });
+    if (!stats.ok && (signal?.aborted || String(stats.code || "").toUpperCase() === "ABC_ABORTED")) {
+        throw toAbortError();
+    }
     if (!stats.ok) {
         const reason = stats.message || "Failed to compute metrics with ABC.";
         return {
@@ -97,7 +113,9 @@ async function runChecker({
     timeoutMs,
     timeoutSeconds,
     reportPhase,
+    signal,
 }) {
+    throwIfAborted(signal);
     if (!enabled) {
         return {
             checkerVerdict: null,
@@ -112,7 +130,11 @@ async function runChecker({
         checkerVersion,
         timeoutMs,
         timeoutSeconds,
+        signal,
     });
+    if (!verify.ok && (signal?.aborted || String(verify.code || "").toUpperCase() === "ABC_ABORTED")) {
+        throw toAbortError();
+    }
     if (!verify.ok) {
         return {
             checkerVerdict: null,
@@ -145,7 +167,7 @@ function readAwsConfig() {
     };
 }
 
-async function uploadPointFileToPrimaryBucket(fileName, circuitText) {
+async function uploadPointFileToPrimaryBucket(fileName, circuitText, { signal = null } = {}) {
     const { accessKeyId, secretAccessKey, sessionToken, region, bucket } = readAwsConfig();
     if (!accessKeyId || !secretAccessKey || !region || !bucket) {
         throw new Error("S3 configuration is not complete.");
@@ -159,10 +181,13 @@ async function uploadPointFileToPrimaryBucket(fileName, circuitText) {
         objectKey: `points/${fileName}`,
         expiresSeconds: 900,
     });
+    throwIfAborted(signal);
     const response = await fetch(uploadUrl, {
         method: "PUT",
+        ...(signal ? { signal } : {}),
         body: circuitText,
     });
+    throwIfAborted(signal);
     if (!response.ok) {
         throw new Error("Failed to upload file to primary S3 bucket.");
     }
@@ -174,6 +199,7 @@ export async function processUploadQueueFile({
     command,
     circuitText,
     reportPhase = () => {},
+    signal = null,
 }) {
     const parserSelection = normalizeParserSelection(requestRow.selectedParser);
     const checkerSelection = normalizeCheckerSelection(requestRow.selectedChecker);
@@ -189,6 +215,7 @@ export async function processUploadQueueFile({
             originalFileName: fileRow.originalFileName,
             timeoutMs: parserTimeoutMs,
             reportPhase,
+            signal,
         })
         : {
             parserKind: "pass",
@@ -213,6 +240,7 @@ export async function processUploadQueueFile({
         };
     }
 
+    throwIfAborted(signal);
     const checkerOut = await runChecker({
         enabled: checkerEnabled,
         checkerVersion: checkerSelection,
@@ -221,8 +249,10 @@ export async function processUploadQueueFile({
         timeoutMs: checkerTimeoutSeconds * 1000,
         timeoutSeconds: checkerTimeoutSeconds,
         reportPhase,
+        signal,
     });
 
+    throwIfAborted(signal);
     const finalStatus = computeFinalStatus({
         parserKind: parserOut.parserKind,
         checkerEnabled,
@@ -235,6 +265,7 @@ export async function processUploadQueueFile({
         area: parserOut.parsed.area,
         circuitText,
     });
+    throwIfAborted(signal);
     let verdict = finalStatus;
     let verdictReason = "";
     if (duplicateCheck.blockedByCheckError) {
@@ -273,7 +304,8 @@ export async function processUploadQueueFile({
             sender: command.name,
             pointId,
         });
-        await uploadPointFileToPrimaryBucket(finalFileName, circuitText);
+        await uploadPointFileToPrimaryBucket(finalFileName, circuitText, { signal });
+        throwIfAborted(signal);
         const created = await createPointForCommand({
             command,
             id: pointId,

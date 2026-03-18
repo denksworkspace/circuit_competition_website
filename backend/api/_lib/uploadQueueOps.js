@@ -4,6 +4,7 @@ import { withDbRetry } from "./dbRetry.js";
 import {
     FILE_PROCESS_STATE_NON_PROCESSED,
     FILE_PROCESS_STATE_PENDING,
+    FILE_PROCESS_STATE_PROCESSING,
     FILE_VERDICT_NON_PROCESSED,
     REQUEST_STATUS_COMPLETED,
     REQUEST_STATUS_FREEZED,
@@ -12,7 +13,6 @@ import {
     REQUEST_STATUS_WAITING_MANUAL_VERDICT,
     normalizeUploadRequestFileRow,
     normalizeUploadRequestRow,
-    isActiveRequestStatus,
 } from "./uploadQueue.js";
 
 export async function getCommandByAuthKey(authKey) {
@@ -93,13 +93,19 @@ export async function refreshUploadRequestCounters(requestId) {
     `);
 }
 
-export async function markRemainingAsNonProcessed(requestId) {
+export async function markRemainingAsNonProcessed(
+    requestId,
+    {
+        includeProcessing = false,
+        reason = "Upload was interrupted before processing.",
+    } = {}
+) {
     await withDbRetry(() => sql`
       update upload_request_files
       set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
           verdict = ${FILE_VERDICT_NON_PROCESSED},
           verdict_reason = case
-              when coalesce(verdict_reason, '') = '' then 'Upload was interrupted before processing.'
+              when coalesce(verdict_reason, '') = '' then ${String(reason || "Upload was interrupted before processing.")}
               else verdict_reason
           end,
           can_apply = false,
@@ -107,7 +113,13 @@ export async function markRemainingAsNonProcessed(requestId) {
           updated_at = now(),
           processed_at = now()
       where request_id = ${requestId}
-        and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}
+        and (
+            lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}
+            or (
+                ${Boolean(includeProcessing)}::boolean
+                and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PROCESSING}
+            )
+        )
     `);
     await refreshUploadRequestCounters(requestId);
     await withDbRetry(() => sql`
@@ -121,6 +133,17 @@ export async function markRemainingAsNonProcessed(requestId) {
     `);
 }
 
+export async function isUploadStopRequested(requestId) {
+    const requestRes = await withDbRetry(() => sql`
+      select stop_requested
+      from upload_requests
+      where id = ${requestId}
+      limit 1
+    `);
+    if (requestRes.rows.length === 0) return false;
+    return Boolean(requestRes.rows[0]?.stop_requested);
+}
+
 export async function findLatestBlockingUploadRequest(commandId) {
     const requestRes = await withDbRetry(() => sql`
       select
@@ -128,13 +151,26 @@ export async function findLatestBlockingUploadRequest(commandId) {
         upload_requests.status
       from upload_requests
       where command_id = ${commandId}
-      order by created_at desc
-      limit 20
+        and lower(coalesce(upload_requests.status, '')) in (
+            'queued',
+            'processing',
+            'freezed',
+            'waiting_manual_verdict'
+        )
+      order by
+        case
+            when lower(coalesce(upload_requests.status, '')) = 'processing' then 0
+            when lower(coalesce(upload_requests.status, '')) = 'queued' then 1
+            when lower(coalesce(upload_requests.status, '')) = 'freezed' then 2
+            when lower(coalesce(upload_requests.status, '')) = 'waiting_manual_verdict' then 3
+            else 4
+        end asc,
+        upload_requests.updated_at desc,
+        upload_requests.created_at desc
+      limit 1
     `);
-    return requestRes.rows.find((row) => (
-        isActiveRequestStatus(row.status)
-        || String(row?.status || "").toLowerCase() === REQUEST_STATUS_WAITING_MANUAL_VERDICT
-    )) || null;
+    if (requestRes.rows.length === 0) return null;
+    return requestRes.rows[0];
 }
 
 export async function findNextPendingUploadFile(requestId) {

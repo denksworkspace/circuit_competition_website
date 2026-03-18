@@ -63,7 +63,10 @@ export async function createPointsUploadRequest({
 export async function fetchActivePointsUploadRequest({ authKey, signal }) {
     const query = new URLSearchParams();
     query.set("authKey", String(authKey || "").trim());
-    const response = await fetch(apiUrl(`/api/points-upload-request-active?${query.toString()}`), { signal });
+    const response = await fetch(apiUrl(`/api/points-upload-request-active?${query.toString()}`), {
+        signal,
+        cache: "no-store",
+    });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
         throw new Error(data?.error || "Failed to fetch active upload request.");
@@ -78,10 +81,15 @@ export async function fetchPointsUploadRequestStatus({ authKey, requestId, signa
     const query = new URLSearchParams();
     query.set("authKey", String(authKey || "").trim());
     query.set("requestId", String(requestId || "").trim());
-    const response = await fetch(apiUrl(`/api/points-upload-request-status?${query.toString()}`), { signal });
+    const response = await fetch(apiUrl(`/api/points-upload-request-status?${query.toString()}`), {
+        signal,
+        cache: "no-store",
+    });
     const data = await parseJsonSafe(response);
     if (!response.ok) {
-        throw new Error(data?.error || "Failed to fetch upload request status.");
+        const error = new Error(data?.error || "Failed to fetch upload request status.");
+        error.code = response.status;
+        throw error;
     }
     return {
         request: data?.request || null,

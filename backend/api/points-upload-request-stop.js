@@ -3,7 +3,7 @@ import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
-import { getCommandByAuthKey, loadUploadRequestSnapshot } from "./_lib/uploadQueueOps.js";
+import { getCommandByAuthKey, loadUploadRequestSnapshot, markRemainingAsNonProcessed } from "./_lib/uploadQueueOps.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -40,10 +40,18 @@ export default async function handler(req, res) {
     await sql`
       update upload_requests
       set stop_requested = true,
+          error = case
+              when lower(coalesce(status, '')) in ('failed', 'closed', 'completed', 'interrupted') then error
+              else 'Upload was interrupted by user.'
+          end,
           updated_at = now()
       where id = ${requestId}
         and command_id = ${command.id}
     `;
+    await markRemainingAsNonProcessed(requestId, {
+        includeProcessing: true,
+        reason: "Upload was interrupted by user.",
+    });
     const ready = await loadUploadRequestSnapshot({
         requestId,
         commandId: command.id,

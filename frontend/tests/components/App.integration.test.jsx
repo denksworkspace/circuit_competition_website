@@ -35,7 +35,14 @@ function installFetchRouter(routes) {
         const method = String(init.method || "GET").toUpperCase();
         const key = `${method} ${url}`;
         const fallbackKey = `* ${url}`;
-        const handler = routes[key] || routes[fallbackKey];
+        let handler = routes[key] || routes[fallbackKey];
+
+        if (!handler && method === "GET" && url.startsWith("/api/points-upload-request-status?")) {
+            const parsed = new URL(url, "http://localhost");
+            const authKey = String(parsed.searchParams.get("authKey") || "").trim();
+            const activeUrl = `/api/points-upload-request-active?authKey=${authKey}`;
+            handler = routes[`GET ${activeUrl}`] || routes[`* ${activeUrl}`];
+        }
 
         if (!handler) {
             throw new Error(`Unexpected fetch: ${key}`);
@@ -194,6 +201,93 @@ describe("App integration", () => {
         fireEvent.change(fileInput, { target: { files } });
 
         expect(await screen.findByText(/Too many files selected\. Maximum is 100\./)).toBeInTheDocument();
+    });
+
+    it("shows upload monitor immediately before create request resolves", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        let resolveCreateRequest = null;
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+                points: [],
+            }),
+            "GET /api/points?authKey=key_ok": () => Promise.resolve(jsonResponse(200, { points: [] })),
+            "POST /api/points-upload-request-create": () =>
+                new Promise((resolve) => {
+                    resolveCreateRequest = () => resolve(jsonResponse(201, {
+                        request: {
+                            id: "req_immediate_monitor",
+                            status: "queued",
+                            totalCount: 1,
+                            doneCount: 0,
+                            verifiedCount: 0,
+                            currentFileName: "",
+                            currentPhase: "",
+                        },
+                        files: [
+                            {
+                                fileId: "f_immediate_monitor",
+                                originalFileName: "bench254_15_40.bench",
+                                queueFileKey: "queue/req_immediate_monitor/f_immediate_monitor.bench",
+                                uploadUrl: "https://s3.example/queue-upload-immediate",
+                                method: "PUT",
+                            },
+                        ],
+                    }));
+                }),
+            "PUT https://s3.example/queue-upload-immediate": () =>
+                Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
+            "POST /api/points-upload-request-run": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_immediate_monitor",
+                        status: "processing",
+                        totalCount: 1,
+                        doneCount: 0,
+                        verifiedCount: 0,
+                        currentFileName: "bench254_15_40.bench",
+                        currentPhase: "download",
+                    },
+                    files: [
+                        {
+                            id: "f_immediate_monitor",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processing",
+                            verdict: "pending",
+                            verdictReason: "",
+                            canApply: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        fireEvent.change(await screen.findByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Add a point");
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [new File(["bench data"], "bench254_15_40.bench", { type: "text/plain" })] },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
+
+        expect(await screen.findByText("Live processed")).toBeInTheDocument();
+        expect(await screen.findByText(/adding files to queue\.\.\.\s*0\s*\/\s*1/i)).toBeInTheDocument();
+
+        await waitFor(() => {
+            expect(resolveCreateRequest).toEqual(expect.any(Function));
+        });
+        resolveCreateRequest();
     });
 
     it("uploads valid file and creates point", async () => {
@@ -612,7 +706,65 @@ describe("App integration", () => {
         await waitFor(() => {
             expect(resolveCloseRequest).toEqual(expect.any(Function));
         });
+        await new Promise((resolve) => setTimeout(resolve, 2200));
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
         resolveCloseRequest();
+    });
+
+    it("reopens manual modal with error when close request fails", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_restore_error",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f_restore_error",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+            "POST /api/points-upload-request-close": () =>
+                Promise.resolve(jsonResponse(500, {
+                    error: "close failed",
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        await openManualVerdictModal();
+
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+        await waitFor(() => {
+            expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        });
+
+        expect(await screen.findByText("Failed to close manual verdict request.")).toBeInTheDocument();
+        expect(await screen.findByText("Manual point apply")).toBeInTheDocument();
     });
 
     it("apply without selected manual rows closes request without confirm dialog", async () => {

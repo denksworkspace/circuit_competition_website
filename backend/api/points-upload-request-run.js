@@ -21,6 +21,7 @@ import { isRetryableDbError } from "./_lib/dbRetry.js";
 import {
     findNextPendingUploadFile,
     getCommandByAuthKey,
+    isUploadStopRequested,
     loadUploadRequestSnapshot,
     markRemainingAsNonProcessed,
     refreshUploadRequestCounters,
@@ -30,6 +31,51 @@ import { processUploadQueueFile } from "./_lib/uploadQueueProcessing.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 
 const TERMINAL = new Set([REQUEST_STATUS_COMPLETED, REQUEST_STATUS_INTERRUPTED, REQUEST_STATUS_FAILED, "closed"]);
+const STOP_POLL_MS = Math.max(300, Number(process.env.UPLOAD_QUEUE_STOP_POLL_MS || 1000));
+
+function isAbortLikeError(error) {
+    const name = String(error?.name || "").toLowerCase();
+    const code = String(error?.code || "").toLowerCase();
+    return name === "aborterror" || code === "aborted" || code === "abort_err";
+}
+
+function createAbortError() {
+    const error = new Error("Upload request was stopped.");
+    error.name = "AbortError";
+    return error;
+}
+
+function createStopMonitor(requestId) {
+    const controller = new AbortController();
+    let timer = null;
+    let closed = false;
+    const pollStopRequested = async () => {
+        if (closed || controller.signal.aborted) return;
+        try {
+            const stopRequested = await isUploadStopRequested(requestId);
+            if (stopRequested) {
+                controller.abort();
+                return;
+            }
+        } catch {
+            // keep trying; transient DB errors should not break active processing
+        }
+        timer = setTimeout(() => {
+            void pollStopRequested();
+        }, STOP_POLL_MS);
+    };
+    void pollStopRequested();
+    return {
+        signal: controller.signal,
+        close() {
+            closed = true;
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        },
+    };
+}
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -139,38 +185,43 @@ export default async function handler(req, res) {
         `;
     };
 
-    const downloaded = await downloadQueueFileText(nextFile.queueFileKey);
-    if (!downloaded.ok) {
-        await sql`
-          update upload_request_files
-          set process_state = 'processed',
-              verdict = ${FILE_VERDICT_FAILED},
-              verdict_reason = ${String(downloaded.reason || "Failed to download queue file.")},
-              can_apply = true,
-              default_checked = true,
-              processed_at = now(),
-              updated_at = now()
-          where id = ${nextFile.id}
-        `;
-        await refreshUploadRequestCounters(requestId);
-        await sql`
-          update upload_requests
-          set current_phase = '',
-              current_file_name = '',
-              updated_at = now()
-          where id = ${requestId}
-        `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
-        res.status(200).json(ready);
-        return;
-    }
-
+    const stopMonitor = createStopMonitor(requestId);
     try {
+        const downloaded = await downloadQueueFileText(nextFile.queueFileKey, { signal: stopMonitor.signal });
+        if (!downloaded.ok) {
+            if (downloaded.aborted || stopMonitor.signal.aborted) {
+                throw createAbortError();
+            }
+            await sql`
+              update upload_request_files
+              set process_state = 'processed',
+                  verdict = ${FILE_VERDICT_FAILED},
+                  verdict_reason = ${String(downloaded.reason || "Failed to download queue file.")},
+                  can_apply = true,
+                  default_checked = true,
+                  processed_at = now(),
+                  updated_at = now()
+              where id = ${nextFile.id}
+            `;
+            await refreshUploadRequestCounters(requestId);
+            await sql`
+              update upload_requests
+              set current_phase = '',
+                  current_file_name = '',
+                  updated_at = now()
+              where id = ${requestId}
+            `;
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            res.status(200).json(ready);
+            return;
+        }
+
         const processed = await processUploadQueueFile({
             fileRow: nextFile,
             requestRow: initialRequest,
             command,
             circuitText: downloaded.circuitText,
+            signal: stopMonitor.signal,
             reportPhase: (phase) => {
                 void phaseReporter(phase);
             },
@@ -198,6 +249,35 @@ export default async function handler(req, res) {
         }
         await refreshUploadRequestCounters(requestId);
     } catch (error) {
+        if (isAbortLikeError(error) || stopMonitor.signal.aborted) {
+            await sql`
+              update upload_request_files
+              set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
+                  verdict = ${FILE_VERDICT_NON_PROCESSED},
+                  verdict_reason = ${String(error?.message || "Upload was interrupted by user.")},
+                  can_apply = false,
+                  default_checked = false,
+                  processed_at = now(),
+                  updated_at = now()
+              where id = ${nextFile.id}
+                and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PROCESSING}
+            `;
+            await markRemainingAsNonProcessed(requestId, {
+                includeProcessing: true,
+                reason: "Upload was interrupted by user.",
+            });
+            await sql`
+              update upload_requests
+              set error = ${String(error?.message || "Upload was interrupted by user.")},
+                  current_phase = '',
+                  current_file_name = '',
+                  updated_at = now()
+              where id = ${requestId}
+            `;
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            res.status(200).json(ready);
+            return;
+        }
         if (isRetryableDbError(error)) {
             await sql`
               update upload_request_files
@@ -248,6 +328,8 @@ export default async function handler(req, res) {
         const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
         res.status(200).json(ready);
         return;
+    } finally {
+        stopMonitor.close();
     }
 
     const postRunSnapshot = await loadUploadRequestSnapshot({
