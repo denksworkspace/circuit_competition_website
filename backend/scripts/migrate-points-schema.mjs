@@ -1,5 +1,9 @@
 import { sql } from "@vercel/postgres";
 
+if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
+    process.env.POSTGRES_URL = process.env.DATABASE_URL;
+}
+
 async function migratePointsSchema() {
     await sql`begin`;
     try {

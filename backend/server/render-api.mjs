@@ -228,10 +228,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 await bootstrapEnv();
-await ensurePointsStatusConstraint();
-startUploadQueueWorker();
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => {
     console.log(`Backend listening on :${port}`);
+    void ensurePointsStatusConstraint().catch((error) => {
+        console.error("points status boot init failed", error);
+    });
+    startUploadQueueWorker();
 });
