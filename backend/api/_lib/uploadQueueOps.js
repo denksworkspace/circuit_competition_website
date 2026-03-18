@@ -125,14 +125,7 @@ export async function findLatestBlockingUploadRequest(commandId) {
     const requestRes = await withDbRetry(() => sql`
       select
         upload_requests.id,
-        upload_requests.status,
-        exists(
-            select 1
-            from upload_request_files
-            where upload_request_files.request_id = upload_requests.id
-              and not upload_request_files.applied
-              and upload_request_files.can_apply
-        ) as has_pending_manual_verdict
+        upload_requests.status
       from upload_requests
       where command_id = ${commandId}
       order by created_at desc
@@ -141,7 +134,6 @@ export async function findLatestBlockingUploadRequest(commandId) {
     return requestRes.rows.find((row) => (
         isActiveRequestStatus(row.status)
         || String(row?.status || "").toLowerCase() === REQUEST_STATUS_WAITING_MANUAL_VERDICT
-        || Boolean(row?.has_pending_manual_verdict)
     )) || null;
 }
 

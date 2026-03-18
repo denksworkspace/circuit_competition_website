@@ -78,7 +78,7 @@ export default async function handler(req, res) {
     const blockingRequest = await findLatestBlockingUploadRequest(command.id);
     if (blockingRequest) {
         const blockingStatus = String(blockingRequest.status || "").toLowerCase();
-        const error = blockingStatus === "waiting_manual_verdict" || Boolean(blockingRequest.has_pending_manual_verdict)
+        const error = blockingStatus === "waiting_manual_verdict"
             ? "Previous upload is waiting for manual verdict."
             : "An active upload request is already running.";
         res.status(409).json({ error });
