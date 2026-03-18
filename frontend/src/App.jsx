@@ -951,7 +951,7 @@ export default function App() {
     }
 
     if (maintenanceStatus.activeForUser && !isLocalRuntime) {
-        return <MaintenanceScreen />;
+        return <MaintenanceScreen message={maintenanceStatus.message} />;
     }
 
     const isTestBenchSelected = benchmarkFilter === "test";

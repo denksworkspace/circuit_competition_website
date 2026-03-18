@@ -615,6 +615,75 @@ describe("App integration", () => {
         resolveCloseRequest();
     });
 
+    it("apply without selected manual rows closes request without confirm dialog", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+        const closeCalls = [];
+        window.confirm = vi.fn(() => false);
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_apply_empty",
+                        status: "waiting_manual_verdict",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [
+                        {
+                            id: "f_apply_empty",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "failed",
+                            verdictReason: "checker/parser failed with unknown reason",
+                            canApply: true,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+            "POST /api/points-upload-request-close": () => {
+                closeCalls.push("close-request");
+                return Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_apply_empty",
+                        status: "closed",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                    },
+                    files: [],
+                }));
+            },
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        await openManualVerdictModal();
+
+        const applyButtons = await screen.findAllByRole("button", { name: "Apply" });
+        fireEvent.click(applyButtons[applyButtons.length - 1]);
+
+        await waitFor(() => {
+            expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        });
+        expect(closeCalls).toEqual(["close-request"]);
+        expect(window.confirm).not.toHaveBeenCalled();
+    });
+
     it("opens manual modal only after all files finish processing", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];

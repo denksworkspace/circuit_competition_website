@@ -255,6 +255,8 @@ export function useBenchUploadFlow({
 
     const uploadAbortRef = useRef(null);
     const activeRequestIdRef = useRef("");
+    const dismissedManualRequestIdRef = useRef("");
+    const activeRequestMissingPollsRef = useRef(0);
     const isPageUnloadingRef = useRef(false);
 
     useEffect(() => {
@@ -344,10 +346,15 @@ export function useBenchUploadFlow({
         const request = snapshot?.request || null;
         const files = Array.isArray(snapshot?.files) ? snapshot.files : [];
         if (!request) {
+            dismissedManualRequestIdRef.current = "";
             setIsUploading(false);
             setIsUploadStopping(false);
             resetBlockingRequestState();
             return;
+        }
+        const requestId = String(request.id || "");
+        if (dismissedManualRequestIdRef.current && dismissedManualRequestIdRef.current !== requestId) {
+            dismissedManualRequestIdRef.current = "";
         }
 
         const lowerStatus = String(request.status || "").toLowerCase();
@@ -357,7 +364,7 @@ export function useBenchUploadFlow({
         const shouldKeepMonitor = runnable || hasPendingManualVerdict;
 
         if (shouldKeepMonitor) {
-            activeRequestIdRef.current = String(request.id || "");
+            activeRequestIdRef.current = requestId;
             setBlockingRequestStatus(lowerStatus);
             setUploadProgress({
                 done: Number(request.doneCount || 0),
@@ -379,7 +386,9 @@ export function useBenchUploadFlow({
         }
         setUploadLogText(buildUploadLogText(files));
         setManualApplyRows(manualRows);
-        if (hasPendingManualVerdict && (lowerStatus === "interrupted" || lowerStatus === "failed")) {
+        if (hasPendingManualVerdict
+            && (lowerStatus === "interrupted" || lowerStatus === "failed")
+            && dismissedManualRequestIdRef.current !== requestId) {
             setIsManualApplyOpen(true);
         } else if (!hasPendingManualVerdict) {
             setIsManualApplyOpen(false);
@@ -606,6 +615,11 @@ export function useBenchUploadFlow({
             return;
         }
         const selected = manualApplyRows.filter((row) => row.checked && !row.disabled).map((row) => row.fileId);
+        if (selected.length < 1) {
+            await closeManualApplyModal({ skipConfirm: true });
+            return;
+        }
+        dismissedManualRequestIdRef.current = "";
 
         setIsManualApplying(true);
         setManualApplyProgress({ processed: 0, total: selected.length });
@@ -643,11 +657,14 @@ export function useBenchUploadFlow({
         }
     }
 
-    async function closeManualApplyModal() {
+    async function closeManualApplyModal({ skipConfirm = false } = {}) {
         if (!isManualApplyOpen) return;
-        const ok = window.confirm("If you close this window, selected points will not be added to the current view. Continue?");
-        if (!ok) return;
+        if (!skipConfirm) {
+            const ok = window.confirm("If you close this window, selected points will not be added to the current view. Continue?");
+            if (!ok) return;
+        }
         const requestId = activeRequestIdRef.current;
+        dismissedManualRequestIdRef.current = String(requestId || "");
         setIsManualApplyOpen(false);
         setManualApplyRows([]);
         resetBlockingRequestState();
@@ -680,6 +697,17 @@ export function useBenchUploadFlow({
                     signal: controller.signal,
                 });
                 if (cancelled) return;
+                const hasServerRequest = Boolean(active?.request?.id);
+                const hasLocalBlockingRequest = Boolean(activeRequestIdRef.current);
+                if (!hasServerRequest && hasLocalBlockingRequest) {
+                    activeRequestMissingPollsRef.current += 1;
+                    const nextDelay = activeRequestMissingPollsRef.current >= 3 ? ACTIVE_QUEUE_STATUS_POLL_MS : 600;
+                    timer = setTimeout(() => {
+                        void poll();
+                    }, nextDelay);
+                    return;
+                }
+                activeRequestMissingPollsRef.current = 0;
                 updateStateFromSnapshot(active);
                 const status = String(active?.request?.status || "").toLowerCase();
                 const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
@@ -693,9 +721,10 @@ export function useBenchUploadFlow({
                 }
             } catch {
                 if (cancelled) return;
+                const retryDelay = activeRequestIdRef.current ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS;
                 timer = setTimeout(() => {
                     void poll();
-                }, IDLE_QUEUE_CHECK_MS);
+                }, retryDelay);
             } finally {
                 if (inFlightController === controller) {
                     inFlightController = null;
@@ -715,6 +744,7 @@ export function useBenchUploadFlow({
 
     function openManualApplyModal() {
         if (manualApplyRows.length < 1) return;
+        dismissedManualRequestIdRef.current = "";
         setIsManualApplyOpen(true);
     }
 
