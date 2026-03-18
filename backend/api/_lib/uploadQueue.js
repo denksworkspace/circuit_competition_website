@@ -44,6 +44,7 @@ export async function ensureUploadQueueSchema() {
                 total_count integer not null default 0,
                 done_count integer not null default 0,
                 verified_count integer not null default 0,
+                pareto_front_count integer not null default 0,
                 current_file_name text not null default '',
                 current_phase text not null default '',
                 error text,
@@ -51,6 +52,10 @@ export async function ensureUploadQueueSchema() {
                 updated_at timestamptz not null default now(),
                 finished_at timestamptz
               )
+            `;
+            await sql`
+              alter table upload_requests
+              add column if not exists pareto_front_count integer not null default 0
             `;
             await sql`
               alter table upload_requests
@@ -97,10 +102,20 @@ export async function ensureUploadQueueSchema() {
                 parsed_delay integer,
                 parsed_area integer,
                 final_file_name text,
+                pareto_state text not null default '',
+                replaced_pareto_coords text not null default '',
                 created_at timestamptz not null default now(),
                 updated_at timestamptz not null default now(),
                 processed_at timestamptz
               )
+            `;
+            await sql`
+              alter table upload_request_files
+              add column if not exists pareto_state text not null default ''
+            `;
+            await sql`
+              alter table upload_request_files
+              add column if not exists replaced_pareto_coords text not null default ''
             `;
             await sql`
               alter table upload_request_files
@@ -155,6 +170,7 @@ export function normalizeUploadRequestRow(row) {
         totalCount: Math.max(0, Number(row.total_count || 0)),
         doneCount: Math.max(0, Number(row.done_count || 0)),
         verifiedCount: Math.max(0, Number(row.verified_count || 0)),
+        paretoFrontCount: Math.max(0, Number(row.pareto_front_count || 0)),
         currentFileName: String(row.current_file_name || ""),
         currentPhase: String(row.current_phase || ""),
         error: row.error ? String(row.error) : null,
@@ -185,6 +201,23 @@ export function normalizeUploadRequestFileRow(row) {
         parsedDelay: row.parsed_delay == null ? null : Number(row.parsed_delay),
         parsedArea: row.parsed_area == null ? null : Number(row.parsed_area),
         finalFileName: row.final_file_name ? String(row.final_file_name) : null,
+        paretoState: String(row.pareto_state || ""),
+        replacedParetoCoords: (() => {
+            const raw = String(row.replaced_pareto_coords || "").trim();
+            if (!raw) return [];
+            try {
+                const parsed = JSON.parse(raw);
+                if (!Array.isArray(parsed)) return [];
+                return parsed
+                    .map((item) => ({
+                        delay: Number(item?.delay),
+                        area: Number(item?.area),
+                    }))
+                    .filter((item) => Number.isFinite(item.delay) && Number.isFinite(item.area));
+            } catch {
+                return [];
+            }
+        })(),
         createdAt: row.created_at || null,
         updatedAt: row.updated_at || null,
         processedAt: row.processed_at || null,

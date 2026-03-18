@@ -12,6 +12,12 @@
     color: var(--muted);
 }
 
+.fieldLabelWithHelp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .field.compact input {
     padding: 8px 10px;
 }
@@ -76,6 +82,10 @@
 
 .benchmarkOption:hover {
     background: #f3f4f6;
+}
+
+.benchmarkEmpty {
+    padding: 8px 9px;
 }
 
 input:not([type="checkbox"]):not([type="range"]) {

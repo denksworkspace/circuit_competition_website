@@ -2,6 +2,8 @@
 import { statusColor } from "../../utils/pointUtils.js";
 import { formatIntNoGrouping } from "../../utils/numberUtils.js";
 
+const PARETO_FRONT_ONLY_LABEL = "pareto front only";
+
 export function SentPointsSection({
     myPoints,
     sentPageItems,
@@ -13,15 +15,118 @@ export function SentPointsSection({
     onFocusPoint,
     onDownloadCircuit,
     getPointDownloadUrl,
-    paretoTransitionByPointId,
-    myNewParetoPointsCount,
+    submissionStatusFilter,
+    toggleSubmissionStatus,
+    submissionBenchmarkFilter,
+    onSubmissionBenchmarkFilterChange,
+    submissionBenchmarkOptions,
+    submissionSortOrder,
+    onSubmissionSortOrderChange,
+    submissionParetoOnly,
+    onSubmissionParetoOnlyChange,
+    selectedSubmissionIdSet,
+    onToggleSubmissionSelected,
+    onOpenDeleteSelectedModal,
+    onResetSubmissionSelection,
 }) {
     return (
         <section className="card listCard sentCard">
             <div className="cardHeader tight">
                 <div>
-                    <div className="cardTitle">Sended points</div>
-                    <div className="cardHint">New Pareto-front points: {myNewParetoPointsCount}</div>
+                    <div className="cardTitleRow">
+                        <div className="cardTitle">Sended points</div>
+                        <div className="helpTipWrap" tabIndex={0} aria-label="Submissions delete help">
+                            <span className="helpTipIcon">?</span>
+                            <div className="helpTipPanel">
+                                <div className="cardHint">
+                                    To delete points, click submissions to select them (they will be highlighted in blue), then click Delete.
+                                </div>
+                                <div className="cardHint">
+                                    <b>Warning: selection is not reset when filters in this window are changed.</b>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {selectedSubmissionIdSet.size > 0 ? (
+                    <div className="sentHeaderActions">
+                        <button className="btn ghost small" type="button" onClick={onResetSubmissionSelection}>
+                            Reset selection
+                        </button>
+                        <button className="btn danger small" type="button" onClick={onOpenDeleteSelectedModal}>
+                            Delete ({selectedSubmissionIdSet.size})
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+
+            <div className="form sentFiltersForm">
+                <div className="sentFiltersLayout">
+                    <label className="field">
+                        <span>Status</span>
+                        <div className="checks">
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={submissionStatusFilter["non-verified"]}
+                                    onChange={() => toggleSubmissionStatus("non-verified")}
+                                />
+                                <span className="dot" style={{ background: statusColor("non-verified") }} />
+                                <span>non-verified</span>
+                            </label>
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={submissionStatusFilter.verified}
+                                    onChange={() => toggleSubmissionStatus("verified")}
+                                />
+                                <span className="dot" style={{ background: statusColor("verified") }} />
+                                <span>verified</span>
+                            </label>
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={submissionStatusFilter.failed}
+                                    onChange={() => toggleSubmissionStatus("failed")}
+                                />
+                                <span className="dot" style={{ background: statusColor("failed") }} />
+                                <span>failed</span>
+                            </label>
+                        </div>
+                    </label>
+
+                    <div className="sentFiltersRight">
+                        <label className="field">
+                            <span>Benchmark</span>
+                            <select
+                                value={submissionBenchmarkFilter}
+                                onChange={(e) => onSubmissionBenchmarkFilterChange(e.target.value)}
+                            >
+                                {submissionBenchmarkOptions.map((option) => (
+                                    <option key={option} value={option}>
+                                        {option}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="field">
+                            <span>Sort by upload date</span>
+                            <select value={submissionSortOrder} onChange={(e) => onSubmissionSortOrderChange(e.target.value)}>
+                                <option value="desc">newest first</option>
+                                <option value="asc">oldest first</option>
+                            </select>
+                        </label>
+
+                        <label className="check compactCheck">
+                            <input
+                                type="checkbox"
+                                checked={submissionParetoOnly}
+                                onChange={(e) => onSubmissionParetoOnlyChange(Boolean(e.target.checked))}
+                            />
+                            <span className="paretoOnlyText">{PARETO_FRONT_ONLY_LABEL}</span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
@@ -31,14 +136,20 @@ export function SentPointsSection({
                 ) : (
                     sentPageItems.map((p, i) => {
                         const globalIndex = sentTotal - (sentStart + i);
-                        const paretoTransition = paretoTransitionByPointId.get(p.id) || { becameFront: false, replaced: [] };
-                        const replacedLabel = paretoTransition.replaced.length > 0
-                            ? paretoTransition.replaced
-                                .map((item) => `${item.fileName || item.id} (${item.delay}, ${item.area})`)
-                                .join("; ")
-                            : "";
+                        const isSelected = selectedSubmissionIdSet.has(p.id);
                         return (
-                            <div className="row compactRow" key={p.id}>
+                            <div
+                                className={isSelected ? "row compactRow selectedSubmissionRow" : "row compactRow"}
+                                key={p.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => onToggleSubmissionSelected(p.id)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Enter" && e.key !== " ") return;
+                                    e.preventDefault();
+                                    onToggleSubmissionSelected(p.id);
+                                }}
+                            >
                                 <div className="compactMain">
                                     <div className="compactTop">
                                         <span className="pill">benchmark: {p.benchmark}</span>
@@ -49,6 +160,7 @@ export function SentPointsSection({
                                     </div>
 
                                     <div className="compactBottom">
+                                        <span className="sentSubmission">submission: {globalIndex}</span>
                                         <span className="mono">
                                             delay=<b>{formatIntNoGrouping(p.delay)}</b>
                                         </span>
@@ -56,24 +168,24 @@ export function SentPointsSection({
                                             area=<b>{formatIntNoGrouping(p.area)}</b>
                                         </span>
                                     </div>
-                                    {paretoTransition.becameFront ? (
-                                        <div className="cardHint">
-                                            New Pareto-front point.
-                                            {replacedLabel
-                                                ? ` Replaced: ${replacedLabel}`
-                                                : " Replaced: none."}
-                                        </div>
-                                    ) : null}
                                 </div>
 
                                 <div className="sentActions">
-                                    <div className="sentSubmission">submission: {globalIndex}</div>
-                                    <button className="btn ghost small" onClick={() => onFocusPoint(p)}>
+                                    <button
+                                        className="btn ghost small"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onFocusPoint(p);
+                                        }}
+                                    >
                                         Find
                                     </button>
                                     <button
                                         className="btn ghost small"
-                                        onClick={() => onDownloadCircuit(p)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDownloadCircuit(p);
+                                        }}
                                         disabled={!getPointDownloadUrl(p)}
                                     >
                                         Download circuit

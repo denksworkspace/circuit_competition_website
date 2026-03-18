@@ -107,6 +107,7 @@ export default async function handler(req, res) {
         requestId,
         commandId: command.id,
         includeFiles: true,
+        commandName: command.name,
     });
     res.status(200).json({
         ...snapshot,

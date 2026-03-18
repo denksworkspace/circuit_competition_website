@@ -33,6 +33,7 @@ export default async function handler(req, res) {
         requestId: String(active.id),
         commandId: command.id,
         includeFiles: true,
+        commandName: command.name,
     });
     if (!snapshot) {
         res.status(200).json({ request: null, files: [] });

@@ -248,6 +248,12 @@ export function AddPointSection({
                                         : "Switching to the next circuit..."}
                             </div>
                         ) : null}
+                        {Number(uploadProgress.total || 0) > 0
+                            && Number(uploadProgress.done || 0) >= Number(uploadProgress.total || 0) ? (
+                                <div className="cardHint">
+                                    <b>Pareto front: {Number(uploadProgress.paretoFront || 0)}</b>
+                                </div>
+                            ) : null}
                     </>
                 ) : null}
 
@@ -262,6 +268,9 @@ export function AddPointSection({
                                     <div key={row.key} className="uploadLiveItem">
                                         <span className={`uploadLiveStatus ${row.tone || "muted"}`}>{row.statusLabel}</span>
                                         <div className="uploadLiveMeta">
+                                            {row.paretoLabel ? (
+                                                <div className={`uploadLiveStatus ${row.paretoTone || "info"}`}>{row.paretoLabel}</div>
+                                            ) : null}
                                             <div className="uploadLiveFile">{row.fileName}</div>
                                             {row.reason ? <div className="cardHint">{row.reason}</div> : null}
                                     </div>

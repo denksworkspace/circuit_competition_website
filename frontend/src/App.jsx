@@ -20,6 +20,7 @@ import { AdminSettingsSection } from "./components/app/AdminSettingsSection.jsx"
 import { FindPointsSection } from "./components/app/FindPointsSection.jsx";
 import { PointActionModal } from "./components/app/PointActionModal.jsx";
 import { ManualPointApplyModal } from "./components/app/ManualPointApplyModal.jsx";
+import { SubmissionsDeleteModal } from "./components/app/SubmissionsDeleteModal.jsx";
 import { MaintenanceScreen } from "./components/app/MaintenanceScreen.jsx";
 import {
     buildAxis,
@@ -64,18 +65,6 @@ function getPointCreatedAtMs(point) {
     const value = Date.parse(String(point?.createdAt || ""));
     if (!Number.isFinite(value)) return null;
     return value;
-}
-
-function dominatesPoint(lhs, rhs) {
-    if (!lhs || !rhs) return false;
-    const lhsDelay = Number(lhs.delay);
-    const lhsArea = Number(lhs.area);
-    const rhsDelay = Number(rhs.delay);
-    const rhsArea = Number(rhs.area);
-    if (!Number.isFinite(lhsDelay) || !Number.isFinite(lhsArea) || !Number.isFinite(rhsDelay) || !Number.isFinite(rhsArea)) {
-        return false;
-    }
-    return lhsDelay <= rhsDelay && lhsArea <= rhsArea && (lhsDelay < rhsDelay || lhsArea < rhsArea);
 }
 
 export default function App() {
@@ -266,6 +255,7 @@ export default function App() {
         downloadCircuit,
         openPointActionModal,
         closePointActionModal,
+        deletePointById,
         confirmAndDeletePoint,
     } = usePointActions({
         points,
@@ -321,13 +311,25 @@ export default function App() {
 
     // Filters (start in "test")
     const [benchmarkFilter, setBenchmarkFilter] = useState("test"); // "test" | numeric string
+    const [benchmarkInputValue, setBenchmarkInputValue] = useState("test");
     const [colorMode, setColorMode] = useState("status");
     const [statusFilter, setStatusFilter] = useState({
         "non-verified": true,
         verified: true,
-        failed: true,
+        failed: false,
     });
     const [showParetoOnly, setShowParetoOnly] = useState(false);
+    const [submissionStatusFilter, setSubmissionStatusFilter] = useState(() => ({
+        "non-verified": true,
+        verified: true,
+        failed: true,
+    }));
+    const [submissionBenchmarkFilter, setSubmissionBenchmarkFilter] = useState("all");
+    const [submissionSortOrder, setSubmissionSortOrder] = useState("desc");
+    const [submissionParetoOnly, setSubmissionParetoOnly] = useState(false);
+    const [selectedSubmissionIds, setSelectedSubmissionIds] = useState(() => []);
+    const [isSubmissionsDeleteModalOpen, setIsSubmissionsDeleteModalOpen] = useState(false);
+    const [isSubmissionsDeleting, setIsSubmissionsDeleting] = useState(false);
     const {
         benchFiles,
         descriptionDraft,
@@ -419,6 +421,17 @@ export default function App() {
         }
         return Array.from(numeric).sort((a, b) => a - b);
     }, [pointsUpToSliderDate]);
+    const benchmarkOptionValues = useMemo(
+        () => ["test", ...availableBenchmarks.map((value) => String(value))],
+        [availableBenchmarks]
+    );
+    const benchmarkInputSuggestions = useMemo(() => {
+        const query = benchmarkInputValue.trim().toLowerCase();
+        return benchmarkOptionValues.filter((value) => {
+            if (!query) return true;
+            return value.toLowerCase().startsWith(query);
+        });
+    }, [benchmarkInputValue, benchmarkOptionValues]);
 
     // Commands shown in the "Users" picker:
     // show ONLY senders that have at least one point in the currently selected benchmark.
@@ -484,6 +497,7 @@ export default function App() {
     const onSelectBenchmark = useCallback((benchmark) => {
         const nextBenchmark = String(benchmark);
         setBenchmarkFilter(nextBenchmark);
+        setBenchmarkInputValue(nextBenchmark);
         setBenchmarkMenuOpen(false);
 
         const nextVisible = pointsUpToSliderDate.filter((p) => {
@@ -558,46 +572,22 @@ export default function App() {
         if (!currentCommand) return [];
         return points.filter((p) => p.sender === currentCommand.name);
     }, [points, currentCommand]);
-    const paretoTransitionByPointId = useMemo(() => {
-        const transitions = new Map();
-        const frontByBenchmark = new Map();
-        const ordered = [...points]
-            .map((point, index) => ({ point, index }))
-            .sort((lhs, rhs) => {
-                const lhsMs = getPointCreatedAtMs(lhs.point);
-                const rhsMs = getPointCreatedAtMs(rhs.point);
-                if (lhsMs != null && rhsMs != null && lhsMs !== rhsMs) return lhsMs - rhsMs;
-                if (lhsMs != null && rhsMs == null) return -1;
-                if (lhsMs == null && rhsMs != null) return 1;
-                return rhs.index - lhs.index;
-            });
-
-        for (const entry of ordered) {
-            const point = entry.point;
+    const currentParetoPointIdSet = useMemo(() => {
+        const byBenchmark = new Map();
+        for (const point of points) {
             const benchmark = String(point?.benchmark || "");
-            const front = frontByBenchmark.get(benchmark) || [];
-            const dominatedByFront = front.some((frontPoint) => dominatesPoint(frontPoint, point));
-            if (dominatedByFront) {
-                transitions.set(point.id, { becameFront: false, replaced: [] });
-                continue;
-            }
-
-            const replaced = front.filter((frontPoint) => dominatesPoint(point, frontPoint));
-            const nextFront = front.filter((frontPoint) => !dominatesPoint(point, frontPoint));
-            nextFront.push(point);
-            frontByBenchmark.set(benchmark, nextFront);
-            transitions.set(point.id, { becameFront: true, replaced });
+            if (!byBenchmark.has(benchmark)) byBenchmark.set(benchmark, []);
+            byBenchmark.get(benchmark).push(point);
         }
-        return transitions;
+        const ids = new Set();
+        for (const benchmarkPoints of byBenchmark.values()) {
+            const front = computeParetoFrontOriginal(benchmarkPoints);
+            for (const point of front) {
+                ids.add(String(point.id || ""));
+            }
+        }
+        return ids;
     }, [points]);
-    const myNewParetoPointsCount = useMemo(
-        () =>
-            myPoints.reduce((count, point) => {
-                if (paretoTransitionByPointId.get(point.id)?.becameFront) return count + 1;
-                return count;
-            }, 0),
-        [myPoints, paretoTransitionByPointId]
-    );
 
     function clearAllTestNoConfirm() {
         setPoints((prev) => prev.filter((p) => p.benchmark !== "test"));
@@ -829,6 +819,19 @@ export default function App() {
         setStatusFilter((prev) => ({ ...prev, [key]: !prev[key] }));
     }
 
+    function toggleSubmissionStatus(key) {
+        setSubmissionStatusFilter((prev) => ({ ...prev, [key]: !prev[key] }));
+    }
+
+    function setSubmissionSelected(pointId) {
+        const id = String(pointId || "");
+        if (!id) return;
+        setSelectedSubmissionIds((prev) => {
+            if (prev.includes(id)) return prev.filter((value) => value !== id);
+            return [...prev, id];
+        });
+    }
+
     const deleteMatches = useMemo(() => {
         const prefix = deletePrefix.trim().toLowerCase();
         if (!prefix) return points;
@@ -842,13 +845,75 @@ export default function App() {
     const placeholdersCount = Math.max(0, DELETE_PREVIEW_LIMIT - deletePreview.length);
     const deleteHasMore = deleteMatches.length > deletePreview.length;
 
+    const submissionsBenchmarkOptions = useMemo(() => {
+        const options = new Set(["all"]);
+        for (const point of myPoints) {
+            options.add(String(point.benchmark));
+        }
+        const values = Array.from(options);
+        const numeric = values.filter((value) => value !== "all" && value !== "test").sort((a, b) => Number(a) - Number(b));
+        const withTest = values.includes("test") ? ["test", ...numeric] : numeric;
+        return ["all", ...withTest];
+    }, [myPoints]);
+
+    const myPointsFiltered = useMemo(() => {
+        const filtered = myPoints.filter((point) => {
+            if (!submissionStatusFilter[point.status]) return false;
+            if (submissionBenchmarkFilter !== "all" && String(point.benchmark) !== String(submissionBenchmarkFilter)) {
+                return false;
+            }
+            if (submissionParetoOnly && !currentParetoPointIdSet.has(String(point.id || ""))) return false;
+            return true;
+        });
+        filtered.sort((lhs, rhs) => {
+            const lhsMs = getPointCreatedAtMs(lhs) || 0;
+            const rhsMs = getPointCreatedAtMs(rhs) || 0;
+            if (lhsMs !== rhsMs) {
+                return submissionSortOrder === "asc" ? lhsMs - rhsMs : rhsMs - lhsMs;
+            }
+            const lhsId = String(lhs.id || "");
+            const rhsId = String(rhs.id || "");
+            return submissionSortOrder === "asc" ? lhsId.localeCompare(rhsId) : rhsId.localeCompare(lhsId);
+        });
+        return filtered;
+    }, [
+        myPoints,
+        submissionStatusFilter,
+        submissionBenchmarkFilter,
+        submissionParetoOnly,
+        currentParetoPointIdSet,
+        submissionSortOrder,
+    ]);
+
+    const selectedSubmissionIdSet = useMemo(
+        () => new Set(selectedSubmissionIds),
+        [selectedSubmissionIds]
+    );
+
+    const selectedSubmissionModalRows = useMemo(
+        () => selectedSubmissionIds
+            .map((id) => myPoints.find((point) => point.id === id))
+            .filter(Boolean)
+            .map((point) => ({
+                key: point.id,
+                pointId: point.id,
+                benchmark: String(point.benchmark),
+                delay: Number(point.delay),
+                area: Number(point.area),
+                fileName: String(point.fileName || point.id || "unknown"),
+            })),
+        [selectedSubmissionIds, myPoints]
+    );
+    const [submissionsDeleteRows, setSubmissionsDeleteRows] = useState(() => []);
+    const [submissionsDeleteProgress, setSubmissionsDeleteProgress] = useState(null);
+
     const [sentPage, setSentPage] = useState(1);
     const sentPageSize = 5;
-    const sentTotalPages = Math.max(1, Math.ceil(myPoints.length / sentPageSize));
+    const sentTotalPages = Math.max(1, Math.ceil(myPointsFiltered.length / sentPageSize));
     const sentPageClamped = clamp(sentPage, 1, sentTotalPages);
     const sentStart = (sentPageClamped - 1) * sentPageSize;
-    const sentPageItems = myPoints.slice(sentStart, sentStart + sentPageSize);
-    const sentTotal = myPoints.length;
+    const sentPageItems = myPointsFiltered.slice(sentStart, sentStart + sentPageSize);
+    const sentTotal = myPointsFiltered.length;
     const sentPages = useMemo(
         () => Array.from({ length: sentTotalPages }, (_, i) => i + 1),
         [sentTotalPages]
@@ -857,13 +922,22 @@ export default function App() {
     useEffect(() => {
         const timer = setTimeout(() => setSentPage(1), 0);
         return () => clearTimeout(timer);
-    }, [myPoints.length]);
+    }, [myPointsFiltered.length]);
+
+    useEffect(() => {
+        const currentIds = new Set(myPoints.map((point) => String(point.id || "")));
+        setSelectedSubmissionIds((prev) => prev.filter((id) => currentIds.has(id)));
+    }, [myPoints]);
 
     useEffect(() => {
         if (!navigateNotice) return;
         const t = setTimeout(() => setNavigateNotice(""), 3200);
         return () => clearTimeout(t);
     }, [navigateNotice]);
+
+    useEffect(() => {
+        setBenchmarkInputValue(String(benchmarkFilter));
+    }, [benchmarkFilter]);
 
     useEffect(() => {
         let cancelled = false;
@@ -931,10 +1005,82 @@ export default function App() {
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
+        setBenchmarkInputValue(String(p.benchmark));
         setLastAddedId(p.id);
         setNavigateNotice(
             "Navigation successful. If the point is not visible, make sure it matches current filters."
         );
+    }
+
+    function onBenchmarkInputFocus() {
+        setBenchmarkInputValue("");
+        setBenchmarkMenuOpen(true);
+    }
+
+    function onBenchmarkInputChange(value) {
+        setBenchmarkInputValue(value);
+        setBenchmarkMenuOpen(true);
+    }
+
+    function onBenchmarkInputBlur() {
+        setBenchmarkInputValue(String(benchmarkFilter));
+        setBenchmarkMenuOpen(false);
+    }
+
+    function onBenchmarkInputKeyDown(event) {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const nextBenchmark = benchmarkInputValue.trim();
+        if (!nextBenchmark) return;
+        const matched = benchmarkOptionValues.find((value) => value.toLowerCase() === nextBenchmark.toLowerCase());
+        if (!matched) return;
+        onSelectBenchmark(matched);
+    }
+
+    function openDeleteSelectedSubmissionsModal() {
+        if (selectedSubmissionModalRows.length < 1) return;
+        setSubmissionsDeleteRows(selectedSubmissionModalRows.map((row) => ({ ...row, checked: true })));
+        setIsSubmissionsDeleteModalOpen(true);
+    }
+
+    function setSubmissionsDeleteChecked(key, checked) {
+        setSubmissionsDeleteRows((prev) =>
+            prev.map((row) => (row.key === key ? { ...row, checked: Boolean(checked) } : row))
+        );
+    }
+
+    async function applyDeleteSelectedSubmissions() {
+        const selectedIds = submissionsDeleteRows
+            .filter((row) => Boolean(row.checked))
+            .map((row) => String(row.pointId || ""));
+        if (selectedIds.length < 1) {
+            return;
+        }
+        setIsSubmissionsDeleting(true);
+        setSubmissionsDeleteProgress({ processed: 0, total: selectedIds.length });
+        try {
+            const deleted = [];
+            const failed = [];
+            for (let index = 0; index < selectedIds.length; index += 1) {
+                const pointId = selectedIds[index];
+                const ok = await deletePointById(pointId);
+                if (ok) deleted.push(pointId);
+                else failed.push(pointId);
+                setSubmissionsDeleteProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
+            }
+            setSelectedSubmissionIds((prev) => prev.filter((id) => !deleted.includes(id)));
+            setIsSubmissionsDeleteModalOpen(false);
+            if (failed.length > 0) {
+                window.alert(`Failed to delete ${failed.length} point(s).`);
+            }
+        } finally {
+            setIsSubmissionsDeleting(false);
+            setSubmissionsDeleteProgress(null);
+        }
+    }
+
+    function resetSubmissionSelection() {
+        setSelectedSubmissionIds([]);
     }
 
     if (!currentCommand) {
@@ -1040,7 +1186,7 @@ export default function App() {
                     />
 
                     <SentPointsSection
-                        myPoints={myPoints}
+                        myPoints={myPointsFiltered}
                         sentPageItems={sentPageItems}
                         sentTotal={sentTotal}
                         sentStart={sentStart}
@@ -1050,8 +1196,19 @@ export default function App() {
                         onFocusPoint={focusPoint}
                         onDownloadCircuit={downloadCircuit}
                         getPointDownloadUrl={getPointDownloadUrl}
-                        paretoTransitionByPointId={paretoTransitionByPointId}
-                        myNewParetoPointsCount={myNewParetoPointsCount}
+                        submissionStatusFilter={submissionStatusFilter}
+                        toggleSubmissionStatus={toggleSubmissionStatus}
+                        submissionBenchmarkFilter={submissionBenchmarkFilter}
+                        onSubmissionBenchmarkFilterChange={setSubmissionBenchmarkFilter}
+                        submissionBenchmarkOptions={submissionsBenchmarkOptions}
+                        submissionSortOrder={submissionSortOrder}
+                        onSubmissionSortOrderChange={setSubmissionSortOrder}
+                        submissionParetoOnly={submissionParetoOnly}
+                        onSubmissionParetoOnlyChange={setSubmissionParetoOnly}
+                        selectedSubmissionIdSet={selectedSubmissionIdSet}
+                        onToggleSubmissionSelected={setSubmissionSelected}
+                        onOpenDeleteSelectedModal={openDeleteSelectedSubmissionsModal}
+                        onResetSubmissionSelection={resetSubmissionSelection}
                     />
                 </div>
 
@@ -1060,9 +1217,13 @@ export default function App() {
                         benchmarkMenuRef={benchmarkMenuRef}
                         benchmarkMenuOpen={benchmarkMenuOpen}
                         benchmarkLabel={benchmarkLabel}
-                        onBenchmarkMenuToggle={() => setBenchmarkMenuOpen((v) => !v)}
+                        benchmarkInputValue={benchmarkInputValue}
+                        onBenchmarkInputChange={onBenchmarkInputChange}
+                        onBenchmarkInputFocus={onBenchmarkInputFocus}
+                        onBenchmarkInputBlur={onBenchmarkInputBlur}
+                        onBenchmarkInputKeyDown={onBenchmarkInputKeyDown}
+                        benchmarkInputSuggestions={benchmarkInputSuggestions}
                         onSelectBenchmark={onSelectBenchmark}
-                        availableBenchmarks={availableBenchmarks}
                         colorMode={colorMode}
                         onColorModeChange={setColorMode}
                         commandQuery={commandQuery}
@@ -1292,6 +1453,16 @@ export default function App() {
                 onClose={closeManualApplyModal}
                 isApplying={isManualApplying}
                 applyProgress={manualApplyProgress}
+            />
+
+            <SubmissionsDeleteModal
+                open={isSubmissionsDeleteModalOpen}
+                rows={submissionsDeleteRows}
+                onToggle={setSubmissionsDeleteChecked}
+                onApply={applyDeleteSelectedSubmissions}
+                onClose={() => setIsSubmissionsDeleteModalOpen(false)}
+                isApplying={isSubmissionsDeleting}
+                applyProgress={submissionsDeleteProgress}
             />
 
             {navigateNotice ? (

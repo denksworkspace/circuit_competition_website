@@ -178,6 +178,47 @@ describe("App integration", () => {
         expect(screen.queryByText(/Invalid file name pattern/)).not.toBeInTheDocument();
     });
 
+    it("shows benchmark help and all matching benchmark options by prefix", async () => {
+        const points = [
+            { id: "p250", benchmark: 250, delay: 10, area: 100, description: "", sender: "team1", fileName: "a", status: "verified" },
+            { id: "p251", benchmark: 251, delay: 11, area: 101, description: "", sender: "team1", fileName: "b", status: "verified" },
+            { id: "p252", benchmark: 252, delay: 12, area: 102, description: "", sender: "team1", fileName: "c", status: "verified" },
+            { id: "p253", benchmark: 253, delay: 13, area: 103, description: "", sender: "team1", fileName: "d", status: "verified" },
+        ];
+        const routes = bootstrapRoutes({
+            points,
+            authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" }) },
+        });
+        installFetchRouter(routes);
+
+        render(<App />);
+        fireEvent.change(await screen.findByPlaceholderText("key_XXXXXXXXXXXXXXXX"), {
+            target: { value: "key_ok" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Enter" }));
+        await screen.findByText("Add a point");
+
+        expect(screen.getByLabelText("Benchmark selection help")).toBeInTheDocument();
+        expect(screen.getByText("To select a benchmark, type its number.")).toBeInTheDocument();
+
+        const benchmarkInput = screen.getByRole("textbox", { name: "Benchmark" });
+        fireEvent.focus(benchmarkInput);
+        expect(await screen.findByRole("button", { name: "test" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "250" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "251" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "252" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "253" })).toBeInTheDocument();
+
+        fireEvent.change(benchmarkInput, { target: { value: "25" } });
+        expect(screen.queryByRole("button", { name: "test" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "250" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "251" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "252" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "253" })).toBeInTheDocument();
+
+        expect(screen.getAllByText("pareto front only")).toHaveLength(2);
+    });
+
     it("validates multi-file count limit", async () => {
         const routes = bootstrapRoutes({
             authBody: { command: withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" }) },
@@ -430,7 +471,7 @@ describe("App integration", () => {
             expect(calls).toEqual(["create-request", "put-queue", "run-request"]);
         });
 
-        expect(screen.getByRole("button", { name: "1) Benchmark" })).toHaveTextContent("test");
+        expect(screen.getByRole("textbox", { name: "Benchmark" })).toHaveValue("test");
         expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
         await openManualVerdictModal();
         expect(

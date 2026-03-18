@@ -221,6 +221,11 @@ export function ChartSection({
                         />
                     </ScatterChart>
                 </ResponsiveContainer>
+                <div className="chartAxisCornerLabel" aria-hidden="true">
+                    <span className="chartAxisArea">area</span>
+                    <span className="chartAxisSlashLine" />
+                    <span className="chartAxisDelay">delay</span>
+                </div>
             </div>
 
             <form className="viewControls" onSubmit={applyView}>

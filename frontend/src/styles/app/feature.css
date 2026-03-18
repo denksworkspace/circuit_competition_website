@@ -479,6 +479,10 @@
     border-bottom: none;
 }
 
+.manualApplyItem.singleColumn {
+    grid-template-columns: 1fr;
+}
+
 .navigateToast {
     position: fixed;
     right: 16px;

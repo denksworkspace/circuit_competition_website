@@ -32,6 +32,7 @@ export default async function handler(req, res) {
         requestId,
         commandId: command.id,
         includeFiles: true,
+        commandName: command.name,
     });
     if (!snapshot) {
         res.status(404).json({ error: "Upload request not found." });

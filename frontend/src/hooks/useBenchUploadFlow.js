@@ -47,7 +47,12 @@ function buildUploadLogText(files) {
             const success = Boolean(row?.applied);
             const verdict = hasManualVerdictPending(row) ? "waiting manual verdict" : String(row?.verdict || "pending");
             const reason = String(row?.verdictReason || "").trim();
-            return `file=${String(row?.originalFileName || "unknown")}; success=${success ? "true" : "false"}; verdict=${verdict}; reason=${reason || "-"}`;
+            const paretoState = String(row?.paretoState || "").trim().toLowerCase();
+            const replacedCoords = Array.isArray(row?.replacedParetoCoords) ? row.replacedParetoCoords : [];
+            const replacedLabel = replacedCoords
+                .map((item) => `(${Number(item?.delay)}, ${Number(item?.area)})`)
+                .join("; ");
+            return `file=${String(row?.originalFileName || "unknown")}; success=${success ? "true" : "false"}; verdict=${verdict}; pareto=${paretoState || "-"}; replaced=${replacedLabel || "-"}; reason=${reason || "-"}`;
         });
     return rows.join("\n");
 }
@@ -172,10 +177,17 @@ function buildLiveRowStatus(row) {
     return { statusLabel: verdict || "processed", tone: "success" };
 }
 
-function buildLiveRows(files) {
+function buildLiveRows(files, { showParetoLabels = false } = {}) {
     if (!Array.isArray(files)) return [];
     return files.map((row) => {
         const status = buildLiveRowStatus(row);
+        let paretoLabel = "";
+        let paretoTone = "info";
+        const paretoState = String(row?.paretoState || "").trim().toLowerCase();
+        if (showParetoLabels && paretoState === "new-front") {
+            paretoLabel = "new pareto front";
+            paretoTone = "info";
+        }
         const orderIndex = Number(row?.orderIndex);
         const fileName = String(row?.originalFileName || "unknown");
         return {
@@ -185,6 +197,8 @@ function buildLiveRows(files) {
             fileName,
             statusLabel: status.statusLabel,
             tone: status.tone,
+            paretoLabel,
+            paretoTone,
             reason: String(row?.verdictReason || "").trim(),
         };
     });
@@ -265,6 +279,7 @@ export function useBenchUploadFlow({
     const pollInFlightControllerRef = useRef(null);
     const pollLoopRef = useRef(null);
     const isPageUnloadingRef = useRef(false);
+    const queueUploadInFlightRef = useRef(false);
 
     useEffect(() => {
         if (typeof window === "undefined") return undefined;
@@ -389,12 +404,22 @@ export function useBenchUploadFlow({
         }
 
         const lowerStatus = String(request.status || "").toLowerCase();
+        const doneCount = Number(request.doneCount || 0);
+        const totalCount = Number(request.totalCount || 0);
+        const isAllFilesProcessed = totalCount > 0 && doneCount >= totalCount;
         const runnable = isRunnableRequestStatus(lowerStatus);
         const manualRows = runnable ? [] : buildManualRows(files);
         const hasPendingManualVerdict = manualRows.length > 0;
         const shouldKeepMonitor = runnable || hasPendingManualVerdict;
         const hiddenRequestId = String(hiddenRequestIdRef.current || "");
         const isHiddenRequest = hiddenRequestId && hiddenRequestId === requestId;
+
+        if (queueUploadInFlightRef.current && lowerStatus === "queued") {
+            activeRequestIdRef.current = requestId;
+            setBlockingRequestStatus(lowerStatus);
+            setIsUploading(true);
+            return;
+        }
 
         if (isHiddenRequest) {
             // Keep polling this request in background while close/apply finalization settles,
@@ -412,15 +437,16 @@ export function useBenchUploadFlow({
             activeRequestIdRef.current = requestId;
             setBlockingRequestStatus(lowerStatus);
             setUploadProgress({
-                done: Number(request.doneCount || 0),
-                total: Number(request.totalCount || 0),
+                done: doneCount,
+                total: totalCount,
                 verified: Number(request.verifiedCount || 0),
+                paretoFront: Number(request.paretoFrontCount || 0),
                 phase: hasPendingManualVerdict && !runnable ? "waiting-manual" : mapPhase(request.currentPhase, request.status),
                 currentFileName: String(request.currentFileName || ""),
                 secondsRemaining: null,
                 transitionTarget: "next-circuit",
             });
-            setUploadLiveRows(buildLiveRows(files));
+            setUploadLiveRows(buildLiveRows(files, { showParetoLabels: isAllFilesProcessed }));
         } else {
             clearVisibleBlockingRequestState();
         }
@@ -507,6 +533,7 @@ export function useBenchUploadFlow({
             done: 0,
             total: benchFiles.length,
             verified: 0,
+            paretoFront: 0,
             phase: "uploading",
             currentFileName: "",
             queueUploaded: 0,
@@ -549,39 +576,44 @@ export function useBenchUploadFlow({
                 throw new Error("Upload request payload mismatch.");
             }
 
-            for (let index = 0; index < uploadRows.length; index += 1) {
-                const row = uploadRows[index];
-                const file = benchFiles[index];
-                setUploadProgress((prev) => (prev ? {
-                    ...prev,
-                    phase: "uploading",
-                    currentFileName: file.name,
-                    queueUploaded: index + 1,
-                } : prev));
-                setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
-                    statusLabel: "adding to queue",
-                    tone: "processing",
-                    reason: "",
-                }));
-                const putRes = await fetch(String(row.uploadUrl || ""), {
-                    method: "PUT",
-                    signal: controller.signal,
-                    body: file,
-                });
-                if (!putRes.ok) {
-                    const errorMessage = await buildQueueUploadErrorMessage(putRes, file.name);
+            queueUploadInFlightRef.current = true;
+            try {
+                for (let index = 0; index < uploadRows.length; index += 1) {
+                    const row = uploadRows[index];
+                    const file = benchFiles[index];
+                    setUploadProgress((prev) => (prev ? {
+                        ...prev,
+                        phase: "uploading",
+                        currentFileName: file.name,
+                        queueUploaded: index + 1,
+                    } : prev));
                     setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
-                        statusLabel: "queue upload failed",
-                        tone: "error",
-                        reason: errorMessage,
+                        statusLabel: "adding to queue",
+                        tone: "processing",
+                        reason: "",
                     }));
-                    throw new Error(errorMessage);
+                    const putRes = await fetch(String(row.uploadUrl || ""), {
+                        method: "PUT",
+                        signal: controller.signal,
+                        body: file,
+                    });
+                    if (!putRes.ok) {
+                        const errorMessage = await buildQueueUploadErrorMessage(putRes, file.name);
+                        setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
+                            statusLabel: "queue upload failed",
+                            tone: "error",
+                            reason: errorMessage,
+                        }));
+                        throw new Error(errorMessage);
+                    }
+                    setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
+                        statusLabel: "queued",
+                        tone: "queued",
+                        reason: "",
+                    }));
                 }
-                setUploadLiveRows((prev) => updateLocalQueueRow(prev, index, {
-                    statusLabel: "queued",
-                    tone: "queued",
-                    reason: "",
-                }));
+            } finally {
+                queueUploadInFlightRef.current = false;
             }
 
             const started = await runPointsUploadRequest({

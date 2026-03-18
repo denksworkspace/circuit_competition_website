@@ -177,6 +177,7 @@ body {
     padding: 10px 12px 12px;
     height: 520px;
     user-select: none;
+    position: relative;
 }
 
 .chartWrap :focus,
@@ -197,4 +198,39 @@ svg *:focus {
     display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+.chartAxisCornerLabel {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 6px;
+    pointer-events: none;
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.chartAxisArea {
+    margin-bottom: 8px;
+}
+
+.chartAxisSlashLine {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(
+        to top left,
+        transparent calc(50% - 1px),
+        #4b5563 calc(50% - 1px),
+        #4b5563 calc(50% + 1px),
+        transparent calc(50% + 1px)
+    );
+}
+
+.chartAxisDelay {
+    margin-bottom: 0;
 }

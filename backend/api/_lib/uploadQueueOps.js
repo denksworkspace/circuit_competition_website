@@ -14,6 +14,141 @@ import {
     normalizeUploadRequestFileRow,
     normalizeUploadRequestRow,
 } from "./uploadQueue.js";
+import { ensurePointsStatusConstraint } from "./pointsStatus.js";
+
+function dominatesPoint(lhs, rhs) {
+    if (!lhs || !rhs) return false;
+    const lhsDelay = Number(lhs.delay);
+    const lhsArea = Number(lhs.area);
+    const rhsDelay = Number(rhs.delay);
+    const rhsArea = Number(rhs.area);
+    if (!Number.isFinite(lhsDelay) || !Number.isFinite(lhsArea) || !Number.isFinite(rhsDelay) || !Number.isFinite(rhsArea)) {
+        return false;
+    }
+    return lhsDelay <= rhsDelay && lhsArea <= rhsArea && (lhsDelay < rhsDelay || lhsArea < rhsArea);
+}
+
+function toFrontPoint(benchmark, delay, area, origin, fileId = "") {
+    return {
+        benchmark: String(benchmark || ""),
+        delay: Number(delay),
+        area: Number(area),
+        origin: String(origin || ""),
+        fileId: String(fileId || ""),
+    };
+}
+
+function computeFrontMask(points) {
+    const items = Array.isArray(points) ? points : [];
+    return items.map((candidate, candidateIndex) => {
+        for (let index = 0; index < items.length; index += 1) {
+            if (index === candidateIndex) continue;
+            if (dominatesPoint(items[index], candidate)) return false;
+        }
+        return true;
+    });
+}
+
+function isUploadParetoEligible(fileRow) {
+    const verdict = String(fileRow?.verdict || "").toLowerCase();
+    const processState = String(fileRow?.processState || "").toLowerCase();
+    const hasMetrics = Number.isFinite(Number(fileRow?.parsedDelay)) && Number.isFinite(Number(fileRow?.parsedArea));
+    if (!hasMetrics) return false;
+    if (!["processed", "non-processed"].includes(processState)) return false;
+    return verdict === "verified" || verdict === "non-verified";
+}
+
+function buildReplacedCoordsPayload(replacedPoints) {
+    return JSON.stringify(
+        (Array.isArray(replacedPoints) ? replacedPoints : [])
+            .filter((point) => Number.isFinite(Number(point?.delay)) && Number.isFinite(Number(point?.area)))
+            .map((point) => ({
+                delay: Number(point.delay),
+                area: Number(point.area),
+            }))
+    );
+}
+
+async function computeUploadParetoState({ requestId, commandId, commandName = "" }) {
+    let resolvedCommandName = String(commandName || "").trim();
+    if (!resolvedCommandName) {
+        const commandRes = await withDbRetry(() => sql`
+          select name
+          from commands
+          where id = ${commandId}
+          limit 1
+        `);
+        resolvedCommandName = String(commandRes.rows[0]?.name || "").trim();
+    }
+    if (!resolvedCommandName) {
+        return { paretoFrontCount: 0, fileMetaById: new Map() };
+    }
+
+    const requestFilesRes = await withDbRetry(() => sql`
+      select *
+      from upload_request_files
+      where request_id = ${requestId}
+      order by order_index asc
+    `);
+    const requestFiles = requestFilesRes.rows.map(normalizeUploadRequestFileRow);
+    const requestPointIds = new Set(
+        requestFiles
+            .map((row) => String(row?.pointId || "").trim())
+            .filter(Boolean)
+    );
+
+    await ensurePointsStatusConstraint();
+    const pointsRes = await withDbRetry(() => sql`
+      select id, benchmark, delay, area
+      from points
+      where sender = ${resolvedCommandName}
+        and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+    `);
+    const baselinePoints = pointsRes.rows
+        .filter((row) => !requestPointIds.has(String(row.id || "")))
+        .map((row) => toFrontPoint(row.benchmark, row.delay, row.area, "baseline"));
+
+    const uploadCandidatePoints = requestFiles
+        .filter((file) => isUploadParetoEligible(file) && (Boolean(file.applied) || Boolean(file.canApply)))
+        .map((file) => toFrontPoint(file.parsedBenchmark, file.parsedDelay, file.parsedArea, "upload", String(file.id || "")));
+
+    const pointsByBenchmark = new Map();
+    for (const point of baselinePoints) {
+        const benchmark = String(point?.benchmark || "");
+        if (!pointsByBenchmark.has(benchmark)) pointsByBenchmark.set(benchmark, []);
+        pointsByBenchmark.get(benchmark).push(point);
+    }
+    for (const point of uploadCandidatePoints) {
+        const benchmark = String(point?.benchmark || "");
+        if (!pointsByBenchmark.has(benchmark)) pointsByBenchmark.set(benchmark, []);
+        pointsByBenchmark.get(benchmark).push(point);
+    }
+
+    const fileMetaById = new Map();
+    for (const file of requestFiles) {
+        fileMetaById.set(String(file.id || ""), { paretoState: "", replacedParetoCoords: [] });
+    }
+
+    let paretoFrontCount = 0;
+    for (const benchmarkPoints of pointsByBenchmark.values()) {
+        const frontMask = computeFrontMask(benchmarkPoints);
+        const frontPoints = benchmarkPoints.filter((_, index) => frontMask[index]);
+        for (const point of frontPoints) {
+            if (point.origin !== "upload" || !point.fileId) continue;
+            paretoFrontCount += 1;
+            const replacedParetoCoords = benchmarkPoints
+                .filter((candidate, index) => !frontMask[index] && dominatesPoint(point, candidate))
+                .map((candidate) => ({ delay: Number(candidate.delay), area: Number(candidate.area) }))
+                .filter((candidate) => Number.isFinite(candidate.delay) && Number.isFinite(candidate.area));
+            fileMetaById.set(String(point.fileId), {
+                paretoState: "new-front",
+                replacedParetoCoords,
+            });
+        }
+    }
+
+    return { paretoFrontCount, fileMetaById };
+}
 
 export async function getCommandByAuthKey(authKey) {
     const result = await withDbRetry(() => sql`
@@ -27,7 +162,7 @@ export async function getCommandByAuthKey(authKey) {
     return result.rows[0];
 }
 
-export async function loadUploadRequestSnapshot({ requestId, commandId, includeFiles = true }) {
+export async function loadUploadRequestSnapshot({ requestId, commandId, includeFiles = true, commandName = "" }) {
     const requestRes = await withDbRetry(() => sql`
       select *
       from upload_requests
@@ -46,6 +181,17 @@ export async function loadUploadRequestSnapshot({ requestId, commandId, includeF
           order by order_index asc
         `);
         files = filesRes.rows.map(normalizeUploadRequestFileRow);
+        const paretoState = await computeUploadParetoState({ requestId, commandId, commandName });
+        request.paretoFrontCount = Number(paretoState.paretoFrontCount || 0);
+        files = files.map((row) => {
+            const meta = paretoState.fileMetaById.get(String(row.id || ""));
+            if (!meta) return row;
+            return {
+                ...row,
+                paretoState: String(meta.paretoState || ""),
+                replacedParetoCoords: Array.isArray(meta.replacedParetoCoords) ? meta.replacedParetoCoords : [],
+            };
+        });
     }
     return { request, files };
 }
@@ -91,6 +237,32 @@ export async function refreshUploadRequestCounters(requestId) {
           end
       where id = ${requestId}
     `);
+    const reqMetaRes = await withDbRetry(() => sql`
+      select command_id
+      from upload_requests
+      where id = ${requestId}
+      limit 1
+    `);
+    const commandId = Number(reqMetaRes.rows[0]?.command_id || 0);
+    if (commandId > 0) {
+        const paretoState = await computeUploadParetoState({
+            requestId,
+            commandId,
+        });
+        await withDbRetry(() => sql`
+          update upload_requests
+          set pareto_front_count = ${Math.max(0, Number(paretoState.paretoFrontCount || 0))}
+          where id = ${requestId}
+        `);
+        for (const [fileId, meta] of paretoState.fileMetaById.entries()) {
+            await withDbRetry(() => sql`
+              update upload_request_files
+              set pareto_state = ${String(meta?.paretoState || "")},
+                  replaced_pareto_coords = ${buildReplacedCoordsPayload(meta?.replacedParetoCoords || [])}
+              where id = ${fileId}
+            `);
+        }
+    }
 }
 
 export async function markRemainingAsNonProcessed(

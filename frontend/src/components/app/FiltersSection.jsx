@@ -1,13 +1,19 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { commandColor, statusColor } from "../../utils/pointUtils.js";
 
+const PARETO_FRONT_ONLY_LABEL = "pareto front only";
+
 export function FiltersSection({
     benchmarkMenuRef,
     benchmarkMenuOpen,
     benchmarkLabel,
-    onBenchmarkMenuToggle,
+    benchmarkInputValue,
+    onBenchmarkInputChange,
+    onBenchmarkInputFocus,
+    onBenchmarkInputBlur,
+    onBenchmarkInputKeyDown,
+    benchmarkInputSuggestions,
     onSelectBenchmark,
-    availableBenchmarks,
     colorMode,
     onColorModeChange,
     commandQuery,
@@ -33,31 +39,41 @@ export function FiltersSection({
 
             <div className="form">
                 <label className="field">
-                    <span>1) Benchmark</span>
+                    <span className="fieldLabelWithHelp">
+                        <span>Benchmark</span>
+                        <span className="helpTipWrap" tabIndex={0} aria-label="Benchmark selection help">
+                            <span className="helpTipIcon">?</span>
+                            <span className="helpTipPanel">
+                                <span className="cardHint">To select a benchmark, type its number.</span>
+                                <span className="cardHint">The list shows all options matching the typed prefix.</span>
+                            </span>
+                        </span>
+                    </span>
                     <div className="benchmarkDropdown" ref={benchmarkMenuRef}>
-                        <button
-                            className="benchmarkTrigger"
-                            type="button"
-                            onClick={onBenchmarkMenuToggle}
+                        <input
+                            value={benchmarkInputValue}
+                            onChange={(e) => onBenchmarkInputChange(e.target.value)}
+                            onFocus={onBenchmarkInputFocus}
+                            onBlur={onBenchmarkInputBlur}
+                            onKeyDown={onBenchmarkInputKeyDown}
+                            placeholder={benchmarkLabel}
+                            aria-label="Benchmark"
                             aria-expanded={benchmarkMenuOpen ? "true" : "false"}
-                        >
-                            <span>{benchmarkLabel}</span>
-                            <span className="benchmarkCaret">{benchmarkMenuOpen ? "▲" : "▼"}</span>
-                        </button>
+                        />
 
                         {benchmarkMenuOpen ? (
                             <div className="benchmarkMenu" role="listbox">
-                                <button className="benchmarkOption" type="button" onClick={() => onSelectBenchmark("test")}>
-                                    test
-                                </button>
-                                {availableBenchmarks.map((b) => (
+                                {benchmarkInputSuggestions.length === 0 ? (
+                                    <div className="cardHint benchmarkEmpty">No benchmark by prefix.</div>
+                                ) : benchmarkInputSuggestions.map((value) => (
                                     <button
-                                        key={b}
+                                        key={value}
                                         className="benchmarkOption"
                                         type="button"
-                                        onClick={() => onSelectBenchmark(String(b))}
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => onSelectBenchmark(String(value))}
                                     >
-                                        {b}
+                                        {value}
                                     </button>
                                 ))}
                             </div>
@@ -66,7 +82,7 @@ export function FiltersSection({
                 </label>
 
                 <label className="field">
-                    <span>2) Color by</span>
+                    <span>Color by</span>
                     <select value={colorMode} onChange={(e) => onColorModeChange(e.target.value)}>
                         <option value="status">Status</option>
                         <option value="users">Users</option>
@@ -74,7 +90,7 @@ export function FiltersSection({
                 </label>
 
                 <div className="field">
-                    <span>3) Show statuses</span>
+                    <span>Show statuses</span>
 
                     <div className={colorMode === "users" ? "statusUsersRow" : undefined}>
                         {colorMode === "users" ? (
@@ -194,7 +210,7 @@ export function FiltersSection({
                                     checked={showParetoOnly}
                                     onChange={(e) => onShowParetoOnlyChange(e.target.checked)}
                                 />
-                                <span>Pareto front only</span>
+                                <span className="paretoOnlyText">{PARETO_FRONT_ONLY_LABEL}</span>
                             </label>
                         </div>
                     </div>

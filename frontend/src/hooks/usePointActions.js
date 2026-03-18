@@ -67,6 +67,18 @@ export function usePointActions({
         return true;
     }
 
+    async function deletePointsByIds(ids) {
+        const unique = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || "").trim()).filter(Boolean)));
+        const failed = [];
+        const deleted = [];
+        for (const id of unique) {
+            const ok = await deletePointById(id);
+            if (ok) deleted.push(id);
+            else failed.push(id);
+        }
+        return { deleted, failed };
+    }
+
     function openPointActionModal(pointId) {
         const point = points.find((x) => x.id === pointId);
         if (!point) return;
@@ -92,6 +104,8 @@ export function usePointActions({
         downloadCircuit,
         openPointActionModal,
         closePointActionModal,
+        deletePointById,
+        deletePointsByIds,
         confirmAndDeletePoint,
     };
 }

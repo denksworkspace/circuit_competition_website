@@ -106,6 +106,7 @@ export default async function handler(req, res) {
         requestId,
         commandId: command.id,
         includeFiles: false,
+        commandName: command.name,
     });
     if (!initialSnapshot) {
         res.status(404).json({ error: "Upload request not found." });
@@ -114,7 +115,7 @@ export default async function handler(req, res) {
     const initialRequest = initialSnapshot.request;
     const initialStatus = String(initialRequest.status || "").toLowerCase();
     if (TERMINAL.has(initialStatus) || initialStatus === REQUEST_STATUS_WAITING_MANUAL_VERDICT) {
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
         res.status(200).json(ready);
         return;
     }
@@ -134,14 +135,14 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
         res.status(200).json(ready);
         return;
     }
 
     if (initialRequest.stopRequested) {
         await markRemainingAsNonProcessed(requestId);
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
         res.status(200).json(ready);
         return;
     }
@@ -156,7 +157,7 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
         res.status(200).json(ready);
         return;
     }
@@ -211,7 +212,7 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
             res.status(200).json(ready);
             return;
         }
@@ -274,7 +275,7 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
             res.status(200).json(ready);
             return;
         }
@@ -299,7 +300,7 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
             res.status(200).json(ready);
             return;
         }
@@ -325,7 +326,7 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
         res.status(200).json(ready);
         return;
     } finally {
@@ -336,6 +337,7 @@ export default async function handler(req, res) {
         requestId,
         commandId: command.id,
         includeFiles: false,
+        commandName: command.name,
     });
     if (postRunSnapshot?.request?.stopRequested) {
         await markRemainingAsNonProcessed(requestId);
@@ -361,6 +363,6 @@ export default async function handler(req, res) {
         }
     }
 
-    const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true });
+    const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
     res.status(200).json(ready);
 }
