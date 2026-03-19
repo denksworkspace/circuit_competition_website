@@ -7,7 +7,7 @@ import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import { ensureUploadQueueSchema, normalizeUploadRequestRow, normalizeUploadRequestFileRow } from "./_lib/uploadQueue.js";
 import { getCommandByAuthKey, loadUploadRequestSnapshot, refreshUploadRequestCounters } from "./_lib/uploadQueueOps.js";
 import { applyUploadQueueFileRow } from "./_lib/uploadQueueProcessing.js";
-import { deleteQueueObject, downloadQueueFileText } from "./_lib/queueS3.js";
+import { downloadQueueFileText } from "./_lib/queueS3.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -70,7 +70,6 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${row.id}
             `;
-            await deleteQueueObject(row.queueFileKey);
             continue;
         }
         const downloaded = await downloadQueueFileText(row.queueFileKey);
@@ -99,7 +98,6 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${row.id}
         `;
-        await deleteQueueObject(row.queueFileKey);
     }
 
     await refreshUploadRequestCounters(requestId);

@@ -711,33 +711,21 @@ export function useBenchUploadFlow({
         setIsManualApplying(true);
         setManualApplyProgress({ processed: 0, total: selected.length });
         try {
-            const errors = [];
-            let processed = 0;
-            for (const fileId of selected) {
-                if (!activeRequestIdRef.current) break;
-                try {
-                    const applied = await applyPointsUploadRequestFiles({
-                        authKey: authKeyDraft,
-                        requestId: activeRequestIdRef.current,
-                        fileIds: [fileId],
-                    });
-                    updateStateFromSnapshot(applied);
-                    if ((applied?.errors || []).length > 0) {
-                        errors.push(...applied.errors.map((message) => String(message || "Failed to apply selected file.")));
-                    }
-                } catch (error) {
-                    errors.push(String(error?.message || "Failed to apply selected file."));
-                } finally {
-                    processed += 1;
-                    setManualApplyProgress((prev) => (prev ? { ...prev, processed } : prev));
-                }
-            }
+            const applied = await applyPointsUploadRequestFiles({
+                authKey: authKeyDraft,
+                requestId: activeRequestIdRef.current,
+                fileIds: selected,
+            });
+            updateStateFromSnapshot(applied);
+            setManualApplyProgress((prev) => (prev ? { ...prev, processed: selected.length } : prev));
             await refreshPointsAfterRequest();
-            if (errors.length > 0) {
-                setUploadError(errors[0]);
+            if ((applied?.errors || []).length > 0) {
+                setUploadError(String(applied.errors[0] || "Failed to apply selected files."));
             } else {
                 setUploadError(" ");
             }
+        } catch (error) {
+            setUploadError(String(error?.message || "Failed to apply selected files."));
         } finally {
             setIsManualApplying(false);
             setManualApplyProgress(null);

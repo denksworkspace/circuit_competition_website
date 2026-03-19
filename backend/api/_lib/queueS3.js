@@ -1,5 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import { buildPresignedDeleteUrl, buildPresignedPutUrl } from "./s3Presign.js";
+import { buildPresignedPutUrl } from "./s3Presign.js";
 
 function sanitizeToken(raw) {
     return (
@@ -66,26 +66,6 @@ export function buildQueueUploadUrl(objectKey, expiresSeconds = 900) {
         objectKey,
         expiresSeconds,
     });
-}
-
-export async function deleteQueueObject(objectKey) {
-    const { accessKeyId, secretAccessKey, sessionToken, region } = readAwsConfig();
-    const bucket = getQueueBucketName();
-    if (!accessKeyId || !secretAccessKey || !region || !bucket || !objectKey) return;
-    const url = buildPresignedDeleteUrl({
-        bucket,
-        region,
-        accessKeyId,
-        secretAccessKey,
-        sessionToken,
-        objectKey,
-        expiresSeconds: 900,
-    });
-    try {
-        await fetch(url, { method: "DELETE" });
-    } catch {
-        // best-effort cleanup
-    }
 }
 
 export async function downloadQueueFileText(objectKey, { signal = null } = {}) {

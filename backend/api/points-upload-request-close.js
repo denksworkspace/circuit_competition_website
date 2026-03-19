@@ -4,7 +4,6 @@ import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { REQUEST_STATUS_CLOSED, ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
 import { getCommandByAuthKey, loadUploadRequestSnapshot, refreshUploadRequestCounters } from "./_lib/uploadQueueOps.js";
-import { deleteQueueObject } from "./_lib/queueS3.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -37,11 +36,6 @@ export default async function handler(req, res) {
     if (!snapshot) {
         res.status(404).json({ error: "Upload request not found." });
         return;
-    }
-
-    const pendingCleanupRows = snapshot.files.filter((row) => !row.applied && row.queueFileKey);
-    for (const row of pendingCleanupRows) {
-        await deleteQueueObject(row.queueFileKey);
     }
 
     await sql`

@@ -26,7 +26,7 @@ import {
     markRemainingAsNonProcessed,
     refreshUploadRequestCounters,
 } from "./_lib/uploadQueueOps.js";
-import { deleteQueueObject, downloadQueueFileText } from "./_lib/queueS3.js";
+import { downloadQueueFileText } from "./_lib/queueS3.js";
 import { processUploadQueueFile } from "./_lib/uploadQueueProcessing.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 
@@ -245,9 +245,6 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${nextFile.id}
         `;
-        if (processed.applied) {
-            await deleteQueueObject(nextFile.queueFileKey);
-        }
         await refreshUploadRequestCounters(requestId);
     } catch (error) {
         if (isAbortLikeError(error) || stopMonitor.signal.aborted) {

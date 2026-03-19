@@ -63,7 +63,7 @@ import {
     loadUploadRequestSnapshot,
     markRemainingAsNonProcessed,
 } from "../../api/_lib/uploadQueueOps.js";
-import { deleteQueueObject, downloadQueueFileText } from "../../api/_lib/queueS3.js";
+import { downloadQueueFileText } from "../../api/_lib/queueS3.js";
 import { applyUploadQueueFileRow, processUploadQueueFile } from "../../api/_lib/uploadQueueProcessing.js";
 import runHandler from "../../api/points-upload-request-run.js";
 import stopHandler from "../../api/points-upload-request-stop.js";
@@ -223,7 +223,6 @@ describe("upload request lifecycle handlers", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.savedPoints).toHaveLength(1);
         expect(res.body.errors).toHaveLength(1);
-        expect(deleteQueueObject).toHaveBeenCalledWith("queue/a");
     });
 
     it("close cleans up non-applied queue files", async () => {
@@ -252,7 +251,5 @@ describe("upload request lifecycle handlers", () => {
         await closeHandler(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(deleteQueueObject).toHaveBeenCalledWith("queue/f1");
-        expect(deleteQueueObject).toHaveBeenCalledTimes(1);
     });
 });
