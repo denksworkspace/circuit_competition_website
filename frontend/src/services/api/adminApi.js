@@ -3,8 +3,8 @@ import { apiUrl, parseJsonSafe } from "../http/client.js";
 export async function runAdminBulkVerify({
     authKey,
     checkerVersion,
-    includeVerified = true,
-    includeDeleted = true,
+    includedStatuses = [],
+    includeDeleted = false,
     signal,
     progressToken,
 }) {
@@ -12,7 +12,7 @@ export async function runAdminBulkVerify({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal,
-        body: JSON.stringify({ authKey, checkerVersion, includeVerified, includeDeleted, progressToken }),
+        body: JSON.stringify({ authKey, checkerVersion, includedStatuses, includeDeleted, progressToken }),
     });
     const data = await parseJsonSafe(response);
     if (!response.ok) {

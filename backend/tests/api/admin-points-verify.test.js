@@ -95,4 +95,32 @@ describe("api/admin-points-verify", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.log[0].sourceStatus).toBe("deleted");
     });
+
+    it("filters bulk verification by included statuses", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, role: "admin" }] });
+        sql.mockResolvedValueOnce({
+            rows: [
+                { id: "p1", benchmark: "254", file_name: "bench254_1_2_u1_x.bench", status: "verified", lifecycle_status: "main" },
+                { id: "p2", benchmark: "254", file_name: "bench254_2_3_u1_y.bench", status: "failed", lifecycle_status: "main" },
+            ],
+        });
+        downloadPointCircuitText.mockResolvedValueOnce({ ok: true, circuitText: "candidate" });
+        verifyCircuitWithTruth.mockResolvedValueOnce({ ok: true, equivalent: true });
+
+        const req = createMockReq({
+            method: "POST",
+            body: {
+                authKey: "k",
+                checkerVersion: "ABC",
+                includedStatuses: ["verified"],
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(downloadPointCircuitText).toHaveBeenCalledTimes(1);
+        expect(res.body.log).toHaveLength(1);
+        expect(res.body.log[0].pointId).toBe("p1");
+    });
 });

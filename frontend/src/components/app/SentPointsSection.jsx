@@ -18,8 +18,15 @@ export function SentPointsSection({
     submissionStatusFilter,
     toggleSubmissionStatus,
     submissionBenchmarkFilter,
-    onSubmissionBenchmarkFilterChange,
-    submissionBenchmarkOptions,
+    submissionBenchmarkMenuRef,
+    submissionBenchmarkMenuOpen,
+    submissionBenchmarkInputValue,
+    onSubmissionBenchmarkInputChange,
+    onSubmissionBenchmarkInputFocus,
+    onSubmissionBenchmarkInputBlur,
+    onSubmissionBenchmarkInputKeyDown,
+    submissionBenchmarkInputSuggestions,
+    onSelectSubmissionBenchmark,
     submissionSortOrder,
     onSubmissionSortOrderChange,
     submissionParetoOnly,
@@ -98,16 +105,35 @@ export function SentPointsSection({
                     <div className="sentFiltersRight">
                         <label className="field">
                             <span>Benchmark</span>
-                            <select
-                                value={submissionBenchmarkFilter}
-                                onChange={(e) => onSubmissionBenchmarkFilterChange(e.target.value)}
-                            >
-                                {submissionBenchmarkOptions.map((option) => (
-                                    <option key={option} value={option}>
-                                        {option}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="benchmarkDropdown" ref={submissionBenchmarkMenuRef}>
+                                <input
+                                    value={submissionBenchmarkInputValue}
+                                    onChange={(e) => onSubmissionBenchmarkInputChange(String(e.target.value || ""))}
+                                    onFocus={onSubmissionBenchmarkInputFocus}
+                                    onBlur={onSubmissionBenchmarkInputBlur}
+                                    onKeyDown={onSubmissionBenchmarkInputKeyDown}
+                                    placeholder={submissionBenchmarkFilter}
+                                    aria-label="Submission benchmark"
+                                    aria-expanded={submissionBenchmarkMenuOpen ? "true" : "false"}
+                                />
+                                {submissionBenchmarkMenuOpen ? (
+                                    <div className="benchmarkMenu" role="listbox">
+                                        {submissionBenchmarkInputSuggestions.length === 0 ? (
+                                            <div className="cardHint benchmarkEmpty">No benchmark by prefix.</div>
+                                        ) : submissionBenchmarkInputSuggestions.map((option) => (
+                                            <button
+                                                key={option}
+                                                className="benchmarkOption"
+                                                type="button"
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={() => onSelectSubmissionBenchmark(String(option))}
+                                            >
+                                                {option}
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
                         </label>
 
                         <label className="field">

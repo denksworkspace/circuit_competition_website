@@ -39,6 +39,33 @@ function isParserNonVerdictReason(reasonRaw) {
     );
 }
 
+function normalizeParserFailureReason(stats) {
+    const code = String(stats?.code || "").trim().toUpperCase();
+    const message = String(stats?.message || "").trim();
+    const output = String(stats?.output || "").trim();
+    const merged = `${message}\n${output}`.toLowerCase();
+
+    if (code === "ABC_TIMEOUT" || merged.includes("timed out") || merged.includes("timeout")) {
+        return "Parser failed: ABC timed out while computing circuit metrics.";
+    }
+    if (code === "ABC_NOT_FOUND") {
+        return "Parser failed: internal ABC parser is not available on server.";
+    }
+    if (
+        merged.includes("abc_objaddfanin")
+        || (merged.includes("assertion") && merged.includes("read_bench"))
+        || merged.includes("segmentation fault")
+        || merged.includes("core dumped")
+    ) {
+        return "Parser failed: the .bench file has an invalid gate/net structure, so ABC could not parse it.";
+    }
+    if (code === "ABC_ABORTED") {
+        return "Parser failed: parser execution was aborted.";
+    }
+    if (message) return message;
+    return "Failed to compute metrics with ABC.";
+}
+
 function toAbortError(message = "Upload processing aborted.") {
     const error = new Error(message);
     error.name = "AbortError";
@@ -68,7 +95,7 @@ async function runParser({ circuitText, originalFileName, timeoutMs, reportPhase
         throw toAbortError();
     }
     if (!stats.ok) {
-        const reason = stats.message || "Failed to compute metrics with ABC.";
+        const reason = normalizeParserFailureReason(stats);
         return {
             parserKind: isParserNonVerdictReason(reason) ? "non-verdict" : "failed",
             parsed,

@@ -50,6 +50,7 @@ export function ChartSection({
     onFitViewToPareto,
     onFitViewToAllVisiblePoints,
     truthTableOn,
+    chartPointCount,
 }) {
     const sliderPercent = dateSliderMaxDays > 0
         ? Math.min(100, Math.max(0, (dateSliderDayOffset / dateSliderMaxDays) * 100))
@@ -61,6 +62,7 @@ export function ChartSection({
                 <div>
                     <div className="cardTitleRow">
                         <div className="cardTitle">Pareto curve</div>
+                        <div className="pill subtle">{Number(chartPointCount || 0)} points</div>
                         <div className="helpTipWrap" tabIndex={0} aria-label="Pareto frontier help">
                             <span className="helpTipIcon">?</span>
                             <div className="helpTipPanel">

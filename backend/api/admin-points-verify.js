@@ -13,6 +13,24 @@ import {
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
+const ALLOWED_POINT_STATUSES = new Set(["non-verified", "verified", "failed"]);
+
+function normalizeIncludedStatuses(rawStatuses, includeVerifiedFallback) {
+    if (Array.isArray(rawStatuses)) {
+        const normalized = Array.from(
+            new Set(
+                rawStatuses
+                    .map((item) => String(item || "").trim().toLowerCase())
+                    .filter((status) => ALLOWED_POINT_STATUSES.has(status))
+            )
+        );
+        return normalized;
+    }
+    const fallback = ["non-verified", "failed"];
+    if (Boolean(includeVerifiedFallback ?? true)) fallback.push("verified");
+    return fallback;
+}
+
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
 
@@ -20,7 +38,7 @@ export default async function handler(req, res) {
     const authKey = String(body?.authKey || "").trim();
     const checkerVersion = normalizeCheckerVersion(body?.checkerVersion || CHECKER_ABC);
     const pointId = body?.pointId ? String(body.pointId) : null;
-    const includeVerified = Boolean(body?.includeVerified ?? true);
+    const includedStatuses = normalizeIncludedStatuses(body?.includedStatuses, body?.includeVerified);
     const includeDeleted = Boolean(body?.includeDeleted ?? false);
     const progressToken = String(body?.progressToken || "").trim();
     const report = (status, patch = {}) => setVerifyProgress(progressToken, { status, ...patch });
@@ -56,7 +74,7 @@ export default async function handler(req, res) {
     const verifyTimeoutSeconds = Math.max(1, Number(authRes.rows[0].abc_verify_timeout_seconds || 60));
     const verifyTimeoutMs = verifyTimeoutSeconds * 1000;
 
-    const pointsRes = pointId
+    const pointsResRaw = pointId
         ? await sql`
           select id, benchmark, file_name, status, lifecycle_status
           from points
@@ -69,16 +87,22 @@ export default async function handler(req, res) {
           select id, benchmark, file_name, status, lifecycle_status
           from points
           where benchmark <> 'test'
-            and (${includeVerified}::boolean or lower(coalesce(status, '')) <> 'verified')
             and (${includeDeleted}::boolean or lower(coalesce(lifecycle_status, 'main')) <> 'deleted')
           order by created_at desc
         `;
+    const pointsRows = pointId
+        ? pointsResRaw.rows
+        : pointsResRaw.rows.filter((row) => {
+            const status = String(row?.status || "").trim().toLowerCase();
+            if (!status) return true;
+            return includedStatuses.includes(status);
+        });
 
     const log = [];
-    const totalCount = Number(pointsRes.rows.length || 0);
+    const totalCount = Number(pointsRows.length || 0);
     let doneCount = 0;
     report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: "" });
-    for (const point of pointsRes.rows) {
+    for (const point of pointsRows) {
         const pointId = String(point.id);
         const benchmark = String(point.benchmark || "");
         const fileName = String(point.file_name || "");

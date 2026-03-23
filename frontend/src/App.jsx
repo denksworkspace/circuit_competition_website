@@ -22,6 +22,7 @@ import { PointActionModal } from "./components/app/PointActionModal.jsx";
 import { ManualPointApplyModal } from "./components/app/ManualPointApplyModal.jsx";
 import { SubmissionsDeleteModal } from "./components/app/SubmissionsDeleteModal.jsx";
 import { MaintenanceScreen } from "./components/app/MaintenanceScreen.jsx";
+import { ParetoExportModal } from "./components/app/ParetoExportModal.jsx";
 import {
     buildAxis,
     computeParetoFrontOriginal,
@@ -41,14 +42,16 @@ import { usePointActions } from "./hooks/usePointActions.js";
 import { usePointTesting } from "./hooks/usePointTesting.js";
 import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
 import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
-import { downloadTextAsFile } from "./utils/fileDownloadUtils.js";
-import { fetchMaintenanceStatus } from "./services/apiClient.js";
+import { downloadBlobAsFile, downloadTextAsFile } from "./utils/fileDownloadUtils.js";
+import { exportParetoPointsZip, fetchMaintenanceStatus, fetchParetoExportStatus } from "./services/apiClient.js";
+import paretoPortraitImage from "./assets/vilfredo-pareto-portrait.jpg";
 
 const CHECKER_ABC = "ABC";
 const CHECKER_ABC_FAST_HEX = "ABC_FAST_HEX";
 const DEFAULT_CHECKER_VERSION = CHECKER_ABC;
 const ENABLED_CHECKERS = new Set([CHECKER_ABC, CHECKER_ABC_FAST_HEX]);
 const DATE_SLIDER_MIN_UTC_MS = Date.UTC(2026, 1, 1);
+const DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS = Date.UTC(2026, 2, 23, 0, 0, 0, 0);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INITIAL_DATE_SLIDER_MAX_UTC_MS = Math.max(DATE_SLIDER_MIN_UTC_MS, toUtcDayStartMs(Date.now()));
 
@@ -59,6 +62,45 @@ function toUtcDayStartMs(input) {
 
 function toIsoDateLabel(utcMs) {
     return new Date(utcMs).toISOString().slice(0, 10);
+}
+
+function parseUtcDateStartMs(raw) {
+    const value = String(raw || "").trim();
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+    const utcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+    const date = new Date(utcMs);
+    if (
+        date.getUTCFullYear() !== year
+        || date.getUTCMonth() !== month - 1
+        || date.getUTCDate() !== day
+    ) {
+        return null;
+    }
+    return utcMs;
+}
+
+function toIsoDateTimeLabel(utcMs) {
+    const value = Number(utcMs);
+    if (!Number.isFinite(value)) return "-";
+    const date = new Date(value);
+    const yyyy = String(date.getUTCFullYear());
+    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(date.getUTCDate()).padStart(2, "0");
+    const hh = String(date.getUTCHours()).padStart(2, "0");
+    const mi = String(date.getUTCMinutes()).padStart(2, "0");
+    const ss = String(date.getUTCSeconds()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
+}
+
+function toUnixMs(valueRaw) {
+    const parsed = Date.parse(String(valueRaw || ""));
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
 }
 
 function getPointCreatedAtMs(point) {
@@ -100,6 +142,16 @@ export default function App() {
     const [selectedCommands, setSelectedCommands] = useState(() => []);
     const selectedCommandSet = useMemo(() => new Set(selectedCommands), [selectedCommands]);
     const { benchmarkMenuOpen, setBenchmarkMenuOpen, benchmarkMenuRef } = useBenchmarkMenu();
+    const {
+        benchmarkMenuOpen: submissionBenchmarkMenuOpen,
+        setBenchmarkMenuOpen: setSubmissionBenchmarkMenuOpen,
+        benchmarkMenuRef: submissionBenchmarkMenuRef,
+    } = useBenchmarkMenu();
+    const {
+        benchmarkMenuOpen: paretoExportBenchmarkMenuOpen,
+        setBenchmarkMenuOpen: setParetoExportBenchmarkMenuOpen,
+        benchmarkMenuRef: paretoExportBenchmarkMenuRef,
+    } = useBenchmarkMenu();
 
     function addSelectedCommand(name) {
         setSelectedCommands((prev) => (prev.includes(name) ? prev : [...prev, name]));
@@ -117,6 +169,22 @@ export default function App() {
         message: "",
     }));
     const maintenancePollRef = useRef(null);
+    const paretoStatusPollRef = useRef(null);
+    const [hasNewPareto, setHasNewPareto] = useState(false);
+    const [lastParetoExportAt, setLastParetoExportAt] = useState(null);
+    const [isParetoExportModalOpen, setIsParetoExportModalOpen] = useState(false);
+    const [paretoExportDateMode, setParetoExportDateMode] = useState("since_last_export");
+    const [paretoExportDate, setParetoExportDate] = useState(() => toIsoDateLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS));
+    const [paretoExportBench, setParetoExportBench] = useState("all");
+    const [paretoExportBenchmarkInputValue, setParetoExportBenchmarkInputValue] = useState("all");
+    const [paretoExportParetoOnly, setParetoExportParetoOnly] = useState(true);
+    const [paretoExportStatusFilter, setParetoExportStatusFilter] = useState(() => ({
+        "non-verified": false,
+        verified: true,
+        failed: false,
+    }));
+    const [isParetoExporting, setIsParetoExporting] = useState(false);
+    const [paretoExportError, setParetoExportError] = useState("");
 
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
@@ -196,8 +264,10 @@ export default function App() {
         isBulkVerifyRunning,
         selectedBulkVerifyChecker,
         setSelectedBulkVerifyChecker,
-        bulkVerifyIncludeVerified,
-        setBulkVerifyIncludeVerified,
+        bulkVerifyStatusFilter,
+        toggleBulkVerifyStatus,
+        bulkVerifyIncludeDeleted,
+        setBulkVerifyIncludeDeleted,
         bulkVerifyCurrentFileName,
         bulkVerifyLogText,
         isBulkMetricsAuditRunning,
@@ -325,6 +395,7 @@ export default function App() {
         failed: true,
     }));
     const [submissionBenchmarkFilter, setSubmissionBenchmarkFilter] = useState("all");
+    const [submissionBenchmarkInputValue, setSubmissionBenchmarkInputValue] = useState("all");
     const [submissionSortOrder, setSubmissionSortOrder] = useState("desc");
     const [submissionParetoOnly, setSubmissionParetoOnly] = useState(false);
     const [selectedSubmissionIds, setSelectedSubmissionIds] = useState(() => []);
@@ -425,6 +496,16 @@ export default function App() {
         () => ["test", ...availableBenchmarks.map((value) => String(value))],
         [availableBenchmarks]
     );
+    const paretoExportBenchmarkOptions = useMemo(() => {
+        const values = new Set();
+        for (const point of points) {
+            if (String(point?.benchmark || "") === "test") continue;
+            const benchmark = String(point?.benchmark || "").trim();
+            if (!benchmark) continue;
+            values.add(benchmark);
+        }
+        return ["all", ...Array.from(values).sort((lhs, rhs) => Number(lhs) - Number(rhs))];
+    }, [points]);
     const benchmarkInputSuggestions = useMemo(() => {
         const query = benchmarkInputValue.trim().toLowerCase();
         return benchmarkOptionValues.filter((value) => {
@@ -432,6 +513,32 @@ export default function App() {
             return value.toLowerCase().startsWith(query);
         });
     }, [benchmarkInputValue, benchmarkOptionValues]);
+    const paretoExportBenchmarkInputSuggestions = useMemo(() => {
+        const query = paretoExportBenchmarkInputValue.trim().toLowerCase();
+        return paretoExportBenchmarkOptions.filter((value) => {
+            if (!query) return true;
+            return value.toLowerCase().startsWith(query);
+        });
+    }, [paretoExportBenchmarkInputValue, paretoExportBenchmarkOptions]);
+    const paretoExportSinceLastMs = useMemo(
+        () => toUnixMs(lastParetoExportAt) ?? DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS,
+        [lastParetoExportAt]
+    );
+    const paretoExportCustomStartMs = useMemo(
+        () => parseUtcDateStartMs(paretoExportDate),
+        [paretoExportDate]
+    );
+    const paretoExportEffectiveStartMs = paretoExportDateMode === "custom_date"
+        ? paretoExportCustomStartMs
+        : paretoExportSinceLastMs;
+    const paretoExportEffectiveStartLabel = useMemo(
+        () => toIsoDateTimeLabel(paretoExportEffectiveStartMs),
+        [paretoExportEffectiveStartMs]
+    );
+    const paretoExportDateMaxUtcMs = toUtcDayStartMs(Date.now());
+    const paretoExportDateMinUtcMs = paretoExportDateMaxUtcMs - 7 * DAY_MS;
+    const paretoExportDateMaxLabel = toIsoDateLabel(paretoExportDateMaxUtcMs);
+    const paretoExportDateMinLabel = toIsoDateLabel(paretoExportDateMinUtcMs);
 
     // Commands shown in the "Users" picker:
     // show ONLY senders that have at least one point in the currently selected benchmark.
@@ -801,6 +908,69 @@ export default function App() {
         downloadTextAsFile(bulkIdenticalAuditLogText, `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
+    const refreshParetoStatus = useCallback(async () => {
+        if (!currentCommand?.id || !authKeyDraft.trim()) {
+            setHasNewPareto(false);
+            setLastParetoExportAt(null);
+            return;
+        }
+        try {
+            const status = await fetchParetoExportStatus(authKeyDraft);
+            setHasNewPareto(Boolean(status?.hasNewPareto));
+            setLastParetoExportAt(status?.lastParetoExportAt || null);
+        } catch {
+            setHasNewPareto(false);
+        }
+    }, [authKeyDraft, currentCommand?.id]);
+
+    function openParetoExportModal() {
+        setParetoExportError("");
+        setIsParetoExportModalOpen(true);
+    }
+
+    function closeParetoExportModal() {
+        if (isParetoExporting) return;
+        setIsParetoExportModalOpen(false);
+    }
+
+    async function downloadParetoExportZip() {
+        if (!authKeyDraft.trim() || isParetoExporting) return;
+        const mode = paretoExportDateMode === "custom_date" ? "from_date" : "all_new";
+        const includedStatuses = Object.entries(paretoExportStatusFilter)
+            .filter(([, enabled]) => Boolean(enabled))
+            .map(([status]) => status);
+        if (mode === "from_date") {
+            const customDateStartMs = parseUtcDateStartMs(paretoExportDate);
+            if (customDateStartMs == null) {
+                setParetoExportError("Select date.");
+                return;
+            }
+            if (customDateStartMs < paretoExportDateMinUtcMs || customDateStartMs > paretoExportDateMaxUtcMs) {
+                setParetoExportError("Date must be within the last 7 days.");
+                return;
+            }
+        }
+        setParetoExportError("");
+        setIsParetoExporting(true);
+        try {
+            const result = await exportParetoPointsZip({
+                authKey: authKeyDraft,
+                mode,
+                fromDate: mode === "from_date" ? paretoExportDate : "",
+                bench: paretoExportBench,
+                paretoOnly: paretoExportParetoOnly,
+                includedStatuses,
+            });
+            downloadBlobAsFile(result.blob, result.fileName || "pareto-points-export.zip");
+            setIsParetoExportModalOpen(false);
+            await refreshParetoStatus();
+        } catch (error) {
+            setParetoExportError(error?.message || "Failed to export points.");
+        } finally {
+            setIsParetoExporting(false);
+        }
+    }
+
     function formatDelayTick(value) {
         const v = Number(value);
         if (!Number.isFinite(v)) return "";
@@ -821,6 +991,10 @@ export default function App() {
 
     function toggleSubmissionStatus(key) {
         setSubmissionStatusFilter((prev) => ({ ...prev, [key]: !prev[key] }));
+    }
+
+    function toggleParetoExportStatus(key) {
+        setParetoExportStatusFilter((prev) => ({ ...prev, [key]: !prev[key] }));
     }
 
     function setSubmissionSelected(pointId) {
@@ -855,6 +1029,13 @@ export default function App() {
         const withTest = values.includes("test") ? ["test", ...numeric] : numeric;
         return ["all", ...withTest];
     }, [myPoints]);
+    const submissionBenchmarkInputSuggestions = useMemo(() => {
+        const query = submissionBenchmarkInputValue.trim().toLowerCase();
+        return submissionsBenchmarkOptions.filter((value) => {
+            if (!query) return true;
+            return value.toLowerCase().startsWith(query);
+        });
+    }, [submissionBenchmarkInputValue, submissionsBenchmarkOptions]);
 
     const myPointsFiltered = useMemo(() => {
         const filtered = myPoints.filter((point) => {
@@ -940,6 +1121,14 @@ export default function App() {
     }, [benchmarkFilter]);
 
     useEffect(() => {
+        setSubmissionBenchmarkInputValue(String(submissionBenchmarkFilter));
+    }, [submissionBenchmarkFilter]);
+
+    useEffect(() => {
+        setParetoExportBenchmarkInputValue(String(paretoExportBench));
+    }, [paretoExportBench]);
+
+    useEffect(() => {
         let cancelled = false;
 
         const clearPoll = () => {
@@ -1002,6 +1191,52 @@ export default function App() {
         };
     }, [authKeyDraft, currentCommand?.id, currentCommand?.role]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const clearPoll = () => {
+            if (!paretoStatusPollRef.current) return;
+            clearInterval(paretoStatusPollRef.current);
+            paretoStatusPollRef.current = null;
+        };
+
+        const pollOnce = async () => {
+            try {
+                await refreshParetoStatus();
+            } catch {
+                // Status poll errors are handled inside refreshParetoStatus.
+            }
+        };
+
+        clearPoll();
+        if (!currentCommand?.id || !authKeyDraft.trim()) {
+            setHasNewPareto(false);
+            setLastParetoExportAt(null);
+            return () => {
+                cancelled = true;
+                clearPoll();
+            };
+        }
+
+        void (async () => {
+            await pollOnce();
+            if (cancelled) return;
+            paretoStatusPollRef.current = setInterval(() => {
+                void pollOnce();
+            }, 15000);
+        })();
+
+        return () => {
+            cancelled = true;
+            clearPoll();
+        };
+    }, [authKeyDraft, currentCommand?.id, refreshParetoStatus]);
+
+    useEffect(() => {
+        if (paretoExportBenchmarkOptions.includes(paretoExportBench)) return;
+        setParetoExportBench("all");
+    }, [paretoExportBenchmarkOptions, paretoExportBench]);
+
     function focusPoint(p) {
         if (!p) return;
         setBenchmarkFilter(String(p.benchmark));
@@ -1035,6 +1270,70 @@ export default function App() {
         const matched = benchmarkOptionValues.find((value) => value.toLowerCase() === nextBenchmark.toLowerCase());
         if (!matched) return;
         onSelectBenchmark(matched);
+    }
+
+    function onSelectSubmissionBenchmark(benchmark) {
+        const nextBenchmark = String(benchmark);
+        setSubmissionBenchmarkFilter(nextBenchmark);
+        setSubmissionBenchmarkInputValue(nextBenchmark);
+        setSubmissionBenchmarkMenuOpen(false);
+    }
+
+    function onSubmissionBenchmarkInputFocus() {
+        setSubmissionBenchmarkInputValue("");
+        setSubmissionBenchmarkMenuOpen(true);
+    }
+
+    function onSubmissionBenchmarkInputChange(value) {
+        setSubmissionBenchmarkInputValue(value);
+        setSubmissionBenchmarkMenuOpen(true);
+    }
+
+    function onSubmissionBenchmarkInputBlur() {
+        setSubmissionBenchmarkInputValue(String(submissionBenchmarkFilter));
+        setSubmissionBenchmarkMenuOpen(false);
+    }
+
+    function onSubmissionBenchmarkInputKeyDown(event) {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const nextBenchmark = submissionBenchmarkInputValue.trim();
+        if (!nextBenchmark) return;
+        const matched = submissionsBenchmarkOptions.find((value) => value.toLowerCase() === nextBenchmark.toLowerCase());
+        if (!matched) return;
+        onSelectSubmissionBenchmark(matched);
+    }
+
+    function onSelectParetoExportBenchmark(benchmark) {
+        const nextBenchmark = String(benchmark);
+        setParetoExportBench(nextBenchmark);
+        setParetoExportBenchmarkInputValue(nextBenchmark);
+        setParetoExportBenchmarkMenuOpen(false);
+    }
+
+    function onParetoExportBenchmarkInputFocus() {
+        setParetoExportBenchmarkInputValue("");
+        setParetoExportBenchmarkMenuOpen(true);
+    }
+
+    function onParetoExportBenchmarkInputChange(value) {
+        setParetoExportBenchmarkInputValue(value);
+        setParetoExportBenchmarkMenuOpen(true);
+    }
+
+    function onParetoExportBenchmarkInputBlur() {
+        setParetoExportBenchmarkInputValue(String(paretoExportBench));
+        setParetoExportBenchmarkMenuOpen(false);
+    }
+
+    function onParetoExportBenchmarkInputKeyDown(event) {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const nextBenchmark = paretoExportBenchmarkInputValue.trim();
+        if (!nextBenchmark) return;
+        const matched = paretoExportBenchmarkOptions.find((value) => value.toLowerCase() === nextBenchmark.toLowerCase());
+        if (!matched) return;
+        onSelectParetoExportBenchmark(matched);
     }
 
     function openDeleteSelectedSubmissionsModal() {
@@ -1114,6 +1413,24 @@ export default function App() {
                 </div>
 
                 <div className="topbarRight">
+                    <button
+                        type="button"
+                        className={hasNewPareto ? "bellButton hasNew" : "bellButton"}
+                        onClick={openParetoExportModal}
+                        aria-label="Open Pareto export"
+                        title={lastParetoExportAt
+                            ? `Last export: ${new Date(lastParetoExportAt).toISOString()}`
+                            : `No export yet. Baseline: ${toIsoDateTimeLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS)}`}
+                    >
+                        <img
+                            className="bellIcon paretoPortraitIcon"
+                            src={paretoPortraitImage}
+                            alt="Vilfredo Pareto portrait"
+                            loading="eager"
+                            decoding="async"
+                        />
+                        {hasNewPareto ? <span className="bellAlert">!</span> : null}
+                    </button>
                     <div className="hello helloWithMeta">
                         <span>Hello,</span>
                         <b className="helloName">{currentCommand.name}!</b>
@@ -1183,6 +1500,7 @@ export default function App() {
                         onFitViewToPareto={fitViewToPareto}
                         onFitViewToAllVisiblePoints={fitViewToAllVisiblePoints}
                         truthTableOn={truthTableOn}
+                        chartPointCount={plottedPoints.length}
                     />
 
                     <SentPointsSection
@@ -1199,8 +1517,15 @@ export default function App() {
                         submissionStatusFilter={submissionStatusFilter}
                         toggleSubmissionStatus={toggleSubmissionStatus}
                         submissionBenchmarkFilter={submissionBenchmarkFilter}
-                        onSubmissionBenchmarkFilterChange={setSubmissionBenchmarkFilter}
-                        submissionBenchmarkOptions={submissionsBenchmarkOptions}
+                        submissionBenchmarkMenuRef={submissionBenchmarkMenuRef}
+                        submissionBenchmarkMenuOpen={submissionBenchmarkMenuOpen}
+                        submissionBenchmarkInputValue={submissionBenchmarkInputValue}
+                        onSubmissionBenchmarkInputChange={onSubmissionBenchmarkInputChange}
+                        onSubmissionBenchmarkInputFocus={onSubmissionBenchmarkInputFocus}
+                        onSubmissionBenchmarkInputBlur={onSubmissionBenchmarkInputBlur}
+                        onSubmissionBenchmarkInputKeyDown={onSubmissionBenchmarkInputKeyDown}
+                        submissionBenchmarkInputSuggestions={submissionBenchmarkInputSuggestions}
+                        onSelectSubmissionBenchmark={onSelectSubmissionBenchmark}
                         submissionSortOrder={submissionSortOrder}
                         onSubmissionSortOrderChange={setSubmissionSortOrder}
                         submissionParetoOnly={submissionParetoOnly}
@@ -1358,8 +1683,10 @@ export default function App() {
                             runBulkVerifyAllPoints={runBulkVerifyAllPoints}
                             selectedBulkVerifyChecker={selectedBulkVerifyChecker}
                             onSelectedBulkVerifyCheckerChange={setSelectedBulkVerifyChecker}
-                            bulkVerifyIncludeVerified={bulkVerifyIncludeVerified}
-                            onBulkVerifyIncludeVerifiedChange={setBulkVerifyIncludeVerified}
+                            bulkVerifyStatusFilter={bulkVerifyStatusFilter}
+                            onToggleBulkVerifyStatus={toggleBulkVerifyStatus}
+                            bulkVerifyIncludeDeleted={bulkVerifyIncludeDeleted}
+                            onBulkVerifyIncludeDeletedChange={setBulkVerifyIncludeDeleted}
                             stopBulkVerifyAllPoints={stopBulkVerifyAllPoints}
                             isBulkVerifyRunning={isBulkVerifyRunning}
                             bulkVerifyCurrentFileName={bulkVerifyCurrentFileName}
@@ -1463,6 +1790,35 @@ export default function App() {
                 onClose={() => setIsSubmissionsDeleteModalOpen(false)}
                 isApplying={isSubmissionsDeleting}
                 applyProgress={submissionsDeleteProgress}
+            />
+
+            <ParetoExportModal
+                open={isParetoExportModalOpen}
+                dateMode={paretoExportDateMode}
+                onDateModeChange={setParetoExportDateMode}
+                fromDate={paretoExportDate}
+                onFromDateChange={setParetoExportDate}
+                fromDateMin={paretoExportDateMinLabel}
+                fromDateMax={paretoExportDateMaxLabel}
+                effectiveStartLabel={paretoExportEffectiveStartLabel}
+                benchLabel={paretoExportBench}
+                benchMenuRef={paretoExportBenchmarkMenuRef}
+                benchMenuOpen={paretoExportBenchmarkMenuOpen}
+                benchInputValue={paretoExportBenchmarkInputValue}
+                onBenchInputChange={onParetoExportBenchmarkInputChange}
+                onBenchInputFocus={onParetoExportBenchmarkInputFocus}
+                onBenchInputBlur={onParetoExportBenchmarkInputBlur}
+                onBenchInputKeyDown={onParetoExportBenchmarkInputKeyDown}
+                benchInputSuggestions={paretoExportBenchmarkInputSuggestions}
+                onSelectBench={onSelectParetoExportBenchmark}
+                paretoOnly={paretoExportParetoOnly}
+                onParetoOnlyChange={setParetoExportParetoOnly}
+                statusFilter={paretoExportStatusFilter}
+                onToggleStatus={toggleParetoExportStatus}
+                isExporting={isParetoExporting}
+                onDownload={downloadParetoExportZip}
+                onClose={closeParetoExportModal}
+                error={paretoExportError}
             />
 
             {navigateNotice ? (

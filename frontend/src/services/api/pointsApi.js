@@ -1,4 +1,4 @@
-import { apiUrl, parseJsonSafe } from "../http/client.js";
+import { apiUrl, fetchDownloadFile, parseJsonSafe } from "../http/client.js";
 
 export async function fetchPoints(authKey) {
     const query = new URLSearchParams();
@@ -9,6 +9,59 @@ export async function fetchPoints(authKey) {
         throw new Error(data?.error || "Failed to load points.");
     }
     return Array.isArray(data?.points) ? data.points : [];
+}
+
+export async function fetchParetoExportStatus(authKey) {
+    const query = new URLSearchParams();
+    query.set("authKey", String(authKey || "").trim());
+    const response = await fetch(apiUrl(`/api/pareto-export-status?${query.toString()}`), { cache: "no-store" });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load Pareto export status.");
+    }
+    return {
+        hasNewPareto: Boolean(data?.hasNewPareto),
+        lastParetoExportAt: data?.lastParetoExportAt || null,
+    };
+}
+
+export async function downloadPointCircuitFile({ authKey, pointId, signal }) {
+    return fetchDownloadFile("/api/points-download", {
+        authKey,
+        signal,
+        fallbackName: "circuit.bench",
+        queryParams: {
+            pointId: String(pointId || "").trim(),
+        },
+    });
+}
+
+export async function exportParetoPointsZip({
+    authKey,
+    mode = "all_new",
+    fromDate = "",
+    bench = "all",
+    paretoOnly = true,
+    includedStatuses = [],
+    signal = undefined,
+}) {
+    const normalizedStatuses = Array.isArray(includedStatuses)
+        ? includedStatuses
+            .map((status) => String(status || "").trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+    return fetchDownloadFile("/api/pareto-points-export", {
+        authKey,
+        signal,
+        fallbackName: "pareto-points-export.zip",
+        queryParams: {
+            mode: String(mode || "all_new"),
+            fromDate: String(fromDate || ""),
+            bench: String(bench || "all"),
+            paretoOnly: paretoOnly ? "1" : "0",
+            includedStatuses: normalizedStatuses.join(","),
+        },
+    });
 }
 
 export async function requestUploadUrl({ authKey, fileName, fileSize, batchSize = 1, signal }) {

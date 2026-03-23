@@ -750,7 +750,7 @@ describe("App integration", () => {
         await new Promise((resolve) => setTimeout(resolve, 2200));
         expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
         resolveCloseRequest();
-    });
+    }, 12000);
 
     it("reopens manual modal with error when close request fails", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });

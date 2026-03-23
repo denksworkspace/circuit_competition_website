@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { deletePoint } from "../services/apiClient.js";
+import { deletePoint, downloadPointCircuitFile } from "../services/apiClient.js";
+import { downloadBlobAsFile } from "../utils/fileDownloadUtils.js";
 
 export function usePointActions({
     points,
@@ -12,9 +13,8 @@ export function usePointActions({
     const [actionPoint, setActionPoint] = useState(null);
 
     function getPointDownloadUrl(point) {
-        if (!point || !point.fileName || point.benchmark === "test") return null;
-        if (point.downloadUrl) return point.downloadUrl;
-        return null;
+        if (!point || !point.fileName || point.benchmark === "test" || !point.id) return null;
+        return `download:${String(point.id)}`;
     }
 
     function canDeletePoint(point) {
@@ -29,20 +29,19 @@ export function usePointActions({
     }
 
     async function downloadCircuit(point) {
-        const url = getPointDownloadUrl(point);
-        if (!url) {
+        if (!getPointDownloadUrl(point)) {
             window.alert("File does not exist.");
             return;
         }
-
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = point.fileName || "circuit.bench";
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        try {
+            const result = await downloadPointCircuitFile({
+                authKey: authKeyDraft,
+                pointId: point.id,
+            });
+            downloadBlobAsFile(result.blob, result.fileName || point.fileName || "circuit.bench");
+        } catch (error) {
+            window.alert(error?.message || "Failed to download circuit.");
+        }
     }
 
     async function deletePointById(id) {

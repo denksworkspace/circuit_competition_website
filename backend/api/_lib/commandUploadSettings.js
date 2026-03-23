@@ -43,6 +43,7 @@ export function normalizeCommandUploadSettings(commandRow) {
         commandRow?.abc_metrics_timeout_seconds,
         DEFAULT_ABC_METRICS_TIMEOUT_SECONDS
     );
+    const lastParetoExportAt = commandRow?.last_pareto_export_at || null;
 
     return {
         maxSingleUploadBytes,
@@ -52,6 +53,7 @@ export function normalizeCommandUploadSettings(commandRow) {
         maxMultiFileBatchCount,
         abcVerifyTimeoutSeconds,
         abcMetricsTimeoutSeconds,
+        lastParetoExportAt,
     };
 }
 
@@ -64,6 +66,7 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`alter table commands add column if not exists max_multi_file_batch_count integer`;
             await sql`alter table commands add column if not exists abc_verify_timeout_seconds integer`;
             await sql`alter table commands add column if not exists abc_metrics_timeout_seconds integer`;
+            await sql`alter table commands add column if not exists last_pareto_export_at timestamptz`;
 
             await sql`
               update commands

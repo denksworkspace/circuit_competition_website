@@ -21,7 +21,12 @@ export function useAdminBulkActions({
 }) {
     const [isBulkVerifyRunning, setIsBulkVerifyRunning] = useState(false);
     const [selectedBulkVerifyChecker, setSelectedBulkVerifyChecker] = useState(defaultCheckerVersion);
-    const [bulkVerifyIncludeVerified, setBulkVerifyIncludeVerified] = useState(true);
+    const [bulkVerifyStatusFilter, setBulkVerifyStatusFilter] = useState(() => ({
+        "non-verified": true,
+        verified: false,
+        failed: false,
+    }));
+    const [bulkVerifyIncludeDeleted, setBulkVerifyIncludeDeleted] = useState(false);
     const [bulkVerifyCurrentFileName, setBulkVerifyCurrentFileName] = useState("");
     const [bulkVerifyLogText, setBulkVerifyLogText] = useState("");
     const [isBulkMetricsAuditRunning, setIsBulkMetricsAuditRunning] = useState(false);
@@ -84,6 +89,9 @@ export function useAdminBulkActions({
         if (bulkVerifyAbortRef.current) return;
         const normalizedChecker = normalizeCheckerForActor(checkerVersionRaw);
         const checkerVersion = enabledCheckers.has(normalizedChecker) ? normalizedChecker : defaultCheckerVersion;
+        const includedStatuses = Object.entries(bulkVerifyStatusFilter)
+            .filter(([, enabled]) => Boolean(enabled))
+            .map(([status]) => status);
         const controller = new AbortController();
         bulkVerifyAbortRef.current = controller;
         setIsBulkVerifyRunning(true);
@@ -110,8 +118,8 @@ export function useAdminBulkActions({
             const payload = await runAdminBulkVerify({
                 authKey: authKeyDraft,
                 checkerVersion,
-                includeVerified: bulkVerifyIncludeVerified,
-                includeDeleted: true,
+                includedStatuses,
+                includeDeleted: bulkVerifyIncludeDeleted,
                 signal: controller.signal,
                 progressToken,
             });
@@ -423,6 +431,13 @@ export function useAdminBulkActions({
         bulkVerifyAbortRef.current = null;
     }
 
+    function toggleBulkVerifyStatus(status) {
+        setBulkVerifyStatusFilter((prev) => ({
+            ...prev,
+            [status]: !prev?.[status],
+        }));
+    }
+
     function stopBulkMetricsAudit() {
         if (!bulkMetricsAbortRef.current) return;
         bulkMetricsAbortRef.current.abort();
@@ -506,8 +521,10 @@ export function useAdminBulkActions({
         isBulkVerifyRunning,
         selectedBulkVerifyChecker,
         setSelectedBulkVerifyChecker,
-        bulkVerifyIncludeVerified,
-        setBulkVerifyIncludeVerified,
+        bulkVerifyStatusFilter,
+        toggleBulkVerifyStatus,
+        bulkVerifyIncludeDeleted,
+        setBulkVerifyIncludeDeleted,
         bulkVerifyCurrentFileName,
         bulkVerifyLogText,
         isBulkMetricsAuditRunning,

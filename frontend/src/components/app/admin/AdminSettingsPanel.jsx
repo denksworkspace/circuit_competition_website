@@ -1,4 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
+import { statusColor } from "../../../utils/pointUtils.js";
+
 export function AdminSettingsPanel({
     adminUserIdDraft,
     onAdminUserIdDraftChange,
@@ -43,8 +45,10 @@ export function AdminSettingsPanel({
     onDownloadTruthUploadLog,
     selectedBulkVerifyChecker,
     onSelectedBulkVerifyCheckerChange,
-    bulkVerifyIncludeVerified,
-    onBulkVerifyIncludeVerifiedChange,
+    bulkVerifyStatusFilter,
+    onToggleBulkVerifyStatus,
+    bulkVerifyIncludeDeleted,
+    onBulkVerifyIncludeDeletedChange,
     runBulkVerifyAllPoints,
     isBulkVerifyRunning,
     stopBulkVerifyAllPoints,
@@ -268,14 +272,44 @@ export function AdminSettingsPanel({
                         </select>
                     </label>
                     <label className="field">
-                        <span className="mono">
-                            <input
-                                type="checkbox"
-                                checked={bulkVerifyIncludeVerified}
-                                onChange={(e) => onBulkVerifyIncludeVerifiedChange(e.target.checked)}
-                            />
-                            {" "}Include points with status verified
-                        </span>
+                        <span>Point statuses to check</span>
+                        <div className="checks">
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(bulkVerifyStatusFilter?.["non-verified"])}
+                                    onChange={() => onToggleBulkVerifyStatus("non-verified")}
+                                />
+                                <span className="dot" style={{ background: statusColor("non-verified") }} />
+                                <span>non-verified</span>
+                            </label>
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(bulkVerifyStatusFilter?.verified)}
+                                    onChange={() => onToggleBulkVerifyStatus("verified")}
+                                />
+                                <span className="dot" style={{ background: statusColor("verified") }} />
+                                <span>verified</span>
+                            </label>
+                            <label className="check compactCheck">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(bulkVerifyStatusFilter?.failed)}
+                                    onChange={() => onToggleBulkVerifyStatus("failed")}
+                                />
+                                <span className="dot" style={{ background: statusColor("failed") }} />
+                                <span>failed</span>
+                            </label>
+                        </div>
+                    </label>
+                    <label className="check compactCheck">
+                        <input
+                            type="checkbox"
+                            checked={Boolean(bulkVerifyIncludeDeleted)}
+                            onChange={(e) => onBulkVerifyIncludeDeletedChange(Boolean(e.target.checked))}
+                        />
+                        <span className="paretoOnlyText">Include points with lifecycle status "deleted"</span>
                     </label>
                     <button
                         className="btn ghost"

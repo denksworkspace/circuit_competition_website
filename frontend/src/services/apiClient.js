@@ -2,6 +2,7 @@
 export { fetchCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./api/authApi.js";
 export {
     fetchPoints,
+    fetchParetoExportStatus,
     requestUploadUrl,
     createPointsUploadRequest,
     fetchActivePointsUploadRequest,
@@ -16,6 +17,8 @@ export {
     verifyPointCircuit,
     checkPointDuplicate,
     deletePoint,
+    downloadPointCircuitFile,
+    exportParetoPointsZip,
 } from "./api/pointsApi.js";
 export {
     runAdminBulkVerify,

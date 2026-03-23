@@ -121,4 +121,42 @@ describe("api/_lib/uploadQueueProcessing", () => {
         expect(result.verdict).toBe("duplicate");
         expect(result.defaultChecked).toBe(false);
     });
+
+    it("maps ABC assertion parser crash to user-friendly failed reason", async () => {
+        parseInputBenchFileName
+            .mockReturnValueOnce({
+                ok: true,
+                benchmark: 254,
+                delay: 15,
+                area: 40,
+            })
+            .mockReturnValueOnce({
+                ok: true,
+                benchmark: 254,
+                delay: 15,
+                area: 40,
+            });
+        getAigStatsFromBenchText.mockResolvedValueOnce({
+            ok: false,
+            code: "ABC_FAILED",
+            message: "Command failed: /usr/local/bin/abc -c read_bench ...",
+            output: "abc: src/base/abc/abcFanio.c:92: Abc_ObjAddFanin: Assertion `!Abc_ObjIsNet(pObj)' failed.",
+        });
+        checkDuplicatePointByCircuit.mockResolvedValueOnce({
+            duplicate: false,
+            blockedByCheckError: false,
+        });
+
+        const result = await processUploadQueueFile({
+            fileRow: { originalFileName: "bench254_15_40.bench" },
+            requestRow: { selectedParser: "ABC", selectedChecker: "none" },
+            command: { name: "team1" },
+            circuitText: "bench data",
+        });
+
+        expect(result.verdict).toBe("failed");
+        expect(result.verdictReason).toBe(
+            "parser: Parser failed: the .bench file has an invalid gate/net structure, so ABC could not parse it."
+        );
+    });
 });
