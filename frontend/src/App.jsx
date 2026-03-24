@@ -43,7 +43,7 @@ import { usePointTesting } from "./hooks/usePointTesting.js";
 import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
 import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
 import { downloadBlobAsFile, downloadTextAsFile } from "./utils/fileDownloadUtils.js";
-import { exportParetoPointsZip, fetchMaintenanceStatus, fetchParetoExportStatus } from "./services/apiClient.js";
+import { exportParetoPointsZip, fetchMaintenanceStatus } from "./services/apiClient.js";
 import paretoPortraitImage from "./assets/vilfredo-pareto-portrait.jpg";
 
 const CHECKER_ABC = "ABC";
@@ -169,9 +169,8 @@ export default function App() {
         message: "",
     }));
     const maintenancePollRef = useRef(null);
-    const paretoStatusPollRef = useRef(null);
-    const [hasNewPareto, setHasNewPareto] = useState(false);
-    const [lastParetoExportAt, setLastParetoExportAt] = useState(null);
+    const [hasNewPareto, setHasNewPareto] = useState(() => Boolean(currentCommand?.hasNewPareto));
+    const [lastParetoExportAt, setLastParetoExportAt] = useState(() => currentCommand?.lastParetoExportAt || null);
     const [isParetoExportModalOpen, setIsParetoExportModalOpen] = useState(false);
     const [paretoExportDateMode, setParetoExportDateMode] = useState("since_last_export");
     const [paretoExportDate, setParetoExportDate] = useState(() => toIsoDateLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS));
@@ -908,21 +907,6 @@ export default function App() {
         downloadTextAsFile(bulkIdenticalAuditLogText, `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
-    const refreshParetoStatus = useCallback(async () => {
-        if (!currentCommand?.id || !authKeyDraft.trim()) {
-            setHasNewPareto(false);
-            setLastParetoExportAt(null);
-            return;
-        }
-        try {
-            const status = await fetchParetoExportStatus(authKeyDraft);
-            setHasNewPareto(Boolean(status?.hasNewPareto));
-            setLastParetoExportAt(status?.lastParetoExportAt || null);
-        } catch {
-            setHasNewPareto(false);
-        }
-    }, [authKeyDraft, currentCommand?.id]);
-
     function openParetoExportModal() {
         setParetoExportError("");
         setIsParetoExportModalOpen(true);
@@ -963,7 +947,8 @@ export default function App() {
             });
             downloadBlobAsFile(result.blob, result.fileName || "pareto-points-export.zip");
             setIsParetoExportModalOpen(false);
-            await refreshParetoStatus();
+            setHasNewPareto(false);
+            setLastParetoExportAt(new Date().toISOString());
         } catch (error) {
             setParetoExportError(error?.message || "Failed to export points.");
         } finally {
@@ -1192,45 +1177,9 @@ export default function App() {
     }, [authKeyDraft, currentCommand?.id, currentCommand?.role]);
 
     useEffect(() => {
-        let cancelled = false;
-
-        const clearPoll = () => {
-            if (!paretoStatusPollRef.current) return;
-            clearInterval(paretoStatusPollRef.current);
-            paretoStatusPollRef.current = null;
-        };
-
-        const pollOnce = async () => {
-            try {
-                await refreshParetoStatus();
-            } catch {
-                // Status poll errors are handled inside refreshParetoStatus.
-            }
-        };
-
-        clearPoll();
-        if (!currentCommand?.id || !authKeyDraft.trim()) {
-            setHasNewPareto(false);
-            setLastParetoExportAt(null);
-            return () => {
-                cancelled = true;
-                clearPoll();
-            };
-        }
-
-        void (async () => {
-            await pollOnce();
-            if (cancelled) return;
-            paretoStatusPollRef.current = setInterval(() => {
-                void pollOnce();
-            }, 15000);
-        })();
-
-        return () => {
-            cancelled = true;
-            clearPoll();
-        };
-    }, [authKeyDraft, currentCommand?.id, refreshParetoStatus]);
+        setHasNewPareto(Boolean(currentCommand?.hasNewPareto));
+        setLastParetoExportAt(currentCommand?.lastParetoExportAt || null);
+    }, [currentCommand?.hasNewPareto, currentCommand?.lastParetoExportAt]);
 
     useEffect(() => {
         if (paretoExportBenchmarkOptions.includes(paretoExportBench)) return;

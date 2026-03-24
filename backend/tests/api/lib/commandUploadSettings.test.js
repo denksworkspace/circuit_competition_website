@@ -30,6 +30,7 @@ describe("api/_lib/commandUploadSettings", () => {
         expect(out.maxMultiFileBatchCount).toBe(17);
         expect(out.uploadedBytesTotal).toBe(1000);
         expect(out.remainingUploadBytes).toBe(3096);
+        expect(out.hasNewPareto).toBe(false);
     });
 
     it("falls back to defaults on invalid numbers", async () => {
@@ -38,6 +39,7 @@ describe("api/_lib/commandUploadSettings", () => {
         expect(out.maxSingleUploadBytes).toBeGreaterThan(0);
         expect(out.totalUploadQuotaBytes).toBeGreaterThan(0);
         expect(out.remainingUploadBytes).toBe(out.totalUploadQuotaBytes);
+        expect(out.hasNewPareto).toBe(false);
     });
 
     it("ensures schema once", async () => {
@@ -47,6 +49,6 @@ describe("api/_lib/commandUploadSettings", () => {
         await mod.ensureCommandUploadSettingsSchema();
         await mod.ensureCommandUploadSettingsSchema();
 
-        expect(sql).toHaveBeenCalledTimes(19);
+        expect(sql).toHaveBeenCalledTimes(22);
     });
 });

@@ -55,7 +55,7 @@ export async function handleUpdateAdminUser(req, res, body) {
         abc_metrics_timeout_seconds = ${metricsTimeoutSeconds}
       where id = ${userIdInt}
       returning id, name, color, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
-                abc_verify_timeout_seconds, abc_metrics_timeout_seconds
+                abc_verify_timeout_seconds, abc_metrics_timeout_seconds, last_pareto_export_at, has_new_pareto
     `;
 
     if (update.rows.length === 0) {

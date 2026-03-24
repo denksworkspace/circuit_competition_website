@@ -140,7 +140,7 @@ export default async function handler(req, res) {
     await ensurePointsStatusConstraint();
 
     const authRes = await sql`
-      select id, last_pareto_export_at
+      select id, last_pareto_export_at, has_new_pareto
       from commands
       where auth_key = ${authKey}
       limit 1
@@ -233,7 +233,8 @@ export default async function handler(req, res) {
     const chargeRes = await sql`
       update commands
       set uploaded_bytes_total = uploaded_bytes_total + ${chargedBytes}::bigint,
-          last_pareto_export_at = now()
+          last_pareto_export_at = now(),
+          has_new_pareto = false
       where id = ${actor.id}
         and uploaded_bytes_total + ${chargedBytes}::bigint <= total_upload_quota_bytes
       returning uploaded_bytes_total, total_upload_quota_bytes

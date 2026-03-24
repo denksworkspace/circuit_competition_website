@@ -18,6 +18,8 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
         uploadedBytesTotal: 0,
         remainingUploadBytes: 50 * 1024 * 1024 * 1024,
         maxMultiFileBatchCount: 100,
+        lastParetoExportAt: null,
+        hasNewPareto: false,
     })),
 }));
 

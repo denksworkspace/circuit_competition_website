@@ -3,9 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockReq, createMockRes } from "../helpers/mockHttp.js";
 
 vi.mock("@vercel/postgres", () => ({ sql: vi.fn() }));
-vi.mock("../../api/_lib/pointsStatus.js", () => ({
-    ensurePointsStatusConstraint: vi.fn(),
-}));
 vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
     ensureCommandUploadSettingsSchema: vi.fn(),
 }));
@@ -28,14 +25,8 @@ describe("api/pareto-export-status", () => {
         expect(res.statusCode).toBe(401);
     });
 
-    it("returns hasNewPareto=true when no export timestamp exists", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: null }] });
-        sql.mockResolvedValueOnce({
-            rows: [
-                { benchmark: "254", delay: 1, area: 5, created_at: "2026-03-23T10:00:00.000Z" },
-                { benchmark: "254", delay: 2, area: 6, created_at: "2026-03-23T09:00:00.000Z" },
-            ],
-        });
+    it("returns hasNewPareto=true when user flag is set", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: null, has_new_pareto: true }] });
 
         const req = createMockReq({ method: "GET", query: { authKey: "k" } });
         const res = createMockRes();
@@ -45,13 +36,9 @@ describe("api/pareto-export-status", () => {
         expect(res.body.hasNewPareto).toBe(true);
     });
 
-    it("returns hasNewPareto=false when front points are older than last export", async () => {
-        sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: "2026-03-23T10:00:00.000Z" }] });
+    it("returns hasNewPareto=false when user flag is not set", async () => {
         sql.mockResolvedValueOnce({
-            rows: [
-                { benchmark: "254", delay: 1, area: 5, created_at: "2026-03-22T10:00:00.000Z" },
-                { benchmark: "254", delay: 2, area: 6, created_at: "2026-03-22T09:00:00.000Z" },
-            ],
+            rows: [{ id: 1, last_pareto_export_at: "2026-03-23T10:00:00.000Z", has_new_pareto: false }],
         });
 
         const req = createMockReq({ method: "GET", query: { authKey: "k" } });

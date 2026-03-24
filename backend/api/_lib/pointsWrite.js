@@ -14,6 +14,31 @@ function isValidStatus(status) {
     return ["non-verified", "verified", "failed"].includes(status);
 }
 
+async function markHasNewParetoForAllIfNeeded({ pointId, benchmark, delay, area }) {
+    const normalizedBenchmark = String(benchmark || "").trim();
+    if (!normalizedBenchmark || normalizedBenchmark === "test") return false;
+
+    const dominatedRes = await sql`
+      select 1
+      from points
+      where benchmark = ${normalizedBenchmark}
+        and id <> ${String(pointId || "")}
+        and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        and delay <= ${Number(delay)}
+        and area <= ${Number(area)}
+      limit 1
+    `;
+    const dominatedRows = Array.isArray(dominatedRes?.rows) ? dominatedRes.rows : [];
+    if (dominatedRows.length > 0) return false;
+
+    await sql`
+      update commands
+      set has_new_pareto = true
+      where coalesce(has_new_pareto, false) = false
+    `;
+    return true;
+}
+
 export async function createPointForCommand({
     command,
     id,
@@ -111,6 +136,13 @@ export async function createPointForCommand({
         const nextQuota = quotaRow
             ? normalizeCommandUploadSettings(quotaRow)
             : normalizeCommandUploadSettings(command);
+
+        await markHasNewParetoForAllIfNeeded({
+            pointId: id,
+            benchmark,
+            delay,
+            area,
+        });
 
         await addActionLog({
             commandId: command.id,

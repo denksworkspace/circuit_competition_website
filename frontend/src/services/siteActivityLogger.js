@@ -1,11 +1,9 @@
 const MAX_QUEUE_SIZE = 200;
-const FLUSH_INTERVAL_MS = 5000;
 const LOG_ENDPOINT_PATH = "/api/site-activity-log";
 
 let loggerStarted = false;
 let fetchPatched = false;
 let queue = [];
-let flushTimer = null;
 const sessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 function nowIso() {
@@ -85,10 +83,7 @@ export async function flushNow() {
 }
 
 function scheduleFlush() {
-    if (flushTimer != null || typeof window === "undefined") return;
-    flushTimer = window.setInterval(() => {
-        void flushNow();
-    }, FLUSH_INTERVAL_MS);
+    // Intentionally no periodic polling flush to avoid background network traffic.
 }
 
 function installFetchPatch() {

@@ -44,6 +44,7 @@ export function normalizeCommandUploadSettings(commandRow) {
         DEFAULT_ABC_METRICS_TIMEOUT_SECONDS
     );
     const lastParetoExportAt = commandRow?.last_pareto_export_at || null;
+    const hasNewPareto = Boolean(commandRow?.has_new_pareto);
 
     return {
         maxSingleUploadBytes,
@@ -54,6 +55,7 @@ export function normalizeCommandUploadSettings(commandRow) {
         abcVerifyTimeoutSeconds,
         abcMetricsTimeoutSeconds,
         lastParetoExportAt,
+        hasNewPareto,
     };
 }
 
@@ -67,6 +69,7 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`alter table commands add column if not exists abc_verify_timeout_seconds integer`;
             await sql`alter table commands add column if not exists abc_metrics_timeout_seconds integer`;
             await sql`alter table commands add column if not exists last_pareto_export_at timestamptz`;
+            await sql`alter table commands add column if not exists has_new_pareto boolean`;
 
             await sql`
               update commands
@@ -112,6 +115,11 @@ export async function ensureCommandUploadSettingsSchema() {
               where abc_metrics_timeout_seconds is null
                  or abc_metrics_timeout_seconds < 1
             `;
+            await sql`
+              update commands
+              set has_new_pareto = false
+              where has_new_pareto is null
+            `;
 
             await sql`alter table commands alter column max_single_upload_bytes set default 524288000`;
             await sql`alter table commands alter column total_upload_quota_bytes set default 53687091200`;
@@ -119,6 +127,7 @@ export async function ensureCommandUploadSettingsSchema() {
             await sql`alter table commands alter column max_multi_file_batch_count set default 100`;
             await sql`alter table commands alter column abc_verify_timeout_seconds set default 60`;
             await sql`alter table commands alter column abc_metrics_timeout_seconds set default 60`;
+            await sql`alter table commands alter column has_new_pareto set default false`;
         })().catch((error) => {
             uploadSettingsReadyPromise = null;
             throw error;
