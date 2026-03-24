@@ -4,6 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkMaintenanceBlock } from "../api/_lib/maintenanceMode.js";
 import { ensurePointsStatusConstraint } from "../api/_lib/pointsStatus.js";
+import { applyDbEnvSelection } from "./dbEnvSelection.mjs";
 import { kickUploadQueueWorker, startUploadQueueWorker } from "./uploadQueueWorker.mjs";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
@@ -44,11 +45,7 @@ async function bootstrapEnv() {
     await loadEnvFile(path.join(repoRootDir, ".env"));
     await loadEnvFile(path.join(path.resolve(serverDir, ".."), ".env.local"));
     await loadEnvFile(path.join(path.resolve(serverDir, ".."), ".env"));
-
-    // @vercel/postgres expects POSTGRES_URL. On non-Vercel hosts we often only have DATABASE_URL.
-    if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
-        process.env.POSTGRES_URL = process.env.DATABASE_URL;
-    }
+    applyDbEnvSelection();
 }
 
 function setCorsHeaders(res) {

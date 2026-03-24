@@ -1,8 +1,7 @@
 import { sql } from "@vercel/postgres";
+import { applyDbEnvSelection } from "../server/dbEnvSelection.mjs";
 
-if (!process.env.POSTGRES_URL && process.env.DATABASE_URL) {
-    process.env.POSTGRES_URL = process.env.DATABASE_URL;
-}
+applyDbEnvSelection();
 
 async function migratePointsSchema() {
     await sql`begin`;
