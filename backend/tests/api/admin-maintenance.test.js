@@ -14,6 +14,7 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
     ensureUploadQueueSchema: vi.fn(),
 }));
 vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
+    finalizeUploadRequestPareto: vi.fn(),
     resumeFreezedUploadRequests: vi.fn(),
 }));
 vi.mock("../../server/uploadQueueWorker.mjs", () => ({

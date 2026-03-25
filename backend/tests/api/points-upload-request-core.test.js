@@ -33,6 +33,7 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
     })),
 }));
 vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
+    finalizeUploadRequestPareto: vi.fn(),
     findLatestBlockingUploadRequest: vi.fn(),
     getCommandByAuthKey: vi.fn(),
     loadUploadRequestSnapshot: vi.fn(),

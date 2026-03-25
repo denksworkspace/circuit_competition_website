@@ -85,7 +85,18 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     }
 
     const requestFilesRes = await withDbRetry(() => sql`
-      select *
+      select
+        id,
+        order_index,
+        original_file_name,
+        process_state,
+        verdict,
+        can_apply,
+        applied,
+        point_id,
+        parsed_benchmark,
+        parsed_delay,
+        parsed_area
       from upload_request_files
       where request_id = ${requestId}
       order by order_index asc
@@ -150,6 +161,16 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     return { paretoFrontCount, fileMetaById };
 }
 
+function shouldComputeParetoForSnapshot({ paretoMode }) {
+    const normalizedMode = String(paretoMode || "always").trim().toLowerCase();
+    if (normalizedMode === "never") return false;
+    if (normalizedMode === "always") return true;
+    if (normalizedMode === "final_only") {
+        return false;
+    }
+    return true;
+}
+
 export async function getCommandByAuthKey(authKey) {
     const result = await withDbRetry(() => sql`
       select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
@@ -162,9 +183,34 @@ export async function getCommandByAuthKey(authKey) {
     return result.rows[0];
 }
 
-export async function loadUploadRequestSnapshot({ requestId, commandId, includeFiles = true, commandName = "" }) {
+export async function loadUploadRequestSnapshot({
+    requestId,
+    commandId,
+    includeFiles = true,
+    commandName = "",
+    paretoMode = "always",
+}) {
     const requestRes = await withDbRetry(() => sql`
-      select *
+      select
+        id,
+        command_id,
+        status,
+        stop_requested,
+        selected_parser,
+        selected_checker,
+        parser_timeout_seconds,
+        checker_timeout_seconds,
+        description,
+        total_count,
+        done_count,
+        verified_count,
+        pareto_front_count,
+        current_file_name,
+        current_phase,
+        error,
+        created_at,
+        updated_at,
+        finished_at
       from upload_requests
       where id = ${requestId}
         and command_id = ${commandId}
@@ -175,23 +221,44 @@ export async function loadUploadRequestSnapshot({ requestId, commandId, includeF
     let files = [];
     if (includeFiles) {
         const filesRes = await withDbRetry(() => sql`
-          select *
+          select
+            id,
+            order_index,
+            original_file_name,
+            process_state,
+            verdict,
+            verdict_reason,
+            can_apply,
+            default_checked,
+            applied,
+            point_id,
+            checker_version,
+            parsed_benchmark,
+            parsed_delay,
+            parsed_area,
+            final_file_name,
+            pareto_state,
+            replaced_pareto_coords
           from upload_request_files
           where request_id = ${requestId}
           order by order_index asc
         `);
         files = filesRes.rows.map(normalizeUploadRequestFileRow);
-        const paretoState = await computeUploadParetoState({ requestId, commandId, commandName });
-        request.paretoFrontCount = Number(paretoState.paretoFrontCount || 0);
-        files = files.map((row) => {
-            const meta = paretoState.fileMetaById.get(String(row.id || ""));
-            if (!meta) return row;
-            return {
-                ...row,
-                paretoState: String(meta.paretoState || ""),
-                replacedParetoCoords: Array.isArray(meta.replacedParetoCoords) ? meta.replacedParetoCoords : [],
-            };
-        });
+        if (shouldComputeParetoForSnapshot({
+            paretoMode,
+        })) {
+            const paretoState = await computeUploadParetoState({ requestId, commandId, commandName });
+            request.paretoFrontCount = Number(paretoState.paretoFrontCount || 0);
+            files = files.map((row) => {
+                const meta = paretoState.fileMetaById.get(String(row.id || ""));
+                if (!meta) return row;
+                return {
+                    ...row,
+                    paretoState: String(meta.paretoState || ""),
+                    replacedParetoCoords: Array.isArray(meta.replacedParetoCoords) ? meta.replacedParetoCoords : [],
+                };
+            });
+        }
     }
     return { request, files };
 }
@@ -237,32 +304,54 @@ export async function refreshUploadRequestCounters(requestId) {
           end
       where id = ${requestId}
     `);
-    const reqMetaRes = await withDbRetry(() => sql`
-      select command_id
-      from upload_requests
-      where id = ${requestId}
-      limit 1
-    `);
-    const commandId = Number(reqMetaRes.rows[0]?.command_id || 0);
-    if (commandId > 0) {
-        const paretoState = await computeUploadParetoState({
-            requestId,
-            commandId,
-        });
-        await withDbRetry(() => sql`
-          update upload_requests
-          set pareto_front_count = ${Math.max(0, Number(paretoState.paretoFrontCount || 0))}
+    return {
+        totalCount,
+        doneCount,
+        verifiedCount,
+        pendingCount,
+        manualPendingCount,
+        nextStatus,
+    };
+}
+
+export async function finalizeUploadRequestPareto({ requestId, commandId = 0, commandName = "" }) {
+    let resolvedCommandId = Math.max(0, Number(commandId || 0));
+    if (resolvedCommandId <= 0) {
+        const reqMetaRes = await withDbRetry(() => sql`
+          select command_id
+          from upload_requests
           where id = ${requestId}
+          limit 1
         `);
-        for (const [fileId, meta] of paretoState.fileMetaById.entries()) {
-            await withDbRetry(() => sql`
-              update upload_request_files
-              set pareto_state = ${String(meta?.paretoState || "")},
-                  replaced_pareto_coords = ${buildReplacedCoordsPayload(meta?.replacedParetoCoords || [])}
-              where id = ${fileId}
-            `);
-        }
+        resolvedCommandId = Math.max(0, Number(reqMetaRes.rows[0]?.command_id || 0));
     }
+    if (resolvedCommandId <= 0) {
+        return { paretoFrontCount: 0 };
+    }
+
+    const paretoState = await computeUploadParetoState({
+        requestId,
+        commandId: resolvedCommandId,
+        commandName,
+    });
+
+    await withDbRetry(() => sql`
+      update upload_requests
+      set pareto_front_count = ${Math.max(0, Number(paretoState.paretoFrontCount || 0))}
+      where id = ${requestId}
+    `);
+    for (const [fileId, meta] of paretoState.fileMetaById.entries()) {
+        await withDbRetry(() => sql`
+          update upload_request_files
+          set pareto_state = ${String(meta?.paretoState || "")},
+              replaced_pareto_coords = ${buildReplacedCoordsPayload(meta?.replacedParetoCoords || [])}
+          where id = ${fileId}
+        `);
+    }
+
+    return {
+        paretoFrontCount: Math.max(0, Number(paretoState.paretoFrontCount || 0)),
+    };
 }
 
 export async function markRemainingAsNonProcessed(
@@ -293,7 +382,11 @@ export async function markRemainingAsNonProcessed(
             )
         )
     `);
-    await refreshUploadRequestCounters(requestId);
+    const counters = await refreshUploadRequestCounters(requestId);
+    const pendingCount = Number(counters?.pendingCount);
+    if (Number.isFinite(pendingCount) && pendingCount <= 0) {
+        await finalizeUploadRequestPareto({ requestId });
+    }
     await withDbRetry(() => sql`
       update upload_requests
       set status = ${REQUEST_STATUS_INTERRUPTED},
@@ -347,7 +440,13 @@ export async function findLatestBlockingUploadRequest(commandId) {
 
 export async function findNextPendingUploadFile(requestId) {
     const result = await withDbRetry(() => sql`
-      select *
+      select
+        id,
+        order_index,
+        original_file_name,
+        queue_file_key,
+        file_size,
+        process_state
       from upload_request_files
       where request_id = ${requestId}
         and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}

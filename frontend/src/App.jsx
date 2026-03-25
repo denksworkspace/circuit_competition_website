@@ -169,6 +169,7 @@ export default function App() {
         message: "",
     }));
     const maintenancePollRef = useRef(null);
+    const maintenanceEnabledPrevRef = useRef(false);
     const [hasNewPareto, setHasNewPareto] = useState(() => Boolean(currentCommand?.hasNewPareto));
     const [lastParetoExportAt, setLastParetoExportAt] = useState(() => currentCommand?.lastParetoExportAt || null);
     const [isParetoExportModalOpen, setIsParetoExportModalOpen] = useState(false);
@@ -438,6 +439,7 @@ export default function App() {
         setManualApplyChecked,
         applyManualRows,
         closeManualApplyModal,
+        wakeUploadQueuePolling,
     } = useBenchUploadFlow({
         authKeyDraft,
         currentCommand,
@@ -1175,6 +1177,15 @@ export default function App() {
             clearPoll();
         };
     }, [authKeyDraft, currentCommand?.id, currentCommand?.role]);
+
+    useEffect(() => {
+        const prevEnabled = Boolean(maintenanceEnabledPrevRef.current);
+        const nextEnabled = Boolean(maintenanceStatus.enabled);
+        if (prevEnabled && !nextEnabled) {
+            wakeUploadQueuePolling();
+        }
+        maintenanceEnabledPrevRef.current = nextEnabled;
+    }, [maintenanceStatus.enabled, wakeUploadQueuePolling]);
 
     useEffect(() => {
         setHasNewPareto(Boolean(currentCommand?.hasNewPareto));

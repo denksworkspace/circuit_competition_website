@@ -21,6 +21,11 @@ function isRunnableRequestStatus(statusRaw) {
     return RUNNABLE_REQUEST_STATUSES.has(String(statusRaw || "").trim().toLowerCase());
 }
 
+function isExternallyManagedQueueStatus(statusRaw) {
+    const status = String(statusRaw || "").trim().toLowerCase();
+    return status === FREEZED_REQUEST_STATUS || status === WAITING_MANUAL_REQUEST_STATUS;
+}
+
 function hasManualVerdictPending(row) {
     return !row?.applied && Boolean(row?.canApply);
 }
@@ -278,6 +283,7 @@ export function useBenchUploadFlow({
     const pollTimerRef = useRef(null);
     const pollInFlightControllerRef = useRef(null);
     const pollLoopRef = useRef(null);
+    const pollPausedExternallyRef = useRef(false);
     const isPageUnloadingRef = useRef(false);
     const queueUploadInFlightRef = useRef(false);
 
@@ -348,6 +354,7 @@ export function useBenchUploadFlow({
     }
 
     const wakePolling = useCallback(() => {
+        pollPausedExternallyRef.current = false;
         if (pollTimerRef.current) {
             clearTimeout(pollTimerRef.current);
             pollTimerRef.current = null;
@@ -360,6 +367,27 @@ export function useBenchUploadFlow({
             void pollLoopRef.current();
         }
     }, []);
+
+    useEffect(() => {
+        if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+        const wakeOnFocusOrOnline = () => {
+            if (document.visibilityState && document.visibilityState !== "visible") return;
+            wakePolling();
+        };
+        const wakeOnVisible = () => {
+            if (document.visibilityState === "visible") {
+                wakePolling();
+            }
+        };
+        window.addEventListener("focus", wakeOnFocusOrOnline);
+        window.addEventListener("online", wakeOnFocusOrOnline);
+        document.addEventListener("visibilitychange", wakeOnVisible);
+        return () => {
+            window.removeEventListener("focus", wakeOnFocusOrOnline);
+            window.removeEventListener("online", wakeOnFocusOrOnline);
+            document.removeEventListener("visibilitychange", wakeOnVisible);
+        };
+    }, [wakePolling]);
 
     const refreshPointsAfterRequest = useCallback(async () => {
         try {
@@ -391,6 +419,7 @@ export function useBenchUploadFlow({
             if (isPreRunUploadRef.current) {
                 return;
             }
+            pollPausedExternallyRef.current = false;
             dismissedManualRequestIdRef.current = "";
             hiddenRequestIdRef.current = "";
             setIsUploading(false);
@@ -408,9 +437,10 @@ export function useBenchUploadFlow({
         const totalCount = Number(request.totalCount || 0);
         const isAllFilesProcessed = totalCount > 0 && doneCount >= totalCount;
         const runnable = isRunnableRequestStatus(lowerStatus);
+        const externallyManaged = isExternallyManagedQueueStatus(lowerStatus);
         const manualRows = runnable ? [] : buildManualRows(files);
         const hasPendingManualVerdict = manualRows.length > 0;
-        const shouldKeepMonitor = runnable || hasPendingManualVerdict;
+        const shouldKeepMonitor = runnable || hasPendingManualVerdict || externallyManaged;
         const hiddenRequestId = String(hiddenRequestIdRef.current || "");
         const isHiddenRequest = hiddenRequestId && hiddenRequestId === requestId;
 
@@ -774,13 +804,14 @@ export function useBenchUploadFlow({
         if (!authKey || !currentCommand) return;
         let cancelled = false;
         const scheduleByCurrentState = () => {
+            if (pollPausedExternallyRef.current) return;
             const delay = (hiddenRequestIdRef.current || activeRequestIdRef.current)
                 ? ACTIVE_QUEUE_STATUS_POLL_MS
                 : IDLE_QUEUE_CHECK_MS;
             scheduleNext(delay);
         };
         const scheduleNext = (ms) => {
-            if (cancelled) return;
+            if (cancelled || pollPausedExternallyRef.current) return;
             if (pollTimerRef.current) {
                 clearTimeout(pollTimerRef.current);
             }
@@ -812,7 +843,15 @@ export function useBenchUploadFlow({
                         const hasManual = buildManualRows(hiddenSnapshot?.files || []).length > 0;
                         if (!status || (!isRunnableRequestStatus(status) && !hasManual)) {
                             hiddenRequestIdRef.current = "";
+                            pollPausedExternallyRef.current = false;
+                            scheduleNext(IDLE_QUEUE_CHECK_MS);
+                            return;
                         }
+                        if (isExternallyManagedQueueStatus(status)) {
+                            pollPausedExternallyRef.current = true;
+                            return;
+                        }
+                        pollPausedExternallyRef.current = false;
                         scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
                     } catch (error) {
                         if (isStalePoll(generation)) {
@@ -821,6 +860,7 @@ export function useBenchUploadFlow({
                         }
                         if (Number(error?.code || 0) === 404) {
                             hiddenRequestIdRef.current = "";
+                            pollPausedExternallyRef.current = false;
                             updateStateFromSnapshot({ request: null, files: [] });
                             scheduleNext(IDLE_QUEUE_CHECK_MS);
                             return;
@@ -845,6 +885,15 @@ export function useBenchUploadFlow({
                         const status = String(trackedSnapshot?.request?.status || "").toLowerCase();
                         const hasRunnableRequest = Boolean(trackedSnapshot?.request?.id) && isRunnableRequestStatus(status);
                         const hasBlockingRequest = Boolean(trackedSnapshot?.request?.id);
+                        if (isExternallyManagedQueueStatus(status)) {
+                            pollPausedExternallyRef.current = true;
+                            if (pollTimerRef.current) {
+                                clearTimeout(pollTimerRef.current);
+                                pollTimerRef.current = null;
+                            }
+                            return;
+                        }
+                        pollPausedExternallyRef.current = false;
                         scheduleNext(hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS);
                         if (!hasRunnableRequest && status !== FREEZED_REQUEST_STATUS) {
                             setIsUploadStopping(false);
@@ -855,6 +904,7 @@ export function useBenchUploadFlow({
                             return;
                         }
                         if (Number(error?.code || 0) === 404) {
+                            pollPausedExternallyRef.current = false;
                             updateStateFromSnapshot({ request: null, files: [] });
                             scheduleNext(IDLE_QUEUE_CHECK_MS);
                             return;
@@ -876,6 +926,15 @@ export function useBenchUploadFlow({
                 const status = String(active?.request?.status || "").toLowerCase();
                 const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
                 const hasBlockingRequest = Boolean(active?.request?.id);
+                if (isExternallyManagedQueueStatus(status)) {
+                    pollPausedExternallyRef.current = true;
+                    if (pollTimerRef.current) {
+                        clearTimeout(pollTimerRef.current);
+                        pollTimerRef.current = null;
+                    }
+                    return;
+                }
+                pollPausedExternallyRef.current = false;
                 scheduleNext(hasBlockingRequest ? ACTIVE_QUEUE_STATUS_POLL_MS : IDLE_QUEUE_CHECK_MS);
                 if (!hasRunnableRequest && status !== FREEZED_REQUEST_STATUS) {
                     setIsUploadStopping(false);
@@ -884,6 +943,9 @@ export function useBenchUploadFlow({
                 if (cancelled) return;
                 if (isStalePoll(generation)) {
                     scheduleByCurrentState();
+                    return;
+                }
+                if (pollPausedExternallyRef.current) {
                     return;
                 }
                 const retryDelay = (hiddenRequestIdRef.current || activeRequestIdRef.current)
@@ -909,6 +971,7 @@ export function useBenchUploadFlow({
                 pollInFlightControllerRef.current.abort();
                 pollInFlightControllerRef.current = null;
             }
+            pollPausedExternallyRef.current = false;
             pollLoopRef.current = null;
         };
     }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
@@ -959,5 +1022,6 @@ export function useBenchUploadFlow({
         setManualApplyChecked,
         applyManualRows,
         closeManualApplyModal,
+        wakeUploadQueuePolling: wakePolling,
     };
 }

@@ -37,6 +37,7 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
     })),
 }));
 vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
+    finalizeUploadRequestPareto: vi.fn(),
     findNextPendingUploadFile: vi.fn(),
     getCommandByAuthKey: vi.fn(),
     isUploadStopRequested: vi.fn(async () => false),
@@ -99,6 +100,33 @@ describe("upload request lifecycle handlers", () => {
         expect(markRemainingAsNonProcessed).toHaveBeenCalledWith("req_1");
         expect(res.statusCode).toBe(200);
         expect(res.body.request.status).toBe("interrupted");
+    });
+
+    it("run returns request-only payload for worker response mode", async () => {
+        getCommandByAuthKey.mockResolvedValueOnce({ id: 10, name: "team_1" });
+        loadUploadRequestSnapshot
+            .mockResolvedValueOnce({
+                request: { id: "req_1", status: "completed", stopRequested: false },
+                files: [],
+            })
+            .mockResolvedValueOnce({
+                request: { id: "req_1", status: "completed" },
+                files: [{ id: "f1" }],
+            });
+
+        const req = createMockReq({
+            method: "POST",
+            body: { authKey: "k", requestId: "req_1", responseMode: "request_only" },
+        });
+        const res = createMockRes();
+        await runHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual({ request: { id: "req_1", status: "completed" } });
+        expect(loadUploadRequestSnapshot).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            includeFiles: false,
+            paretoMode: "final_only",
+        }));
     });
 
     it("stop sets stop flag and returns fresh snapshot", async () => {

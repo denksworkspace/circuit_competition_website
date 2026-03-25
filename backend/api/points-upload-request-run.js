@@ -19,6 +19,7 @@ import {
 } from "./_lib/uploadQueue.js";
 import { isRetryableDbError } from "./_lib/dbRetry.js";
 import {
+    finalizeUploadRequestPareto,
     findNextPendingUploadFile,
     getCommandByAuthKey,
     isUploadStopRequested,
@@ -77,11 +78,43 @@ function createStopMonitor(requestId) {
     };
 }
 
+function shouldIncludeFilesInRunResponse(responseModeRaw) {
+    return String(responseModeRaw || "full").trim().toLowerCase() !== "request_only";
+}
+
+async function loadRunResponseSnapshot({ requestId, command, includeFiles }) {
+    const snapshot = await loadUploadRequestSnapshot({
+        requestId,
+        commandId: command.id,
+        includeFiles,
+        commandName: command.name,
+        paretoMode: "final_only",
+    });
+    if (!snapshot) {
+        return includeFiles ? { request: null, files: [] } : { request: null };
+    }
+    if (!includeFiles) {
+        return { request: snapshot.request };
+    }
+    return snapshot;
+}
+
+async function finalizeParetoIfCompleted({ requestId, command, counters }) {
+    const pendingCount = Number(counters?.pendingCount);
+    if (!Number.isFinite(pendingCount) || pendingCount > 0) return;
+    await finalizeUploadRequestPareto({
+        requestId,
+        commandId: command.id,
+        commandName: command.name,
+    });
+}
+
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
     const requestId = String(body?.requestId || "").trim();
+    const includeFilesInResponse = shouldIncludeFilesInRunResponse(body?.responseMode);
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
         return;
@@ -115,7 +148,11 @@ export default async function handler(req, res) {
     const initialRequest = initialSnapshot.request;
     const initialStatus = String(initialRequest.status || "").toLowerCase();
     if (TERMINAL.has(initialStatus) || initialStatus === REQUEST_STATUS_WAITING_MANUAL_VERDICT) {
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
         res.status(200).json(ready);
         return;
     }
@@ -135,21 +172,30 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
         res.status(200).json(ready);
         return;
     }
 
     if (initialRequest.stopRequested) {
         await markRemainingAsNonProcessed(requestId);
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
         res.status(200).json(ready);
         return;
     }
 
     const nextFile = await findNextPendingUploadFile(requestId);
     if (!nextFile) {
-        await refreshUploadRequestCounters(requestId);
+        const counters = await refreshUploadRequestCounters(requestId);
+        await finalizeParetoIfCompleted({ requestId, command, counters });
         await sql`
           update upload_requests
           set current_phase = '',
@@ -157,7 +203,11 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
         res.status(200).json(ready);
         return;
     }
@@ -187,6 +237,7 @@ export default async function handler(req, res) {
     };
 
     const stopMonitor = createStopMonitor(requestId);
+    let refreshedCounters = null;
     try {
         const downloaded = await downloadQueueFileText(nextFile.queueFileKey, { signal: stopMonitor.signal });
         if (!downloaded.ok) {
@@ -204,7 +255,8 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${nextFile.id}
             `;
-            await refreshUploadRequestCounters(requestId);
+            refreshedCounters = await refreshUploadRequestCounters(requestId);
+            await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
             await sql`
               update upload_requests
               set current_phase = '',
@@ -212,7 +264,11 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+            const ready = await loadRunResponseSnapshot({
+                requestId,
+                command,
+                includeFiles: includeFilesInResponse,
+            });
             res.status(200).json(ready);
             return;
         }
@@ -245,7 +301,8 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${nextFile.id}
         `;
-        await refreshUploadRequestCounters(requestId);
+        refreshedCounters = await refreshUploadRequestCounters(requestId);
+        await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
     } catch (error) {
         if (isAbortLikeError(error) || stopMonitor.signal.aborted) {
             await sql`
@@ -272,7 +329,11 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+            const ready = await loadRunResponseSnapshot({
+                requestId,
+                command,
+                includeFiles: includeFilesInResponse,
+            });
             res.status(200).json(ready);
             return;
         }
@@ -288,7 +349,8 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${nextFile.id}
             `;
-            await refreshUploadRequestCounters(requestId);
+            refreshedCounters = await refreshUploadRequestCounters(requestId);
+            await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
             await sql`
               update upload_requests
               set error = ${String(error?.message || "Temporary database connectivity issue; file skipped.")},
@@ -297,7 +359,11 @@ export default async function handler(req, res) {
                   updated_at = now()
               where id = ${requestId}
             `;
-            const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+            const ready = await loadRunResponseSnapshot({
+                requestId,
+                command,
+                includeFiles: includeFilesInResponse,
+            });
             res.status(200).json(ready);
             return;
         }
@@ -312,7 +378,7 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${nextFile.id}
         `;
-        await refreshUploadRequestCounters(requestId);
+        refreshedCounters = await refreshUploadRequestCounters(requestId);
         await sql`
           update upload_requests
           set status = ${REQUEST_STATUS_FAILED},
@@ -323,7 +389,12 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${requestId}
         `;
-        const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+        await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
         res.status(200).json(ready);
         return;
     } finally {
@@ -341,7 +412,10 @@ export default async function handler(req, res) {
     } else {
         const pending = await findNextPendingUploadFile(requestId);
         if (!pending) {
-            await refreshUploadRequestCounters(requestId);
+            if (!refreshedCounters || Number(refreshedCounters.pendingCount || 0) > 0) {
+                refreshedCounters = await refreshUploadRequestCounters(requestId);
+                await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
+            }
             await sql`
               update upload_requests
               set current_phase = '',
@@ -360,6 +434,10 @@ export default async function handler(req, res) {
         }
     }
 
-    const ready = await loadUploadRequestSnapshot({ requestId, commandId: command.id, includeFiles: true, commandName: command.name });
+    const ready = await loadRunResponseSnapshot({
+        requestId,
+        command,
+        includeFiles: includeFilesInResponse,
+    });
     res.status(200).json(ready);
 }

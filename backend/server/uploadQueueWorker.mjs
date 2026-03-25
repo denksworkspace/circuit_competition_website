@@ -27,7 +27,7 @@ function scheduleIdleCheck() {
     }, IDLE_CHECK_MS);
 }
 
-async function findOldestActiveRequest() {
+async function listActiveRequests() {
     const result = await sql`
       select upload_requests.id, commands.auth_key
       from upload_requests
@@ -36,13 +36,12 @@ async function findOldestActiveRequest() {
       order by
         case when lower(coalesce(upload_requests.status, '')) = 'processing' then 0 else 1 end asc,
         upload_requests.created_at asc
-      limit 1
     `;
-    if (result.rows.length === 0) return null;
-    return {
-        requestId: String(result.rows[0].id || ""),
-        authKey: String(result.rows[0].auth_key || ""),
-    };
+    if (result.rows.length === 0) return [];
+    return result.rows.map((row) => ({
+        requestId: String(row.id || ""),
+        authKey: String(row.auth_key || ""),
+    })).filter((row) => row.requestId && row.authKey);
 }
 
 async function runRequestStep({ requestId, authKey }) {
@@ -72,6 +71,7 @@ async function runRequestStep({ requestId, authKey }) {
         body: {
             authKey,
             requestId,
+            responseMode: "request_only",
         },
     };
     await runUploadRequestHandler(req, res);
@@ -84,21 +84,6 @@ async function runRequestStep({ requestId, authKey }) {
     return payload || {};
 }
 
-async function processRequestUntilSettled(activeRequest) {
-    let steps = 0;
-    while (steps < MAX_STEPS_PER_REQUEST) {
-        const snapshot = await runRequestStep(activeRequest);
-        const nextStatus = toStatus(snapshot?.request?.status);
-        if (!ACTIVE_REQUEST_STATUSES.has(nextStatus)) {
-            return;
-        }
-        steps += 1;
-        // Yield to the event loop so API requests are still served smoothly.
-        await sleep(0);
-    }
-    throw new Error(`Queue worker reached step limit (${MAX_STEPS_PER_REQUEST}) for request ${activeRequest.requestId}.`);
-}
-
 async function runQueueWorker(trigger) {
     if (workerRunning) return;
     workerRunning = true;
@@ -107,14 +92,39 @@ async function runQueueWorker(trigger) {
         idleTimer = null;
     }
     try {
-        // Drain active queue fully before returning to idle hourly checks.
-        // This guarantees processing continues even with no users on the site.
+        const requestStepCounts = new Map();
+        // Fair scheduling: one run step per active request in each round.
+        // This prevents a single long request from starving other active requests.
         while (true) {
-            const activeRequest = await findOldestActiveRequest();
-            if (!activeRequest || !activeRequest.requestId || !activeRequest.authKey) {
+            const activeRequests = await listActiveRequests();
+            if (!Array.isArray(activeRequests) || activeRequests.length < 1) {
                 break;
             }
-            await processRequestUntilSettled(activeRequest);
+
+            const activeIds = new Set(activeRequests.map((row) => row.requestId));
+            for (const requestId of Array.from(requestStepCounts.keys())) {
+                if (!activeIds.has(requestId)) {
+                    requestStepCounts.delete(requestId);
+                }
+            }
+
+            for (const activeRequest of activeRequests) {
+                const requestId = String(activeRequest?.requestId || "");
+                if (!requestId) continue;
+                const steps = Number(requestStepCounts.get(requestId) || 0) + 1;
+                if (steps > MAX_STEPS_PER_REQUEST) {
+                    throw new Error(`Queue worker reached step limit (${MAX_STEPS_PER_REQUEST}) for request ${requestId}.`);
+                }
+                requestStepCounts.set(requestId, steps);
+
+                const snapshot = await runRequestStep(activeRequest);
+                const nextStatus = toStatus(snapshot?.request?.status);
+                if (!ACTIVE_REQUEST_STATUSES.has(nextStatus)) {
+                    requestStepCounts.delete(requestId);
+                }
+                // Yield to the event loop so API requests are still served smoothly.
+                await sleep(0);
+            }
         }
     } catch (error) {
         console.error(`[queue-worker:${trigger}]`, error);

@@ -3,7 +3,12 @@ import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { REQUEST_STATUS_CLOSED, ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
-import { getCommandByAuthKey, loadUploadRequestSnapshot, refreshUploadRequestCounters } from "./_lib/uploadQueueOps.js";
+import {
+    finalizeUploadRequestPareto,
+    getCommandByAuthKey,
+    loadUploadRequestSnapshot,
+    refreshUploadRequestCounters,
+} from "./_lib/uploadQueueOps.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -32,6 +37,7 @@ export default async function handler(req, res) {
         commandId: command.id,
         includeFiles: true,
         commandName: command.name,
+        paretoMode: "final_only",
     });
     if (!snapshot) {
         res.status(404).json({ error: "Upload request not found." });
@@ -46,7 +52,15 @@ export default async function handler(req, res) {
       where request_id = ${requestId}
         and applied = false
     `;
-    await refreshUploadRequestCounters(requestId);
+    const counters = await refreshUploadRequestCounters(requestId);
+    const pendingCount = Number(counters?.pendingCount);
+    if (Number.isFinite(pendingCount) && pendingCount <= 0) {
+        await finalizeUploadRequestPareto({
+            requestId,
+            commandId: command.id,
+            commandName: command.name,
+        });
+    }
     await sql`
       update upload_requests
       set status = case
@@ -67,6 +81,7 @@ export default async function handler(req, res) {
         commandId: command.id,
         includeFiles: true,
         commandName: command.name,
+        paretoMode: "final_only",
     });
     res.status(200).json(ready);
 }

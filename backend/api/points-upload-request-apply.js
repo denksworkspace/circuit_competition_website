@@ -5,7 +5,12 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import { ensureUploadQueueSchema, normalizeUploadRequestRow, normalizeUploadRequestFileRow } from "./_lib/uploadQueue.js";
-import { getCommandByAuthKey, loadUploadRequestSnapshot, refreshUploadRequestCounters } from "./_lib/uploadQueueOps.js";
+import {
+    finalizeUploadRequestPareto,
+    getCommandByAuthKey,
+    loadUploadRequestSnapshot,
+    refreshUploadRequestCounters,
+} from "./_lib/uploadQueueOps.js";
 import { applyUploadQueueFileRow } from "./_lib/uploadQueueProcessing.js";
 import { downloadQueueFileText } from "./_lib/queueS3.js";
 
@@ -36,7 +41,18 @@ export default async function handler(req, res) {
     }
 
     const reqRes = await sql`
-      select *
+      select
+        id,
+        command_id,
+        status,
+        selected_parser,
+        selected_checker,
+        parser_timeout_seconds,
+        checker_timeout_seconds,
+        description,
+        total_count,
+        done_count,
+        verified_count
       from upload_requests
       where id = ${requestId}
         and command_id = ${command.id}
@@ -49,7 +65,20 @@ export default async function handler(req, res) {
     const requestRow = normalizeUploadRequestRow(reqRes.rows[0]);
 
     const filesRes = await sql`
-      select *
+      select
+        id,
+        order_index,
+        original_file_name,
+        queue_file_key,
+        file_size,
+        verdict,
+        can_apply,
+        default_checked,
+        applied,
+        checker_version,
+        parsed_benchmark,
+        parsed_delay,
+        parsed_area
       from upload_request_files
       where request_id = ${requestId}
         and not applied
@@ -100,12 +129,21 @@ export default async function handler(req, res) {
         `;
     }
 
-    await refreshUploadRequestCounters(requestId);
+    const counters = await refreshUploadRequestCounters(requestId);
+    const pendingCount = Number(counters?.pendingCount);
+    if (Number.isFinite(pendingCount) && pendingCount <= 0) {
+        await finalizeUploadRequestPareto({
+            requestId,
+            commandId: command.id,
+            commandName: command.name,
+        });
+    }
     const snapshot = await loadUploadRequestSnapshot({
         requestId,
         commandId: command.id,
         includeFiles: true,
         commandName: command.name,
+        paretoMode: "final_only",
     });
     res.status(200).json({
         ...snapshot,

@@ -58,6 +58,7 @@ export default async function handler(req, res) {
         commandId: command.id,
         includeFiles: true,
         commandName: command.name,
+        paretoMode: "final_only",
     });
     res.status(200).json(ready);
 }
