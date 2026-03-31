@@ -25,6 +25,7 @@ export default async function handler(req, res) {
         scope: row.scope ? String(row.scope) : null,
         done: Math.max(0, Number(row.done || 0)),
         total: Math.max(0, Number(row.total || 0)),
+        downloaded: Math.max(0, Number(row.downloaded || 0)),
         doneFlag: Boolean(row.doneFlag),
         error: row.error ? String(row.error) : null,
         updatedAt: Number(row.updatedAt || Date.now()),

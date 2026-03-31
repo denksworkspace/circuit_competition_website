@@ -12,6 +12,7 @@ import {
     FILE_VERDICT_DUPLICATE,
     FILE_VERDICT_FAILED,
     FILE_VERDICT_NON_VERIFIED,
+    FILE_VERDICT_WARNING,
     FILE_VERDICT_VERIFIED,
 } from "./uploadQueue.js";
 
@@ -184,6 +185,20 @@ function computeFinalStatus({ parserKind, checkerEnabled, checkerVerdict }) {
     return FILE_VERDICT_NON_VERIFIED;
 }
 
+function hasWarningGateCombo(circuitTextRaw) {
+    const lines = String(circuitTextRaw || "").split(/\r?\n/);
+    let hasLut = false;
+    let hasGnd = false;
+    for (const lineRaw of lines) {
+        const line = String(lineRaw || "").split("#")[0].trim();
+        if (!line || !line.includes("=")) continue;
+        if (!hasLut && /\blut\s*\(/i.test(line)) hasLut = true;
+        if (!hasGnd && /\bgnd\s*\(/i.test(line)) hasGnd = true;
+        if (hasLut && hasGnd) return true;
+    }
+    return false;
+}
+
 function readAwsConfig() {
     return {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -301,6 +316,9 @@ export async function processUploadQueueFile({
     } else if (duplicateCheck.duplicate) {
         verdict = FILE_VERDICT_DUPLICATE;
         verdictReason = `Identical file hash for same delay+area already exists: ${duplicateCheck?.point?.fileName || duplicateCheck?.point?.id || "existing point"}.`;
+    } else if (finalStatus !== FILE_VERDICT_FAILED && hasWarningGateCombo(circuitText)) {
+        verdict = FILE_VERDICT_WARNING;
+        verdictReason = "warning: circuit contains both LUT and GND gate calls.";
     } else if (finalStatus === FILE_VERDICT_FAILED) {
         if (parserOut.parserKind === "failed") {
             verdictReason = `parser: ${parserOut.reason || "failed to parse metrics"}`;
@@ -399,7 +417,9 @@ export async function applyUploadQueueFileRow({
         area: fileRow.parsedArea,
         description: requestRow.description,
         fileName: finalFileName,
-        status: fileRow.verdict === FILE_VERDICT_DUPLICATE ? FILE_VERDICT_NON_VERIFIED : fileRow.verdict,
+        status: (fileRow.verdict === FILE_VERDICT_DUPLICATE || fileRow.verdict === FILE_VERDICT_WARNING)
+            ? FILE_VERDICT_NON_VERIFIED
+            : fileRow.verdict,
         checkerVersion: fileRow.checkerVersion || null,
         fileSize: fileRow.fileSize,
         batchSize: requestRow.totalCount,

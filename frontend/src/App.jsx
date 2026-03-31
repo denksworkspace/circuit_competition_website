@@ -43,7 +43,7 @@ import { usePointTesting } from "./hooks/usePointTesting.js";
 import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
 import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
 import { downloadBlobAsFile, downloadTextAsFile } from "./utils/fileDownloadUtils.js";
-import { exportParetoPointsZip, fetchMaintenanceStatus } from "./services/apiClient.js";
+import { exportParetoPointsZip, fetchAdminExportProgress, fetchMaintenanceStatus } from "./services/apiClient.js";
 import paretoPortraitImage from "./assets/vilfredo-pareto-portrait.jpg";
 
 const CHECKER_ABC = "ABC";
@@ -184,7 +184,10 @@ export default function App() {
         failed: false,
     }));
     const [isParetoExporting, setIsParetoExporting] = useState(false);
+    const [paretoExportProgress, setParetoExportProgress] = useState(null);
     const [paretoExportError, setParetoExportError] = useState("");
+    const paretoExportProgressPollRef = useRef(null);
+    const paretoExportProgressAbortRef = useRef(null);
 
     const maxSingleUploadBytes = Math.max(0, Number(currentCommand?.maxSingleUploadBytes || 0));
     const totalUploadQuotaBytes = Math.max(0, Number(currentCommand?.totalUploadQuotaBytes || 0));
@@ -909,8 +912,42 @@ export default function App() {
         downloadTextAsFile(bulkIdenticalAuditLogText, `bulk-identical-audit-log-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`);
     }
 
+    function stopParetoExportProgressPoll() {
+        if (paretoExportProgressPollRef.current) {
+            clearInterval(paretoExportProgressPollRef.current);
+            paretoExportProgressPollRef.current = null;
+        }
+    }
+
+    function startParetoExportProgressPoll({ token, signal }) {
+        stopParetoExportProgressPoll();
+        const poll = async () => {
+            if (signal.aborted) return;
+            try {
+                const progress = await fetchAdminExportProgress({ token, signal });
+                setParetoExportProgress(progress);
+                if (progress?.doneFlag) {
+                    stopParetoExportProgressPoll();
+                }
+            } catch {
+                // Export starts asynchronously; transient polling failures are expected.
+            }
+        };
+        paretoExportProgressPollRef.current = setInterval(poll, 500);
+        poll();
+    }
+
+    useEffect(() => () => {
+        stopParetoExportProgressPoll();
+        if (paretoExportProgressAbortRef.current) {
+            paretoExportProgressAbortRef.current.abort();
+            paretoExportProgressAbortRef.current = null;
+        }
+    }, []);
+
     function openParetoExportModal() {
         setParetoExportError("");
+        setParetoExportProgress(null);
         setIsParetoExportModalOpen(true);
     }
 
@@ -938,6 +975,16 @@ export default function App() {
         }
         setParetoExportError("");
         setIsParetoExporting(true);
+        setParetoExportProgress({
+            status: "queued",
+            done: 0,
+            total: 0,
+            downloaded: 0,
+        });
+        const controller = new AbortController();
+        paretoExportProgressAbortRef.current = controller;
+        const progressToken = uid();
+        startParetoExportProgressPoll({ token: progressToken, signal: controller.signal });
         try {
             const result = await exportParetoPointsZip({
                 authKey: authKeyDraft,
@@ -946,14 +993,24 @@ export default function App() {
                 bench: paretoExportBench,
                 paretoOnly: paretoExportParetoOnly,
                 includedStatuses,
+                progressToken,
+                signal: controller.signal,
             });
             downloadBlobAsFile(result.blob, result.fileName || "pareto-points-export.zip");
             setIsParetoExportModalOpen(false);
             setHasNewPareto(false);
             setLastParetoExportAt(new Date().toISOString());
         } catch (error) {
+            if (error?.name === "AbortError") {
+                setParetoExportError("Export cancelled.");
+                return;
+            }
             setParetoExportError(error?.message || "Failed to export points.");
         } finally {
+            if (paretoExportProgressAbortRef.current === controller) {
+                paretoExportProgressAbortRef.current = null;
+            }
+            stopParetoExportProgressPoll();
             setIsParetoExporting(false);
         }
     }
@@ -1776,6 +1833,7 @@ export default function App() {
                 statusFilter={paretoExportStatusFilter}
                 onToggleStatus={toggleParetoExportStatus}
                 isExporting={isParetoExporting}
+                exportProgress={paretoExportProgress}
                 onDownload={downloadParetoExportZip}
                 onClose={closeParetoExportModal}
                 error={paretoExportError}

@@ -15,9 +15,13 @@ vi.mock("../../api/_lib/points.js", () => ({
 vi.mock("../../api/_lib/zip.js", () => ({
     buildZipBuffer: vi.fn(() => Buffer.from("zip")),
 }));
+vi.mock("../../api/_lib/exportProgress.js", () => ({
+    setExportProgress: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import { buildZipBuffer } from "../../api/_lib/zip.js";
+import { setExportProgress } from "../../api/_lib/exportProgress.js";
 import handler from "../../api/pareto-points-export.js";
 
 describe("api/pareto-points-export", () => {
@@ -148,6 +152,34 @@ describe("api/pareto-points-export", () => {
         expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
+    it("computes pareto on full status scope before applying date window", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: "2026-03-24T00:00:00.000Z" }] }); // auth
+        sql.mockResolvedValueOnce({
+            rows: [
+                { benchmark: "254", delay: 1, area: 4, file_name: "bench254_1_4_old_front.bench", created_at: "2026-03-20T09:00:00.000Z", status: "verified" },
+                { benchmark: "254", delay: 1, area: 5, file_name: "bench254_1_5_new_dominated.bench", created_at: "2026-03-25T10:00:00.000Z", status: "verified" },
+                { benchmark: "254", delay: 2, area: 3, file_name: "bench254_2_3_new_front.bench", created_at: "2026-03-25T11:00:00.000Z", status: "verified" },
+            ],
+        }); // points
+        sql.mockResolvedValueOnce({ rows: [{ uploaded_bytes_total: 100, total_upload_quota_bytes: 1000 }] }); // quota update
+
+        const req = createMockReq({
+            method: "GET",
+            query: {
+                authKey: "k",
+                mode: "all_new",
+                bench: "all",
+                paretoOnly: "1",
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch).toHaveBeenCalledWith("https://cdn.example/bench254_2_3_new_front.bench", undefined);
+    });
+
     it("filters exported points by selected statuses", async () => {
         sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: null }] }); // auth
         sql.mockResolvedValueOnce({
@@ -198,5 +230,42 @@ describe("api/pareto-points-export", () => {
         await handler(req, res);
 
         expect(res.statusCode).toBe(413);
+    });
+
+    it("reports progress with processed and downloaded counters when token is provided", async () => {
+        sql.mockResolvedValueOnce({ rows: [{ id: 1, last_pareto_export_at: null }] }); // auth
+        sql.mockResolvedValueOnce({
+            rows: [
+                { benchmark: "254", delay: 1, area: 5, file_name: "bench254_1_5_a.bench", created_at: "2026-03-23T10:00:00.000Z", status: "verified" },
+                { benchmark: "254", delay: 2, area: 4, file_name: "bench254_2_4_b.bench", created_at: "2026-03-24T11:00:00.000Z", status: "verified" },
+            ],
+        }); // points
+        sql.mockResolvedValueOnce({ rows: [{ uploaded_bytes_total: 100, total_upload_quota_bytes: 1000 }] }); // quota update
+
+        const req = createMockReq({
+            method: "GET",
+            query: {
+                authKey: "k",
+                mode: "all_new",
+                bench: "all",
+                paretoOnly: "0",
+                progressToken: "pt_1",
+            },
+        });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(setExportProgress).toHaveBeenCalled();
+        const calls = setExportProgress.mock.calls.filter((call) => call[0] === "pt_1");
+        expect(calls.length).toBeGreaterThan(0);
+        const lastPatch = calls[calls.length - 1][1];
+        expect(lastPatch).toEqual(expect.objectContaining({
+            status: "done",
+            doneFlag: true,
+            done: 2,
+            total: 2,
+            downloaded: 2,
+        }));
     });
 });

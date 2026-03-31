@@ -55,7 +55,7 @@ function isUploadParetoEligible(fileRow) {
     const hasMetrics = Number.isFinite(Number(fileRow?.parsedDelay)) && Number.isFinite(Number(fileRow?.parsedArea));
     if (!hasMetrics) return false;
     if (!["processed", "non-processed"].includes(processState)) return false;
-    return verdict === "verified" || verdict === "non-verified";
+    return verdict === "verified" || verdict === "non-verified" || verdict === "warning";
 }
 
 function buildReplacedCoordsPayload(replacedPoints) {

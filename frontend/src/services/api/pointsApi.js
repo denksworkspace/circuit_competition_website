@@ -43,6 +43,7 @@ export async function exportParetoPointsZip({
     bench = "all",
     paretoOnly = true,
     includedStatuses = [],
+    progressToken = "",
     signal = undefined,
 }) {
     const normalizedStatuses = Array.isArray(includedStatuses)
@@ -52,6 +53,7 @@ export async function exportParetoPointsZip({
         : [];
     return fetchDownloadFile("/api/pareto-points-export", {
         authKey,
+        progressToken,
         signal,
         fallbackName: "pareto-points-export.zip",
         queryParams: {

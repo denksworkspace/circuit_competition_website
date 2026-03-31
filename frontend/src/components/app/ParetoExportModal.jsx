@@ -25,6 +25,7 @@ export function ParetoExportModal({
     statusFilter,
     onToggleStatus,
     isExporting,
+    exportProgress,
     onDownload,
     onClose,
     error,
@@ -142,6 +143,12 @@ export function ParetoExportModal({
                 </label>
 
                 {error ? <div className="error">{error}</div> : null}
+                {isExporting && exportProgress ? (
+                    <div className="cardHint">
+                        processed {Number(exportProgress.done || 0)} / {Number(exportProgress.total || 0)},
+                        {" "}downloaded {Number(exportProgress.downloaded || 0)}
+                    </div>
+                ) : null}
 
                 <div className="pointModalActions">
                     <button className="btn primary small" type="button" onClick={onDownload} disabled={isExporting}>

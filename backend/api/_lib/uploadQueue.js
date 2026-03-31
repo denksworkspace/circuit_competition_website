@@ -20,6 +20,7 @@ export const FILE_VERDICT_VERIFIED = "verified";
 export const FILE_VERDICT_FAILED = "failed";
 export const FILE_VERDICT_NON_VERIFIED = "non-verified";
 export const FILE_VERDICT_DUPLICATE = "duplicate";
+export const FILE_VERDICT_WARNING = "warning";
 export const FILE_VERDICT_BLOCKED = "blocked";
 export const FILE_VERDICT_NON_PROCESSED = "non-processed";
 
@@ -133,7 +134,7 @@ export async function ensureUploadQueueSchema() {
             await sql`
               alter table upload_request_files
               add constraint upload_request_files_verdict_check
-              check (lower(coalesce(verdict, '')) in ('pending', 'verified', 'failed', 'non-verified', 'duplicate', 'blocked', 'non-processed'))
+              check (lower(coalesce(verdict, '')) in ('pending', 'verified', 'failed', 'non-verified', 'duplicate', 'warning', 'blocked', 'non-processed'))
             `;
             await sql`
               create unique index if not exists upload_request_files_request_order_uidx

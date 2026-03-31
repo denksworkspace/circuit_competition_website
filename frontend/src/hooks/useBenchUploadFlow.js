@@ -176,6 +176,9 @@ function buildLiveRowStatus(row) {
     if (verdict === "duplicate") {
         return { statusLabel: "duplicate", tone: "info" };
     }
+    if (verdict === "warning") {
+        return { statusLabel: "warning", tone: "info" };
+    }
     if (verdict === "blocked") {
         return { statusLabel: "blocked", tone: "error" };
     }

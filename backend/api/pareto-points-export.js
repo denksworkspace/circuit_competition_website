@@ -6,6 +6,7 @@ import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.
 import { buildDownloadUrl } from "./_lib/points.js";
 import { buildZipBuffer } from "./_lib/zip.js";
 import { selectParetoRows } from "./_lib/pareto.js";
+import { setExportProgress } from "./_lib/exportProgress.js";
 
 const DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS = Date.UTC(2026, 2, 23, 0, 0, 0, 0);
 const CUSTOM_EXPORT_DATE_RANGE_DAYS = 7;
@@ -105,6 +106,16 @@ async function fetchAsBuffer(url, signal) {
     return Buffer.from(arrayBuffer);
 }
 
+function filterRowsByStartMs(rowsRaw, startMs) {
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    return rows.filter((row) => {
+        if (startMs == null) return true;
+        const createdAtMs = toUnixMs(row?.created_at);
+        if (createdAtMs == null) return false;
+        return createdAtMs >= startMs;
+    });
+}
+
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["GET"])) return;
 
@@ -114,6 +125,8 @@ export default async function handler(req, res) {
     const bench = normalizeBench(req?.query?.bench);
     const paretoOnly = parseParetoOnly(req?.query?.paretoOnly);
     const includedStatuses = parseIncludedStatuses(req?.query?.includedStatuses);
+    const progressToken = String(req?.query?.progressToken || "").trim();
+    const reportProgress = (patch) => setExportProgress(progressToken, patch);
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
         return;
@@ -154,130 +167,203 @@ export default async function handler(req, res) {
         startMs = toUnixMs(actor?.last_pareto_export_at) ?? DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS;
     }
 
-    const pointsRes = bench === "all"
-        ? await sql`
-          select benchmark, delay, area, file_name, created_at, status
-          from points
-          where benchmark <> 'test'
-            and file_name is not null
-            and btrim(file_name) <> ''
-            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
-          order by created_at desc
-        `
-        : await sql`
-          select benchmark, delay, area, file_name, created_at, status
-          from points
-          where benchmark = ${bench}
-            and benchmark <> 'test'
-            and file_name is not null
-            and btrim(file_name) <> ''
-            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
-          order by created_at desc
-        `;
-    const rowsByTime = (Array.isArray(pointsRes.rows) ? pointsRes.rows : []).filter((row) => {
-        if (startMs == null) return true;
-        const createdAtMs = toUnixMs(row?.created_at);
-        if (createdAtMs == null) return false;
-        return createdAtMs >= startMs;
-    });
-    const rowsByStatus = rowsByTime.filter((row) =>
-        includedStatuses.includes(String(row?.status || "").trim().toLowerCase())
-    );
-    const selectedRows = paretoOnly ? selectParetoRows(rowsByStatus) : rowsByStatus;
-    if (selectedRows.length < 1) {
-        if (mode === "all_new") {
-            res.status(409).json({ error: "No new points to export." });
-            return;
-        }
-        res.status(409).json({ error: "No points to export for selected filters." });
-        return;
-    }
-    const pointRows = Array.from(
-        selectedRows.reduce((acc, row) => {
-            const sourceFileName = String(row?.file_name || "").trim();
-            if (!sourceFileName) return acc;
-            if (!acc.has(sourceFileName)) {
-                acc.set(sourceFileName, {
-                    sourceFileName,
-                    benchmark: String(row?.benchmark || "").trim(),
-                    createdAt: row?.created_at || null,
-                });
+    try {
+        const pointsRes = bench === "all"
+            ? await sql`
+              select benchmark, delay, area, file_name, created_at, status
+              from points
+              where benchmark <> 'test'
+                and file_name is not null
+                and btrim(file_name) <> ''
+                and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+              order by created_at desc
+            `
+            : await sql`
+              select benchmark, delay, area, file_name, created_at, status
+              from points
+              where benchmark = ${bench}
+                and benchmark <> 'test'
+                and file_name is not null
+                and btrim(file_name) <> ''
+                and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+              order by created_at desc
+            `;
+        const rowsByStatus = (Array.isArray(pointsRes.rows) ? pointsRes.rows : []).filter((row) =>
+            includedStatuses.includes(String(row?.status || "").trim().toLowerCase())
+        );
+        const paretoBaseRows = paretoOnly ? selectParetoRows(rowsByStatus) : rowsByStatus;
+        const selectedRows = filterRowsByStartMs(paretoBaseRows, startMs);
+        if (selectedRows.length < 1) {
+            reportProgress({
+                type: "pareto_export",
+                status: "no_points",
+                unit: "points",
+                done: 0,
+                total: 0,
+                downloaded: 0,
+                doneFlag: true,
+                error: null,
+            });
+            if (mode === "all_new") {
+                res.status(409).json({ error: "No new points to export." });
+                return;
             }
-            return acc;
-        }, new Map()).values()
-    );
+            res.status(409).json({ error: "No points to export for selected filters." });
+            return;
+        }
+        const pointRows = Array.from(
+            selectedRows.reduce((acc, row) => {
+                const sourceFileName = String(row?.file_name || "").trim();
+                if (!sourceFileName) return acc;
+                if (!acc.has(sourceFileName)) {
+                    acc.set(sourceFileName, {
+                        sourceFileName,
+                        benchmark: String(row?.benchmark || "").trim(),
+                        createdAt: row?.created_at || null,
+                    });
+                }
+                return acc;
+            }, new Map()).values()
+        );
 
-    const downloadedFiles = [];
-    let totalSchemesBytes = 0;
-    for (const row of pointRows) {
-        const downloadUrl = buildDownloadUrl(row.sourceFileName);
-        if (!downloadUrl) {
-            res.status(500).json({ error: "Download URL is not configured." });
-            return;
-        }
-        const fileBuffer = await fetchAsBuffer(downloadUrl, req?.abortSignal || null);
-        if (!fileBuffer) {
-            res.status(422).json({ error: `Failed to download file: ${row.sourceFileName}` });
-            return;
-        }
-        totalSchemesBytes += fileBuffer.length;
-        downloadedFiles.push({
-            fileName: row.sourceFileName,
-            benchmark: row.benchmark,
-            createdAt: row.createdAt,
-            fileBuffer,
+        const totalPoints = pointRows.length;
+        let processedPoints = 0;
+        let downloadedPoints = 0;
+        reportProgress({
+            type: "pareto_export",
+            status: "downloading_files",
+            unit: "points",
+            done: 0,
+            total: totalPoints,
+            downloaded: 0,
+            doneFlag: false,
+            error: null,
         });
+
+        const downloadedFiles = [];
+        let totalSchemesBytes = 0;
+        for (const row of pointRows) {
+            processedPoints += 1;
+            const downloadUrl = buildDownloadUrl(row.sourceFileName);
+            if (!downloadUrl) {
+                reportProgress({
+                    status: "error",
+                    done: processedPoints,
+                    total: totalPoints,
+                    downloaded: downloadedPoints,
+                    doneFlag: true,
+                    error: "Download URL is not configured.",
+                });
+                res.status(500).json({ error: "Download URL is not configured." });
+                return;
+            }
+            const fileBuffer = await fetchAsBuffer(downloadUrl, req?.abortSignal || null);
+            if (!fileBuffer) {
+                reportProgress({
+                    status: "error",
+                    done: processedPoints,
+                    total: totalPoints,
+                    downloaded: downloadedPoints,
+                    doneFlag: true,
+                    error: `Failed to download file: ${row.sourceFileName}`,
+                });
+                res.status(422).json({ error: `Failed to download file: ${row.sourceFileName}` });
+                return;
+            }
+            totalSchemesBytes += fileBuffer.length;
+            downloadedPoints += 1;
+            downloadedFiles.push({
+                fileName: row.sourceFileName,
+                benchmark: row.benchmark,
+                createdAt: row.createdAt,
+                fileBuffer,
+            });
+            reportProgress({
+                done: processedPoints,
+                total: totalPoints,
+                downloaded: downloadedPoints,
+            });
+        }
+
+        const chargedBytes = Math.max(0, Number(totalSchemesBytes || 0));
+        const chargeRes = await sql`
+          update commands
+          set uploaded_bytes_total = uploaded_bytes_total + ${chargedBytes}::bigint,
+              last_pareto_export_at = now(),
+              has_new_pareto = false
+          where id = ${actor.id}
+            and uploaded_bytes_total + ${chargedBytes}::bigint <= total_upload_quota_bytes
+          returning uploaded_bytes_total, total_upload_quota_bytes
+        `;
+        if (chargeRes.rows.length === 0) {
+            reportProgress({
+                status: "error",
+                done: processedPoints,
+                total: totalPoints,
+                downloaded: downloadedPoints,
+                doneFlag: true,
+                error: "Multi-file quota exceeded.",
+            });
+            res.status(413).json({ error: "Multi-file quota exceeded." });
+            return;
+        }
+
+        const manifest = {
+            exportedAt: new Date().toISOString(),
+            mode,
+            fromDate: mode === "from_date" ? fromDate : null,
+            startedFrom: startMs == null ? null : new Date(startMs).toISOString(),
+            bench,
+            paretoOnly,
+            includedStatuses,
+            points: downloadedFiles.map((item) => ({
+                benchmark: item.benchmark,
+                fileName: item.fileName,
+                createdAt: item.createdAt,
+                bytes: item.fileBuffer.length,
+            })),
+            totalPoints: downloadedFiles.length,
+            chargedBytes,
+            quota: {
+                uploadedBytesTotal: Number(chargeRes.rows[0]?.uploaded_bytes_total || 0),
+                totalUploadQuotaBytes: Number(chargeRes.rows[0]?.total_upload_quota_bytes || 0),
+            },
+        };
+
+        const zipEntries = downloadedFiles.map((item) => ({
+            name: buildPointZipPath(item.fileName),
+            data: item.fileBuffer,
+        }));
+        zipEntries.push({
+            name: "manifest.json",
+            data: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
+        });
+        reportProgress({
+            status: "building_zip",
+            done: processedPoints,
+            total: totalPoints,
+            downloaded: downloadedPoints,
+        });
+        const zipBuffer = buildZipBuffer(zipEntries);
+        reportProgress({
+            status: "done",
+            done: processedPoints,
+            total: totalPoints,
+            downloaded: downloadedPoints,
+            doneFlag: true,
+            error: null,
+        });
+        const fileName = buildExportFileName();
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        res.setHeader("Cache-Control", "no-store");
+        res.end(zipBuffer);
+    } catch (error) {
+        reportProgress({
+            status: "error",
+            doneFlag: true,
+            error: "Failed to export points.",
+        });
+        res.status(500).json({ error: "Failed to export points." });
     }
-
-    const chargedBytes = Math.max(0, Number(totalSchemesBytes || 0));
-    const chargeRes = await sql`
-      update commands
-      set uploaded_bytes_total = uploaded_bytes_total + ${chargedBytes}::bigint,
-          last_pareto_export_at = now(),
-          has_new_pareto = false
-      where id = ${actor.id}
-        and uploaded_bytes_total + ${chargedBytes}::bigint <= total_upload_quota_bytes
-      returning uploaded_bytes_total, total_upload_quota_bytes
-    `;
-    if (chargeRes.rows.length === 0) {
-        res.status(413).json({ error: "Multi-file quota exceeded." });
-        return;
-    }
-
-    const manifest = {
-        exportedAt: new Date().toISOString(),
-        mode,
-        fromDate: mode === "from_date" ? fromDate : null,
-        startedFrom: startMs == null ? null : new Date(startMs).toISOString(),
-        bench,
-        paretoOnly,
-        includedStatuses,
-        points: downloadedFiles.map((item) => ({
-            benchmark: item.benchmark,
-            fileName: item.fileName,
-            createdAt: item.createdAt,
-            bytes: item.fileBuffer.length,
-        })),
-        totalPoints: downloadedFiles.length,
-        chargedBytes,
-        quota: {
-            uploadedBytesTotal: Number(chargeRes.rows[0]?.uploaded_bytes_total || 0),
-            totalUploadQuotaBytes: Number(chargeRes.rows[0]?.total_upload_quota_bytes || 0),
-        },
-    };
-
-    const zipEntries = downloadedFiles.map((item) => ({
-        name: buildPointZipPath(item.fileName),
-        data: item.fileBuffer,
-    }));
-    zipEntries.push({
-        name: "manifest.json",
-        data: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
-    });
-    const zipBuffer = buildZipBuffer(zipEntries);
-    const fileName = buildExportFileName();
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    res.setHeader("Cache-Control", "no-store");
-    res.end(zipBuffer);
 }
