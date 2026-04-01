@@ -30,6 +30,7 @@ import {
 import { downloadQueueFileText } from "./_lib/queueS3.js";
 import { processUploadQueueFile } from "./_lib/uploadQueueProcessing.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 const TERMINAL = new Set([REQUEST_STATUS_COMPLETED, REQUEST_STATUS_INTERRUPTED, REQUEST_STATUS_FAILED, "closed"]);
 const STOP_POLL_MS = Math.max(300, Number(process.env.UPLOAD_QUEUE_STOP_POLL_MS || 1000));
@@ -238,6 +239,7 @@ export default async function handler(req, res) {
 
     const stopMonitor = createStopMonitor(requestId);
     let refreshedCounters = null;
+    const statusesToSync = new Set();
     try {
         const downloaded = await downloadQueueFileText(nextFile.queueFileKey, { signal: stopMonitor.signal });
         if (!downloaded.ok) {
@@ -302,6 +304,9 @@ export default async function handler(req, res) {
           where id = ${nextFile.id}
         `;
         refreshedCounters = await refreshUploadRequestCounters(requestId);
+        if (processed.applied) {
+            statusesToSync.add("verified");
+        }
         await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
     } catch (error) {
         if (isAbortLikeError(error) || stopMonitor.signal.aborted) {
@@ -439,5 +444,11 @@ export default async function handler(req, res) {
         command,
         includeFiles: includeFilesInResponse,
     });
+    try {
+        await syncParetoFilenameCsvs({ statuses: Array.from(statusesToSync) });
+    } catch {
+        res.status(500).json({ error: "Upload step was applied, but pareto filename CSV sync failed." });
+        return;
+    }
     res.status(200).json(ready);
 }

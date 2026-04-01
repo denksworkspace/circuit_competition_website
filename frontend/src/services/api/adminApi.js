@@ -233,3 +233,19 @@ export async function updateAdminMaintenanceSettings({
         maintenance: data?.maintenance || null,
     };
 }
+
+export async function recalculateParetoFilenameCsvs({ authKey }) {
+    const response = await fetch(apiUrl("/api/admin-pareto-filenames-recalculate"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authKey }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to recalculate pareto filename CSVs.");
+    }
+    return {
+        ok: Boolean(data?.ok),
+        statuses: Array.isArray(data?.statuses) ? data.statuses : [],
+    };
+}

@@ -17,6 +17,9 @@ vi.mock("../../api/_lib/pointVerification.js", async (importOriginal) => {
         downloadPointCircuitText: vi.fn(),
     };
 });
+vi.mock("../../api/_lib/paretoFilenameSync.js", () => ({
+    syncParetoFilenameCsvs: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import { downloadPointCircuitText } from "../../api/_lib/pointVerification.js";

@@ -4,6 +4,7 @@ import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
 import { CHECKER_ABC, CHECKER_ABC_FAST_HEX, normalizeCheckerVersion } from "./_lib/pointVerification.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 const ALLOWED_STATUS = new Set(["verified", "failed", "non-verified"]);
 
@@ -43,6 +44,7 @@ export default async function handler(req, res) {
 
     let applied = 0;
     const invalid = [];
+    const affectedStatuses = new Set();
 
     for (const update of updates) {
         const pointId = String(update?.pointId || "").trim();
@@ -51,6 +53,14 @@ export default async function handler(req, res) {
             invalid.push({ pointId, status, reason: "Invalid update item." });
             continue;
         }
+        const oldStatusRes = await sql`
+          select status
+          from points
+          where id = ${pointId}
+            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+          limit 1
+        `;
+        const oldStatus = String(oldStatusRes.rows[0]?.status || "").trim().toLowerCase();
         const checker = status === "non-verified" ? null : checkerVersion;
         await sql`
           update points
@@ -60,6 +70,19 @@ export default async function handler(req, res) {
             and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
         `;
         applied += 1;
+        affectedStatuses.add(oldStatus);
+        affectedStatuses.add(String(status || "").trim().toLowerCase());
+    }
+
+    try {
+        await syncParetoFilenameCsvs({ statuses: Array.from(affectedStatuses) });
+    } catch {
+        res.status(500).json({
+            error: "Point statuses were updated, but pareto filename CSV sync failed.",
+            applied,
+            invalid,
+        });
+        return;
     }
 
     res.status(200).json({

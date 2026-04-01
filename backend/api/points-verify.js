@@ -14,6 +14,7 @@ import {
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -92,7 +93,7 @@ export default async function handler(req, res) {
     let pointRow = null;
     if (pointId) {
         const pointRes = await sql`
-          select id, benchmark, sender, file_name
+          select id, benchmark, sender, file_name, status
           from points
           where id = ${pointId}
           limit 1
@@ -164,6 +165,12 @@ export default async function handler(req, res) {
         `;
         if (Number(updateResult.rowCount || 0) === 0) {
             res.status(409).json({ error: "Cannot apply status for deleted point.", code: "POINT_DELETED" });
+            return;
+        }
+        try {
+            await syncParetoFilenameCsvs({ statuses: [point?.status, nextStatus] });
+        } catch {
+            res.status(500).json({ error: "Point status was updated, but pareto filename CSV sync failed." });
             return;
         }
     }

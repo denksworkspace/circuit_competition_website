@@ -254,9 +254,11 @@ export default function App() {
         setMaintenanceWhitelistDraft,
         isAdminLoading,
         isAdminSaving,
+        isParetoCsvRecalculating,
         loadAdminUser,
         saveAdminUserSettings,
         saveMaintenanceSettings,
+        recalculateParetoCsvFilenames,
     } = useAdminUserSettings({
         isAdmin,
         authKeyDraft,
@@ -1646,6 +1648,8 @@ export default function App() {
                             adminSchemesExportProgress={adminSchemesExportProgress}
                             adminDbExportProgress={adminDbExportProgress}
                             adminExportError={adminExportError}
+                            recalculateParetoCsvFilenames={recalculateParetoCsvFilenames}
+                            isParetoCsvRecalculating={isParetoCsvRecalculating}
                             adminPanelError={adminPanelError}
                             adminUser={adminUser}
                             formatGb={formatGb}

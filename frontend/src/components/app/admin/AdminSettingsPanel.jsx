@@ -13,6 +13,8 @@ export function AdminSettingsPanel({
     adminSchemesExportProgress,
     adminDbExportProgress,
     adminExportError,
+    recalculateParetoCsvFilenames,
+    isParetoCsvRecalculating,
     adminPanelError,
     adminUser,
     formatGb,
@@ -145,6 +147,14 @@ export function AdminSettingsPanel({
                     {isAdminDbExporting
                         ? `Stop database export (${Number(adminDbExportProgress?.done || 0)}/${Number(adminDbExportProgress?.total || 0)})`
                         : "Export database"}
+                </button>
+                <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={recalculateParetoCsvFilenames}
+                    disabled={isParetoCsvRecalculating}
+                >
+                    {isParetoCsvRecalculating ? "Recalculating..." : "recalculate .csv filenames"}
                 </button>
             </div>
             {isAdminSchemesExporting ? (

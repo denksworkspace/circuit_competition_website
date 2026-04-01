@@ -30,9 +30,13 @@ vi.mock("../../api/_lib/truthTables.js", () => ({
 vi.mock("../../api/_lib/pointsStatus.js", () => ({
     ensurePointsStatusConstraint: vi.fn(),
 }));
+vi.mock("../../api/_lib/paretoFilenameSync.js", () => ({
+    syncParetoFilenameCsvs: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "../../api/_roles.js";
+import { syncParetoFilenameCsvs } from "../../api/_lib/paretoFilenameSync.js";
 import handler from "../../api/points.js";
 
 describe("api/points handler", () => {
@@ -324,6 +328,7 @@ describe("api/points handler", () => {
 
         expect(res.statusCode).toBe(201);
         expect(res.body.point.id).toBe("p1");
+        expect(syncParetoFilenameCsvs).toHaveBeenCalledWith({ statuses: ["non-verified"] });
     });
 
     it("POST defaults missing batchSize to single-file mode", async () => {

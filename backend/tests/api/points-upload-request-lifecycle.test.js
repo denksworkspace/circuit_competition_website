@@ -56,6 +56,9 @@ vi.mock("../../api/_lib/uploadQueueProcessing.js", () => ({
 vi.mock("../../api/_lib/maintenanceMode.js", () => ({
     checkMaintenanceBlock: vi.fn(async () => ({ blocked: false, state: null })),
 }));
+vi.mock("../../api/_lib/paretoFilenameSync.js", () => ({
+    syncParetoFilenameCsvs: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import {

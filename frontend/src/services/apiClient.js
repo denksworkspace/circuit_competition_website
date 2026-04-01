@@ -33,6 +33,7 @@ export {
     updateAdminUserUploadSettings,
     fetchAdminMaintenanceSettings,
     updateAdminMaintenanceSettings,
+    recalculateParetoFilenameCsvs,
 } from "./api/adminApi.js";
 export {
     planTruthTablesUpload,

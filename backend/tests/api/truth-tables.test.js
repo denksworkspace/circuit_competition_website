@@ -38,6 +38,9 @@ vi.mock("../../api/_lib/commandUploadSettings.js", () => ({
             Number(row?.total_upload_quota_bytes || 10_000) - Number(row?.uploaded_bytes_total || 0),
     })),
 }));
+vi.mock("../../api/_lib/paretoFilenameSync.js", () => ({
+    syncParetoFilenameCsvs: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import {

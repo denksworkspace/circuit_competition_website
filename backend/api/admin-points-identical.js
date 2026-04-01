@@ -6,6 +6,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { downloadPointCircuitText } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 function normalizeCircuitTextForHash(textRaw) {
     return String(textRaw || "")
@@ -193,11 +194,22 @@ async function scanIdenticalGroups(req, res, report) {
 async function applyIdenticalResolutions(res, resolutions) {
     await ensurePointsStatusConstraint();
     let deletedPoints = 0;
+    const affectedStatuses = new Set();
 
     for (const item of resolutions) {
         const keepId = String(item.keepPointId || "");
         const removeIds = Array.from(new Set(item.removePointIds.filter((id) => id && id !== keepId)));
         if (removeIds.length === 0) continue;
+        const removedStatusRes = await sql`
+          select status
+          from points
+          where id = any(${removeIds}::text[])
+            and id <> ${keepId}
+            and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        `;
+        for (const row of removedStatusRes.rows) {
+            affectedStatuses.add(String(row?.status || "").trim().toLowerCase());
+        }
         const result = await sql`
           update points
           set lifecycle_status = 'deleted',
@@ -207,6 +219,17 @@ async function applyIdenticalResolutions(res, resolutions) {
             and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
         `;
         deletedPoints += Number(result.rowCount || 0);
+    }
+
+    try {
+        await syncParetoFilenameCsvs({ statuses: Array.from(affectedStatuses) });
+    } catch {
+        res.status(500).json({
+            error: "Duplicate cleanup was applied, but pareto filename CSV sync failed.",
+            deletedPoints,
+            appliedGroups: resolutions.length,
+        });
+        return;
     }
 
     res.status(200).json({

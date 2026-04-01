@@ -3,6 +3,7 @@ import { MAX_MULTI_FILE_BATCH_COUNT } from "../constants/appConstants.js";
 import {
     fetchAdminMaintenanceSettings,
     fetchAdminUserById,
+    recalculateParetoFilenameCsvs,
     updateAdminMaintenanceSettings,
     updateAdminUserUploadSettings,
 } from "../services/apiClient.js";
@@ -26,6 +27,7 @@ export function useAdminUserSettings({
     const [maintenanceWhitelistDraft, setMaintenanceWhitelistDraft] = useState("");
     const [isAdminLoading, setIsAdminLoading] = useState(false);
     const [isAdminSaving, setIsAdminSaving] = useState(false);
+    const [isParetoCsvRecalculating, setIsParetoCsvRecalculating] = useState(false);
 
     function applyAdminUserDrafts(user) {
         setAdminUser(user || null);
@@ -125,6 +127,20 @@ export function useAdminUserSettings({
         }
     }
 
+    async function recalculateParetoCsvFilenames() {
+        if (!isAdmin) return;
+        setIsParetoCsvRecalculating(true);
+        setAdminPanelError("");
+        try {
+            await recalculateParetoFilenameCsvs({ authKey: authKeyDraft });
+            refreshAdminLogs();
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to recalculate pareto filename CSVs.");
+        } finally {
+            setIsParetoCsvRecalculating(false);
+        }
+    }
+
     useEffect(() => {
         if (!isAdmin) return;
         if (!String(authKeyDraft || "").trim()) return;
@@ -157,8 +173,10 @@ export function useAdminUserSettings({
         setMaintenanceWhitelistDraft,
         isAdminLoading,
         isAdminSaving,
+        isParetoCsvRecalculating,
         loadAdminUser,
         saveAdminUserSettings,
         saveMaintenanceSettings,
+        recalculateParetoCsvFilenames,
     };
 }

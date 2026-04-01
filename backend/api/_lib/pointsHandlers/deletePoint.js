@@ -3,6 +3,7 @@ import { sql } from "@vercel/postgres";
 import { parseBody } from "../http.js";
 import { addActionLog } from "../actionLogs.js";
 import { ensurePointsStatusConstraint } from "../pointsStatus.js";
+import { syncParetoFilenameCsvs } from "../paretoFilenameSync.js";
 
 export async function handleDeletePoint(req, res) {
     await ensurePointsStatusConstraint();
@@ -22,7 +23,7 @@ export async function handleDeletePoint(req, res) {
 
     const commandId = cmdRes.rows[0].id;
     const pointRes = await sql`
-      select id, command_id, lifecycle_status, benchmark, delay, area, file_name
+      select id, command_id, lifecycle_status, benchmark, delay, area, file_name, status
       from points
       where id = ${id}
       limit 1
@@ -61,5 +62,11 @@ export async function handleDeletePoint(req, res) {
             note: "Quota is not refunded for deleted points.",
         },
     });
+    try {
+        await syncParetoFilenameCsvs({ statuses: [pointRes.rows[0]?.status] });
+    } catch {
+        res.status(500).json({ error: "Point was deleted, but pareto filename CSV sync failed." });
+        return;
+    }
     res.status(200).json({ ok: true });
 }

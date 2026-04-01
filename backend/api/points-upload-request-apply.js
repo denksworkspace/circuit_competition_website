@@ -13,6 +13,7 @@ import {
 } from "./_lib/uploadQueueOps.js";
 import { applyUploadQueueFileRow } from "./_lib/uploadQueueProcessing.js";
 import { downloadQueueFileText } from "./_lib/queueS3.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -89,6 +90,7 @@ export default async function handler(req, res) {
     const savedPoints = [];
     const errors = [];
     const selectedIds = new Set(fileIds);
+    const statusesToSync = new Set();
 
     for (const row of rows) {
         if (!selectedIds.has(row.id)) {
@@ -117,6 +119,7 @@ export default async function handler(req, res) {
             continue;
         }
         savedPoints.push(applied.point);
+        statusesToSync.add(String(applied?.point?.status || "").trim().toLowerCase());
         await sql`
           update upload_request_files
           set applied = true,
@@ -137,6 +140,16 @@ export default async function handler(req, res) {
             commandId: command.id,
             commandName: command.name,
         });
+    }
+    try {
+        await syncParetoFilenameCsvs({ statuses: Array.from(statusesToSync) });
+    } catch {
+        res.status(500).json({
+            error: "Upload apply completed, but pareto filename CSV sync failed.",
+            savedPoints,
+            errors,
+        });
+        return;
     }
     const snapshot = await loadUploadRequestSnapshot({
         requestId,

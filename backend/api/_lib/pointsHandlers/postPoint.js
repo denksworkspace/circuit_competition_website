@@ -7,6 +7,7 @@ import {
 } from "../commandUploadSettings.js";
 import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 import { createPointForCommand } from "../pointsWrite.js";
+import { syncParetoFilenameCsvs } from "../paretoFilenameSync.js";
 
 export async function handlePostPoint(req, res) {
     await ensureCommandRolesSchema();
@@ -60,6 +61,12 @@ export async function handlePostPoint(req, res) {
     });
     if (!created.ok) {
         res.status(created.statusCode).json({ error: created.error });
+        return;
+    }
+    try {
+        await syncParetoFilenameCsvs({ statuses: [created?.point?.status] });
+    } catch {
+        res.status(500).json({ error: "Point was created, but pareto filename CSV sync failed." });
         return;
     }
     res.status(201).json({

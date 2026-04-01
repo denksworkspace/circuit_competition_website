@@ -16,6 +16,7 @@ import {
     normalizeCommandUploadSettings,
 } from "./_lib/commandUploadSettings.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
+import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
 const MAX_TRUTH_BATCH_FILES = 100;
 
@@ -119,6 +120,7 @@ export default async function handler(req, res) {
         return;
     }
 
+    let shouldSyncParetoCsvs = false;
     try {
         if (chargeBytes > 0) {
             const quotaUpdate = await sql`
@@ -154,6 +156,7 @@ export default async function handler(req, res) {
               where benchmark = ${benchmark}
                 and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
             `;
+            shouldSyncParetoCsvs = true;
         }
 
         await addActionLog({
@@ -180,6 +183,16 @@ export default async function handler(req, res) {
         }
         res.status(500).json({ error: "Failed to save truth table." });
         return;
+    }
+    if (shouldSyncParetoCsvs) {
+        try {
+            await syncParetoFilenameCsvs({
+                statuses: ["verified", "non-verified"],
+            });
+        } catch {
+            res.status(500).json({ error: "Truth table was saved, but pareto filename CSV sync failed." });
+            return;
+        }
     }
 
     res.status(200).json({
