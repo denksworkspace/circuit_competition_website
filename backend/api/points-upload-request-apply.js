@@ -14,12 +14,14 @@ import {
 import { applyUploadQueueFileRow } from "./_lib/uploadQueueProcessing.js";
 import { downloadQueueFileText } from "./_lib/queueS3.js";
 import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
+import { setVerifyProgress } from "./_lib/verifyProgress.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
     const requestId = String(body?.requestId || "").trim();
+    const progressToken = String(body?.progressToken || "").trim();
     const fileIds = Array.isArray(body?.fileIds) ? body.fileIds.map((id) => String(id || "").trim()).filter(Boolean) : [];
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
@@ -90,7 +92,20 @@ export default async function handler(req, res) {
     const savedPoints = [];
     const errors = [];
     const selectedIds = new Set(fileIds);
+    const unresolvedSelectedIds = new Set(fileIds);
     const statusesToSync = new Set();
+    const totalCount = Math.max(0, Number(selectedIds.size || 0));
+    let doneCount = 0;
+    const report = (patch = {}) => setVerifyProgress(progressToken, {
+        status: "apply",
+        done: false,
+        error: null,
+        doneCount,
+        totalCount,
+        currentFileName: "",
+        ...patch,
+    });
+    report();
 
     for (const row of rows) {
         if (!selectedIds.has(row.id)) {
@@ -103,9 +118,13 @@ export default async function handler(req, res) {
             `;
             continue;
         }
+        unresolvedSelectedIds.delete(row.id);
+        report({ currentFileName: String(row.originalFileName || "") });
         const downloaded = await downloadQueueFileText(row.queueFileKey);
         if (!downloaded.ok) {
             errors.push(`file=${row.originalFileName}; ${downloaded.reason || "Failed to download queue file."}`);
+            doneCount += 1;
+            report({ doneCount });
             continue;
         }
         const applied = await applyUploadQueueFileRow({
@@ -116,6 +135,8 @@ export default async function handler(req, res) {
         });
         if (!applied.ok) {
             errors.push(`file=${row.originalFileName}; ${applied.error || "Failed to apply file."}`);
+            doneCount += 1;
+            report({ doneCount });
             continue;
         }
         savedPoints.push(applied.point);
@@ -130,6 +151,14 @@ export default async function handler(req, res) {
               updated_at = now()
           where id = ${row.id}
         `;
+        doneCount += 1;
+        report({ doneCount });
+    }
+
+    for (const unresolvedId of unresolvedSelectedIds) {
+        errors.push(`file=${unresolvedId}; File not found or not available for apply.`);
+        doneCount += 1;
+        report({ doneCount });
     }
 
     const counters = await refreshUploadRequestCounters(requestId);
@@ -144,6 +173,7 @@ export default async function handler(req, res) {
     try {
         await syncParetoFilenameCsvs({ statuses: Array.from(statusesToSync) });
     } catch {
+        report({ done: true, doneCount, error: "Upload apply completed, but pareto filename CSV sync failed." });
         res.status(500).json({
             error: "Upload apply completed, but pareto filename CSV sync failed.",
             savedPoints,
@@ -151,6 +181,7 @@ export default async function handler(req, res) {
         });
         return;
     }
+    report({ done: true, doneCount, currentFileName: "" });
     const snapshot = await loadUploadRequestSnapshot({
         requestId,
         commandId: command.id,

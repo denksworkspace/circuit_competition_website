@@ -59,6 +59,9 @@ vi.mock("../../api/_lib/maintenanceMode.js", () => ({
 vi.mock("../../api/_lib/paretoFilenameSync.js", () => ({
     syncParetoFilenameCsvs: vi.fn(),
 }));
+vi.mock("../../api/_lib/verifyProgress.js", () => ({
+    setVerifyProgress: vi.fn(),
+}));
 
 import { sql } from "@vercel/postgres";
 import {
@@ -69,6 +72,7 @@ import {
 } from "../../api/_lib/uploadQueueOps.js";
 import { downloadQueueFileText } from "../../api/_lib/queueS3.js";
 import { applyUploadQueueFileRow, processUploadQueueFile } from "../../api/_lib/uploadQueueProcessing.js";
+import { setVerifyProgress } from "../../api/_lib/verifyProgress.js";
 import runHandler from "../../api/points-upload-request-run.js";
 import stopHandler from "../../api/points-upload-request-stop.js";
 import applyHandler from "../../api/points-upload-request-apply.js";
@@ -246,7 +250,7 @@ describe("upload request lifecycle handlers", () => {
 
         const req = createMockReq({
             method: "POST",
-            body: { authKey: "k", requestId: "req_1", fileIds: ["f_ok", "f_err"] },
+            body: { authKey: "k", requestId: "req_1", fileIds: ["f_ok", "f_err"], progressToken: "prog_1" },
         });
         const res = createMockRes();
         await applyHandler(req, res);
@@ -254,6 +258,15 @@ describe("upload request lifecycle handlers", () => {
         expect(res.statusCode).toBe(200);
         expect(res.body.savedPoints).toHaveLength(1);
         expect(res.body.errors).toHaveLength(1);
+        expect(setVerifyProgress).toHaveBeenCalled();
+        const progressCalls = setVerifyProgress.mock.calls
+            .filter((call) => String(call?.[0] || "") === "prog_1")
+            .map((call) => call?.[1] || {});
+        expect(progressCalls.length).toBeGreaterThan(0);
+        const lastProgress = progressCalls[progressCalls.length - 1];
+        expect(lastProgress.done).toBe(true);
+        expect(Number(lastProgress.doneCount || 0)).toBe(2);
+        expect(Number(lastProgress.totalCount || 0)).toBe(2);
     });
 
     it("close cleans up non-applied queue files", async () => {

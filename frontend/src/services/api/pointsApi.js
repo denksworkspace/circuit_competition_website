@@ -192,7 +192,7 @@ export async function stopPointsUploadRequest({ authKey, requestId, signal }) {
     };
 }
 
-export async function applyPointsUploadRequestFiles({ authKey, requestId, fileIds, signal }) {
+export async function applyPointsUploadRequestFiles({ authKey, requestId, fileIds, progressToken = "", signal }) {
     const response = await fetch(apiUrl("/api/points-upload-request-apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -201,6 +201,7 @@ export async function applyPointsUploadRequestFiles({ authKey, requestId, fileId
             authKey,
             requestId,
             fileIds,
+            progressToken,
         }),
     });
     const data = await parseJsonSafe(response);

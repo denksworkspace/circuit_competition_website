@@ -36,3 +36,4 @@ abc/
 .local-exported-points/
 *.history
 .agents/
+.codex

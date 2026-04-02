@@ -397,25 +397,18 @@ export function useAdminBulkActions({
         setBulkIdenticalApplyProgress({ processed: 0, total: resolutions.length });
         setAdminPanelError("");
         try {
-            let appliedGroups = 0;
-            let deletedPoints = 0;
-            for (let index = 0; index < resolutions.length; index += 1) {
-                const resolution = resolutions[index];
-                const result = await applyAdminIdenticalResolutions({
-                    authKey: authKeyDraft,
-                    resolutions: [resolution],
-                });
-                appliedGroups += Number(result?.appliedGroups || 0);
-                deletedPoints += Number(result?.deletedPoints || 0);
-                setBulkIdenticalApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
-            }
+            const result = await applyAdminIdenticalResolutions({
+                authKey: authKeyDraft,
+                resolutions,
+            });
+            setBulkIdenticalApplyProgress((prev) => (prev ? { ...prev, processed: resolutions.length } : prev));
             const freshPoints = await fetchPoints(authKeyDraft);
             setPoints(freshPoints);
             setIsBulkIdenticalApplyModalOpen(false);
             setBulkIdenticalPickerGroupId("");
             setBulkIdenticalGroups([]);
             window.alert(
-                `Identical groups applied: ${appliedGroups}. Deleted points: ${deletedPoints}.`
+                `Identical groups applied: ${Number(result?.appliedGroups || 0)}. Deleted points: ${Number(result?.deletedPoints || 0)}.`
             );
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to apply identical points resolutions.");
@@ -485,30 +478,17 @@ export function useAdminBulkActions({
             const checkerVersion = enabledCheckers.has(normalizedChecker)
                 ? normalizedChecker
                 : defaultCheckerVersion;
-            const errors = [];
-            for (let index = 0; index < updates.length; index += 1) {
-                const update = updates[index];
-                try {
-                    await applyAdminPointStatuses({
-                        authKey: authKeyDraft,
-                        updates: [update],
-                        checkerVersion,
-                    });
-                } catch (error) {
-                    errors.push(String(error?.message || `Failed to apply status for point ${update.pointId}.`));
-                } finally {
-                    setBulkVerifyApplyProgress((prev) => (prev ? { ...prev, processed: index + 1 } : prev));
-                }
-            }
+            await applyAdminPointStatuses({
+                authKey: authKeyDraft,
+                updates,
+                checkerVersion,
+            });
+            setBulkVerifyApplyProgress((prev) => (prev ? { ...prev, processed: updates.length } : prev));
             const freshPoints = await fetchPoints(authKeyDraft);
             setPoints(freshPoints);
             setIsBulkVerifyApplyModalOpen(false);
             setBulkVerifyCandidates([]);
-            if (errors.length > 0) {
-                setAdminPanelError(errors[0]);
-            } else {
-                window.alert(`Applied statuses for ${updates.length} points.`);
-            }
+            window.alert(`Applied statuses for ${updates.length} points.`);
         } catch (error) {
             setAdminPanelError(error?.message || "Failed to apply statuses.");
         } finally {

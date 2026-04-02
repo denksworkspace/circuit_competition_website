@@ -7,11 +7,13 @@ import {
     closePointsUploadRequest,
     createPointsUploadRequest,
     fetchActivePointsUploadRequest,
+    fetchVerifyPointProgress,
     fetchPointsUploadRequestStatus,
     fetchPoints,
     runPointsUploadRequest,
     stopPointsUploadRequest,
 } from "../services/apiClient.js";
+import { uid } from "../utils/pointUtils.js";
 
 const RUNNABLE_REQUEST_STATUSES = new Set(["queued", "processing"]);
 const FREEZED_REQUEST_STATUS = "freezed";
@@ -743,11 +745,34 @@ export function useBenchUploadFlow({
 
         setIsManualApplying(true);
         setManualApplyProgress({ processed: 0, total: selected.length });
+        const progressToken = uid();
+        const progressController = new AbortController();
+        let progressPoll = null;
         try {
+            progressPoll = setInterval(async () => {
+                if (progressController.signal.aborted) return;
+                try {
+                    const progress = await fetchVerifyPointProgress({
+                        token: progressToken,
+                        signal: progressController.signal,
+                    });
+                    setManualApplyProgress((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            processed: Math.min(Number(progress?.doneCount || 0), Number(prev.total || selected.length)),
+                            total: Math.max(Number(prev.total || 0), Number(progress?.totalCount || selected.length)),
+                        };
+                    });
+                } catch {
+                    // Ignore transient polling failures while apply is in progress.
+                }
+            }, 500);
             const applied = await applyPointsUploadRequestFiles({
                 authKey: authKeyDraft,
                 requestId: activeRequestIdRef.current,
                 fileIds: selected,
+                progressToken,
             });
             updateStateFromSnapshot(applied);
             setManualApplyProgress((prev) => (prev ? { ...prev, processed: selected.length } : prev));
@@ -760,6 +785,10 @@ export function useBenchUploadFlow({
         } catch (error) {
             setUploadError(String(error?.message || "Failed to apply selected files."));
         } finally {
+            progressController.abort();
+            if (progressPoll) {
+                clearInterval(progressPoll);
+            }
             setIsManualApplying(false);
             setManualApplyProgress(null);
         }
