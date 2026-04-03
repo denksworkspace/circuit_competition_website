@@ -137,7 +137,7 @@ function getUploadDisabledReason({
         formatGb,
     });
     if (filesError) return filesError;
-    const description = descriptionDraft.trim() || "schema";
+    const description = descriptionDraft.trim() || "circuit";
     if (description.length > MAX_DESCRIPTION_LEN) {
         return `Description is too long (max ${MAX_DESCRIPTION_LEN}).`;
     }
@@ -341,7 +341,7 @@ export function useBenchUploadFlow({
 
     function normalizeDescriptionForSubmit() {
         const description = descriptionDraft.trim();
-        if (!description) return "schema";
+        if (!description) return "circuit";
         return description;
     }
 

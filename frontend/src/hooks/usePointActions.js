@@ -37,6 +37,7 @@ export function usePointActions({
             const result = await downloadPointCircuitFile({
                 authKey: authKeyDraft,
                 pointId: point.id,
+                fallbackName: point.fileName || "circuit.bench",
             });
             downloadBlobAsFile(result.blob, result.fileName || point.fileName || "circuit.bench");
         } catch (error) {

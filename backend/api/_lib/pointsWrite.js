@@ -58,7 +58,7 @@ export async function createPointForCommand({
         return { ok: false, statusCode: 400, error: "Invalid payload." };
     }
 
-    const descriptionTrimmed = String(description || "").trim() || "schema";
+    const descriptionTrimmed = String(description || "").trim() || "circuit";
     if (descriptionTrimmed.length > MAX_DESCRIPTION_LEN) {
         return {
             ok: false,

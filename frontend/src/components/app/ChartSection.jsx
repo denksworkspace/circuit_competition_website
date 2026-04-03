@@ -248,7 +248,7 @@ export function ChartSection({
                         <span>{dateSliderMaxLabel}</span>
                     </div>
                 </label>
-                <div className="viewTitle">View rectange</div>
+                <div className="viewTitle">View rectangle</div>
 
                 <label className="field compact">
                     <span>

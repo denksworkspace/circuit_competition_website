@@ -25,11 +25,11 @@ export async function fetchParetoExportStatus(authKey) {
     };
 }
 
-export async function downloadPointCircuitFile({ authKey, pointId, signal }) {
+export async function downloadPointCircuitFile({ authKey, pointId, signal, fallbackName = "circuit.bench" }) {
     return fetchDownloadFile("/api/points-download", {
         authKey,
         signal,
-        fallbackName: "circuit.bench",
+        fallbackName,
         queryParams: {
             pointId: String(pointId || "").trim(),
         },

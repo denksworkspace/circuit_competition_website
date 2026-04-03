@@ -64,7 +64,7 @@ export function AddPointSection({
                                             <span className="mono">{"{DELAY}"}</span> and <span className="mono">{"{AREA}"}</span> are integers (0..10^9)
                                         </li>
                                         <li>
-                                            <span className="mono">description</span> is optional (up to <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>schema</b>
+                                            <span className="mono">description</span> is optional (up to <b>{MAX_DESCRIPTION_LEN}</b> chars), default is <b>circuit</b>
                                         </li>
                                         <li>input file name length ≤ {MAX_INPUT_FILENAME_LEN}</li>
                                     </ul>
@@ -125,7 +125,7 @@ export function AddPointSection({
                     <input
                         value={descriptionDraft}
                         onChange={(e) => onDescriptionDraftChange(e.target.value)}
-                        placeholder="Short description (default: schema)"
+                        placeholder="Short description (default: circuit)"
                     />
                 </label>
 

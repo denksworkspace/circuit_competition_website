@@ -41,7 +41,7 @@ export function SentPointsSection({
             <div className="cardHeader tight">
                 <div>
                     <div className="cardTitleRow">
-                        <div className="cardTitle">Sended points</div>
+                        <div className="cardTitle">Sent points</div>
                         <div className="helpTipWrap" tabIndex={0} aria-label="Submissions delete help">
                             <span className="helpTipIcon">?</span>
                             <div className="helpTipPanel">

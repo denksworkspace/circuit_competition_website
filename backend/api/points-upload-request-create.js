@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     const body = parseBody(req);
     const authKey = String(body?.authKey || "").trim();
     const files = Array.isArray(body?.files) ? body.files : [];
-    const description = String(body?.description || "").trim() || "schema";
+    const description = String(body?.description || "").trim() || "circuit";
     const selectedParser = normalizeParserSelection(body?.selectedParser);
     const selectedChecker = normalizeCheckerVersion(body?.selectedChecker);
     if (!authKey) {

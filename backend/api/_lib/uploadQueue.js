@@ -41,7 +41,7 @@ export async function ensureUploadQueueSchema() {
                 selected_checker text not null default 'none',
                 parser_timeout_seconds integer not null default 60,
                 checker_timeout_seconds integer not null default 60,
-                description text not null default 'schema',
+                description text not null default 'circuit',
                 total_count integer not null default 0,
                 done_count integer not null default 0,
                 verified_count integer not null default 0,
@@ -57,6 +57,10 @@ export async function ensureUploadQueueSchema() {
             await sql`
               alter table upload_requests
               add column if not exists pareto_front_count integer not null default 0
+            `;
+            await sql`
+              alter table upload_requests
+              alter column description set default 'circuit'
             `;
             await sql`
               alter table upload_requests
@@ -167,7 +171,7 @@ export function normalizeUploadRequestRow(row) {
         selectedChecker: String(row.selected_checker || "none"),
         parserTimeoutSeconds: Math.max(1, Number(row.parser_timeout_seconds || 60)),
         checkerTimeoutSeconds: Math.max(1, Number(row.checker_timeout_seconds || 60)),
-        description: String(row.description || "schema"),
+        description: String(row.description || "circuit"),
         totalCount: Math.max(0, Number(row.total_count || 0)),
         doneCount: Math.max(0, Number(row.done_count || 0)),
         verifiedCount: Math.max(0, Number(row.verified_count || 0)),
