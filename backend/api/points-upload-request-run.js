@@ -239,7 +239,6 @@ export default async function handler(req, res) {
 
     const stopMonitor = createStopMonitor(requestId);
     let refreshedCounters = null;
-    const statusesToSync = new Set();
     try {
         const downloaded = await downloadQueueFileText(nextFile.queueFileKey, { signal: stopMonitor.signal });
         if (!downloaded.ok) {
@@ -304,9 +303,6 @@ export default async function handler(req, res) {
           where id = ${nextFile.id}
         `;
         refreshedCounters = await refreshUploadRequestCounters(requestId);
-        if (processed.applied) {
-            statusesToSync.add("verified");
-        }
         await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
     } catch (error) {
         if (isAbortLikeError(error) || stopMonitor.signal.aborted) {
@@ -444,10 +440,15 @@ export default async function handler(req, res) {
         command,
         includeFiles: includeFilesInResponse,
     });
+    const finalStatus = String(ready?.request?.status || "").toLowerCase();
+    const shouldSyncParetoCsvs = (initialStatus === "queued" || initialStatus === "processing")
+        && TERMINAL.has(finalStatus);
     try {
-        await syncParetoFilenameCsvs({ statuses: Array.from(statusesToSync) });
+        if (shouldSyncParetoCsvs) {
+            await syncParetoFilenameCsvs({ statuses: ["verified", "non-verified"] });
+        }
     } catch {
-        res.status(500).json({ error: "Upload step was applied, but pareto filename CSV sync failed." });
+        res.status(500).json({ error: "Upload step completed, but pareto filename CSV sync failed." });
         return;
     }
     res.status(200).json(ready);
