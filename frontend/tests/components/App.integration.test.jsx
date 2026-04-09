@@ -390,6 +390,7 @@ describe("App integration", () => {
                     request: {
                         id: "req1",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -535,6 +536,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_fail",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -655,6 +657,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_restore",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -857,6 +860,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_failed_restore",
                         status: "failed",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -886,7 +890,8 @@ describe("App integration", () => {
         render(<App />);
 
         await screen.findByText("Add a point");
-        expect(await screen.findByText("Manual point apply")).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Upload & create point" })).toBeDisabled();
         expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute(
             "title",
@@ -908,6 +913,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_restore",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -980,6 +986,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_restore_error",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -1040,6 +1047,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_apply_empty",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 1,
                         doneCount: 1,
                         verifiedCount: 0,
@@ -1138,6 +1146,7 @@ describe("App integration", () => {
                     request: {
                         id: "req_batch",
                         status: "waiting_manual_verdict",
+                        autoManualWindow: false,
                         totalCount: 2,
                         doneCount: 2,
                         verifiedCount: 0,
