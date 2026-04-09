@@ -7,18 +7,18 @@ export async function ensureActionLogsSchema() {
     if (!actionLogsReadyPromise) {
         actionLogsReadyPromise = (async () => {
             await sql`
-              create table if not exists command_action_logs (
+              create table if not exists public.command_action_logs (
                 id bigserial primary key,
-                command_id bigint not null references commands(id) on delete cascade,
-                actor_command_id bigint references commands(id) on delete set null,
+                command_id bigint not null references public.commands(id) on delete cascade,
+                actor_command_id bigint references public.commands(id) on delete set null,
                 action text not null,
                 details jsonb,
                 created_at timestamptz not null default now()
               )
             `;
 
-            await sql`create index if not exists command_action_logs_command_id_idx on command_action_logs(command_id, created_at desc)`;
-            await sql`create index if not exists command_action_logs_actor_id_idx on command_action_logs(actor_command_id, created_at desc)`;
+            await sql`create index if not exists command_action_logs_command_id_idx on public.command_action_logs(command_id, created_at desc)`;
+            await sql`create index if not exists command_action_logs_actor_id_idx on public.command_action_logs(actor_command_id, created_at desc)`;
         })().catch((error) => {
             actionLogsReadyPromise = null;
             throw error;
@@ -31,7 +31,7 @@ export async function ensureActionLogsSchema() {
 export async function addActionLog({ commandId, actorCommandId = null, action, details = null }) {
     await ensureActionLogsSchema();
     await sql`
-      insert into command_action_logs (command_id, actor_command_id, action, details)
+      insert into public.command_action_logs (command_id, actor_command_id, action, details)
       values (${commandId}, ${actorCommandId}, ${action}, ${details ? JSON.stringify(details) : null}::jsonb)
     `;
 }
@@ -50,9 +50,9 @@ export async function getActionLogsForCommand(commandId, limit = 100) {
         l.created_at,
         actor.name as actor_name,
         target.name as target_name
-      from command_action_logs l
-      left join commands actor on actor.id = l.actor_command_id
-      left join commands target on target.id = l.command_id
+      from public.command_action_logs l
+      left join public.commands actor on actor.id = l.actor_command_id
+      left join public.commands target on target.id = l.command_id
       where l.command_id = ${commandId}
       order by l.created_at desc
       limit ${safeLimit}
@@ -84,9 +84,9 @@ export async function getActionLogs(limit = 300) {
         l.created_at,
         actor.name as actor_name,
         target.name as target_name
-      from command_action_logs l
-      left join commands actor on actor.id = l.actor_command_id
-      left join commands target on target.id = l.command_id
+      from public.command_action_logs l
+      left join public.commands actor on actor.id = l.actor_command_id
+      left join public.commands target on target.id = l.command_id
       order by l.created_at desc
       limit ${safeLimit}
     `;

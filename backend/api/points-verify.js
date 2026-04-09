@@ -54,7 +54,7 @@ export default async function handler(req, res) {
     report("auth");
     const authRes = await sql`
       select id, role, name, abc_verify_timeout_seconds
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -94,7 +94,7 @@ export default async function handler(req, res) {
     if (pointId) {
         const pointRes = await sql`
           select id, benchmark, sender, file_name, status
-          from points
+          from public.points
           where id = ${pointId}
           limit 1
         `;
@@ -157,7 +157,7 @@ export default async function handler(req, res) {
             return;
         }
         const updateResult = await sql`
-          update points
+          update public.points
           set status = ${nextStatus},
               checker_version = ${checkerVersion}
           where id = ${pointId}

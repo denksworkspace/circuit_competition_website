@@ -7,19 +7,19 @@ async function migratePointsSchema() {
     await sql`begin`;
     try {
         await sql`
-          alter table points
+          alter table public.points
           add column if not exists lifecycle_status text
         `;
         await sql`
-          alter table points
+          alter table public.points
           add column if not exists content_hash text
         `;
         await sql`
-          alter table points
+          alter table public.points
           add column if not exists manual_synthesis boolean not null default false
         `;
         await sql`
-          update points
+          update public.points
           set lifecycle_status = case
             when lower(coalesce(status, '')) = 'deleted' then 'deleted'
             else 'main'
@@ -28,35 +28,35 @@ async function migratePointsSchema() {
              or btrim(lifecycle_status) = ''
         `;
         await sql`
-          update points
+          update public.points
           set status = 'non-verified'
           where lower(coalesce(btrim(status), '')) not in ('non-verified', 'verified', 'failed')
         `;
         await sql`
-          alter table points
+          alter table public.points
           alter column lifecycle_status set default 'main'
         `;
         await sql`
-          alter table points
+          alter table public.points
           drop constraint if exists points_lifecycle_status_check
         `;
         await sql`
-          alter table points
+          alter table public.points
           add constraint points_lifecycle_status_check
           check (lower(coalesce(lifecycle_status, '')) in ('main', 'deleted'))
         `;
         await sql`
-          alter table points
+          alter table public.points
           drop constraint if exists points_status_check
         `;
         await sql`
-          alter table points
+          alter table public.points
           add constraint points_status_check
           check (lower(coalesce(status, '')) in ('non-verified', 'verified', 'failed'))
         `;
         await sql`
           create index if not exists points_benchmark_content_hash_idx
-          on points(benchmark, content_hash)
+          on public.points(benchmark, content_hash)
         `;
         await sql`commit`;
     } catch (error) {

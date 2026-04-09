@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
     const authRes = await sql`
       select id, last_pareto_export_at, has_new_pareto
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;

@@ -68,7 +68,7 @@ export async function ensureMaintenanceSettingsSchema() {
     if (!maintenanceSettingsReadyPromise) {
         maintenanceSettingsReadyPromise = (async () => {
             await sql`
-              create table if not exists app_runtime_settings (
+              create table if not exists public.app_runtime_settings (
                 key text primary key,
                 value jsonb not null,
                 updated_at timestamptz not null default now()
@@ -76,7 +76,7 @@ export async function ensureMaintenanceSettingsSchema() {
             `;
             await sql`
               create index if not exists app_runtime_settings_updated_at_idx
-              on app_runtime_settings(updated_at desc)
+              on public.app_runtime_settings(updated_at desc)
             `;
         })().catch((error) => {
             maintenanceSettingsReadyPromise = null;
@@ -102,7 +102,7 @@ async function readMaintenanceStateFromDb() {
     await ensureMaintenanceSettingsSchema();
     const result = await sql`
       select value
-      from app_runtime_settings
+      from public.app_runtime_settings
       where key = ${SETTINGS_KEY}
       limit 1
     `;
@@ -135,7 +135,7 @@ export async function setMaintenanceState({ enabled, message, whitelistAdminIds 
     await ensureMaintenanceSettingsSchema();
     const nextState = normalizeMaintenanceState({ enabled, message, whitelistAdminIds });
     await sql`
-      insert into app_runtime_settings (key, value, updated_at)
+      insert into public.app_runtime_settings (key, value, updated_at)
       values (${SETTINGS_KEY}, ${JSON.stringify(nextState)}::jsonb, now())
       on conflict (key)
       do update set

@@ -28,12 +28,12 @@ async function ensurePointsContentHashSchema() {
     if (!pointsContentHashSchemaReadyPromise) {
         pointsContentHashSchemaReadyPromise = (async () => {
             await sql`
-              alter table points
+              alter table public.points
               add column if not exists content_hash text
             `;
             await sql`
               create index if not exists points_benchmark_content_hash_idx
-              on points(benchmark, content_hash)
+              on public.points(benchmark, content_hash)
             `;
         })().catch((error) => {
             pointsContentHashSchemaReadyPromise = null;
@@ -59,7 +59,7 @@ async function ensureAdminByAuthKey(authKey) {
     await ensureCommandRolesSchema();
     const authRes = await sql`
       select id, role
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -74,7 +74,7 @@ async function scanIdenticalGroups(req, res, report) {
     await ensurePointsContentHashSchema();
     const pointsRes = await sql`
       select id, benchmark, delay, area, sender, file_name, created_at, content_hash
-      from points
+      from public.points
       where benchmark <> 'test'
         and lower(coalesce(lifecycle_status, 'main')) = 'main'
       order by created_at desc
@@ -128,7 +128,7 @@ async function scanIdenticalGroups(req, res, report) {
             }
             hash = sha256Hex(downloaded.circuitText);
             await sql`
-              update points
+              update public.points
               set content_hash = ${hash}
               where id = ${pointId}
                 and (content_hash is null or btrim(content_hash) = '')
@@ -202,7 +202,7 @@ async function applyIdenticalResolutions(res, resolutions) {
         if (removeIds.length === 0) continue;
         const removedStatusRes = await sql`
           select status
-          from points
+          from public.points
           where id = any(${removeIds}::text[])
             and id <> ${keepId}
             and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
@@ -211,7 +211,7 @@ async function applyIdenticalResolutions(res, resolutions) {
             affectedStatuses.add(String(row?.status || "").trim().toLowerCase());
         }
         const result = await sql`
-          update points
+          update public.points
           set lifecycle_status = 'deleted',
               checker_version = null
           where id = any(${removeIds}::text[])

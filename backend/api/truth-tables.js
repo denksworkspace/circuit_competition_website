@@ -60,7 +60,7 @@ export default async function handler(req, res) {
 
     const authRes = await sql`
       select id, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -124,7 +124,7 @@ export default async function handler(req, res) {
     try {
         if (chargeBytes > 0) {
             const quotaUpdate = await sql`
-              update commands
+              update public.commands
               set uploaded_bytes_total = uploaded_bytes_total + ${chargeBytes}::bigint
               where id = ${actor.id}
                 and uploaded_bytes_total + ${chargeBytes}::bigint <= total_upload_quota_bytes
@@ -139,7 +139,7 @@ export default async function handler(req, res) {
         }
 
         await sql`
-          insert into truth_tables (benchmark, file_name, uploaded_by_command_id)
+          insert into public.truth_tables (benchmark, file_name, uploaded_by_command_id)
           values (${benchmark}, ${parsed.fileName}, ${actor.id})
           on conflict (benchmark)
           do update
@@ -150,7 +150,7 @@ export default async function handler(req, res) {
 
         if (existingTruth) {
             await sql`
-              update points
+              update public.points
               set status = 'non-verified',
                   checker_version = null
               where benchmark = ${benchmark}
@@ -176,7 +176,7 @@ export default async function handler(req, res) {
     } catch (error) {
         if (chargeBytes > 0) {
             await sql`
-              update commands
+              update public.commands
               set uploaded_bytes_total = greatest(0::bigint, uploaded_bytes_total - ${chargeBytes}::bigint)
               where id = ${actor.id}
             `;

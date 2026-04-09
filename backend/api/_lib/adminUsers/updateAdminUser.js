@@ -46,7 +46,7 @@ export async function handleUpdateAdminUser(req, res, body) {
     }
 
     const update = await sql`
-      update commands
+      update public.commands
       set
         max_single_upload_bytes = ${maxSingleBytes}::bigint,
         total_upload_quota_bytes = ${totalQuotaBytes}::bigint,

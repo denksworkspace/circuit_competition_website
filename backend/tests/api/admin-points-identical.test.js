@@ -39,10 +39,10 @@ describe("api/admin-points-identical", () => {
     it("scans and returns duplicate groups while persisting missing hashes", async () => {
         sql.mockImplementation((strings) => {
             const text = Array.isArray(strings) ? strings.join(" ").toLowerCase() : "";
-            if (text.includes("from commands") && text.includes("auth_key")) {
+            if (text.includes("from public.commands") && text.includes("auth_key")) {
                 return Promise.resolve({ rows: [{ id: 1, role: "admin" }], rowCount: 1 });
             }
-            if (text.includes("from points") && text.includes("content_hash")) {
+            if (text.includes("from public.points") && text.includes("content_hash")) {
                 return Promise.resolve({
                     rows: [
                         {
@@ -88,7 +88,7 @@ describe("api/admin-points-identical", () => {
         expect(updateHashQueries).toHaveLength(2);
         const pointsScanQuery = sql.mock.calls.find((call) => {
             const text = queryTextFromSqlCall(call);
-            return text.includes("from points") && text.includes("content_hash");
+            return text.includes("from public.points") && text.includes("content_hash");
         });
         expect(queryTextFromSqlCall(pointsScanQuery || [])).toContain("lower(coalesce(lifecycle_status, 'main')) = 'main'");
     });
@@ -96,10 +96,10 @@ describe("api/admin-points-identical", () => {
     it("reuses stored hashes without downloading files", async () => {
         sql.mockImplementation((strings) => {
             const text = Array.isArray(strings) ? strings.join(" ").toLowerCase() : "";
-            if (text.includes("from commands") && text.includes("auth_key")) {
+            if (text.includes("from public.commands") && text.includes("auth_key")) {
                 return Promise.resolve({ rows: [{ id: 1, role: "admin" }], rowCount: 1 });
             }
-            if (text.includes("from points") && text.includes("content_hash")) {
+            if (text.includes("from public.points") && text.includes("content_hash")) {
                 return Promise.resolve({
                     rows: [
                         {
@@ -144,10 +144,10 @@ describe("api/admin-points-identical", () => {
     it("applies selected resolutions by deleting non-kept points", async () => {
         sql.mockImplementation((strings) => {
             const text = Array.isArray(strings) ? strings.join(" ").toLowerCase() : "";
-            if (text.includes("from commands") && text.includes("auth_key")) {
+            if (text.includes("from public.commands") && text.includes("auth_key")) {
                 return Promise.resolve({ rows: [{ id: 1, role: "admin" }], rowCount: 1 });
             }
-            if (text.includes("update points") && text.includes("set lifecycle_status = 'deleted'")) {
+            if (text.includes("update public.points") && text.includes("set lifecycle_status = 'deleted'")) {
                 return Promise.resolve({ rows: [], rowCount: 2 });
             }
             return Promise.resolve({ rows: [], rowCount: 0 });

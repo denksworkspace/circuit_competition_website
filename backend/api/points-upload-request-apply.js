@@ -58,7 +58,7 @@ export default async function handler(req, res) {
         total_count,
         done_count,
         verified_count
-      from upload_requests
+      from public.upload_requests
       where id = ${requestId}
         and command_id = ${command.id}
       limit 1
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
         parsed_benchmark,
         parsed_delay,
         parsed_area
-      from upload_request_files
+      from public.upload_request_files
       where request_id = ${requestId}
         and not applied
         and can_apply
@@ -102,7 +102,7 @@ export default async function handler(req, res) {
     const availableRowIds = new Set(rows.map((row) => row.id));
     for (const row of rowsToDrop) {
         await sql`
-          update upload_request_files
+          update public.upload_request_files
           set can_apply = false,
               default_checked = false,
               manual_review_required = false,
@@ -150,7 +150,7 @@ export default async function handler(req, res) {
         savedPoints.push(applied.point);
         statusesToSync.add(String(applied?.point?.status || "").trim().toLowerCase());
         await sql`
-          update upload_request_files
+          update public.upload_request_files
           set applied = true,
               point_id = ${applied.pointId},
               final_file_name = ${applied.finalFileName},

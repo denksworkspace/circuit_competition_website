@@ -62,17 +62,17 @@ export function normalizeCommandUploadSettings(commandRow) {
 export async function ensureCommandUploadSettingsSchema() {
     if (!uploadSettingsReadyPromise) {
         uploadSettingsReadyPromise = (async () => {
-            await sql`alter table commands add column if not exists max_single_upload_bytes bigint`;
-            await sql`alter table commands add column if not exists total_upload_quota_bytes bigint`;
-            await sql`alter table commands add column if not exists uploaded_bytes_total bigint`;
-            await sql`alter table commands add column if not exists max_multi_file_batch_count integer`;
-            await sql`alter table commands add column if not exists abc_verify_timeout_seconds integer`;
-            await sql`alter table commands add column if not exists abc_metrics_timeout_seconds integer`;
-            await sql`alter table commands add column if not exists last_pareto_export_at timestamptz`;
-            await sql`alter table commands add column if not exists has_new_pareto boolean`;
+            await sql`alter table public.commands add column if not exists max_single_upload_bytes bigint`;
+            await sql`alter table public.commands add column if not exists total_upload_quota_bytes bigint`;
+            await sql`alter table public.commands add column if not exists uploaded_bytes_total bigint`;
+            await sql`alter table public.commands add column if not exists max_multi_file_batch_count integer`;
+            await sql`alter table public.commands add column if not exists abc_verify_timeout_seconds integer`;
+            await sql`alter table public.commands add column if not exists abc_metrics_timeout_seconds integer`;
+            await sql`alter table public.commands add column if not exists last_pareto_export_at timestamptz`;
+            await sql`alter table public.commands add column if not exists has_new_pareto boolean`;
 
             await sql`
-              update commands
+              update public.commands
               set max_single_upload_bytes = case
                 when lower(role) = 'admin' then 53687091200
                 else 524288000
@@ -82,52 +82,52 @@ export async function ensureCommandUploadSettingsSchema() {
             `;
 
             await sql`
-              update commands
+              update public.commands
               set total_upload_quota_bytes = 53687091200
               where total_upload_quota_bytes is null
                  or total_upload_quota_bytes <= 0
             `;
 
             await sql`
-              update commands
+              update public.commands
               set uploaded_bytes_total = 0
               where uploaded_bytes_total is null
                  or uploaded_bytes_total < 0
             `;
 
             await sql`
-              update commands
+              update public.commands
               set max_multi_file_batch_count = 100
               where max_multi_file_batch_count is null
                  or max_multi_file_batch_count < 1
             `;
 
             await sql`
-              update commands
+              update public.commands
               set abc_verify_timeout_seconds = ${DEFAULT_ABC_VERIFY_TIMEOUT_SECONDS}
               where abc_verify_timeout_seconds is null
                  or abc_verify_timeout_seconds < 1
             `;
 
             await sql`
-              update commands
+              update public.commands
               set abc_metrics_timeout_seconds = ${DEFAULT_ABC_METRICS_TIMEOUT_SECONDS}
               where abc_metrics_timeout_seconds is null
                  or abc_metrics_timeout_seconds < 1
             `;
             await sql`
-              update commands
+              update public.commands
               set has_new_pareto = false
               where has_new_pareto is null
             `;
 
-            await sql`alter table commands alter column max_single_upload_bytes set default 524288000`;
-            await sql`alter table commands alter column total_upload_quota_bytes set default 53687091200`;
-            await sql`alter table commands alter column uploaded_bytes_total set default 0`;
-            await sql`alter table commands alter column max_multi_file_batch_count set default 100`;
-            await sql`alter table commands alter column abc_verify_timeout_seconds set default 60`;
-            await sql`alter table commands alter column abc_metrics_timeout_seconds set default 60`;
-            await sql`alter table commands alter column has_new_pareto set default false`;
+            await sql`alter table public.commands alter column max_single_upload_bytes set default 524288000`;
+            await sql`alter table public.commands alter column total_upload_quota_bytes set default 53687091200`;
+            await sql`alter table public.commands alter column uploaded_bytes_total set default 0`;
+            await sql`alter table public.commands alter column max_multi_file_batch_count set default 100`;
+            await sql`alter table public.commands alter column abc_verify_timeout_seconds set default 60`;
+            await sql`alter table public.commands alter column abc_metrics_timeout_seconds set default 60`;
+            await sql`alter table public.commands alter column has_new_pareto set default false`;
         })().catch((error) => {
             uploadSettingsReadyPromise = null;
             throw error;

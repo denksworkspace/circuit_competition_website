@@ -180,7 +180,7 @@ export default async function handler(req, res) {
     try {
         const pointsRes = await sql`
           select benchmark, delay, area, file_name, status, lifecycle_status
-          from points
+          from public.points
           where file_name is not null
             and btrim(file_name) <> ''
           order by id asc

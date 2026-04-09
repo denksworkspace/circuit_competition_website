@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     report("auth");
     const authRes = await sql`
       select id, role, abc_metrics_timeout_seconds
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -42,14 +42,14 @@ export default async function handler(req, res) {
     const pointsRes = pointId
         ? await sql`
           select id, benchmark, delay, area, file_name
-          from points
+          from public.points
           where id = ${pointId}
             and benchmark <> 'test'
           order by created_at desc
         `
         : await sql`
           select id, benchmark, delay, area, file_name
-          from points
+          from public.points
           where benchmark <> 'test'
           order by created_at desc
         `;

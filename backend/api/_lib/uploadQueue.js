@@ -32,9 +32,9 @@ export async function ensureUploadQueueSchema() {
     if (!uploadQueueSchemaReadyPromise) {
         uploadQueueSchemaReadyPromise = (async () => {
             await sql`
-              create table if not exists upload_requests (
+              create table if not exists public.upload_requests (
                 id text primary key,
-                command_id bigint not null references commands(id) on delete cascade,
+                command_id bigint not null references public.commands(id) on delete cascade,
                 status text not null default 'queued',
                 stop_requested boolean not null default false,
                 selected_parser text not null default 'none',
@@ -57,27 +57,27 @@ export async function ensureUploadQueueSchema() {
               )
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               add column if not exists pareto_front_count integer not null default 0
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               alter column description set default 'circuit'
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               add column if not exists manual_synthesis boolean not null default false
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               add column if not exists auto_manual_window boolean not null default true
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               drop constraint if exists upload_requests_status_check
             `;
             await sql`
-              alter table upload_requests
+              alter table public.upload_requests
               add constraint upload_requests_status_check
               check (
                 lower(coalesce(status, '')) in (
@@ -94,13 +94,13 @@ export async function ensureUploadQueueSchema() {
             `;
             await sql`
               create index if not exists upload_requests_command_status_idx
-              on upload_requests(command_id, status, created_at desc)
+              on public.upload_requests(command_id, status, created_at desc)
             `;
 
             await sql`
-              create table if not exists upload_request_files (
+              create table if not exists public.upload_request_files (
                 id text primary key,
-                request_id text not null references upload_requests(id) on delete cascade,
+                request_id text not null references public.upload_requests(id) on delete cascade,
                 order_index integer not null,
                 original_file_name text not null,
                 queue_file_key text not null,
@@ -126,42 +126,42 @@ export async function ensureUploadQueueSchema() {
               )
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               add column if not exists pareto_state text not null default ''
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               add column if not exists replaced_pareto_coords text not null default ''
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               add column if not exists manual_review_required boolean not null default false
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               drop constraint if exists upload_request_files_process_state_check
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               add constraint upload_request_files_process_state_check
               check (lower(coalesce(process_state, '')) in ('pending', 'processing', 'processed', 'non-processed'))
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               drop constraint if exists upload_request_files_verdict_check
             `;
             await sql`
-              alter table upload_request_files
+              alter table public.upload_request_files
               add constraint upload_request_files_verdict_check
               check (lower(coalesce(verdict, '')) in ('pending', 'verified', 'failed', 'non-verified', 'duplicate', 'warning', 'blocked', 'non-processed'))
             `;
             await sql`
               create unique index if not exists upload_request_files_request_order_uidx
-              on upload_request_files(request_id, order_index)
+              on public.upload_request_files(request_id, order_index)
             `;
             await sql`
               create index if not exists upload_request_files_request_state_idx
-              on upload_request_files(request_id, process_state, order_index)
+              on public.upload_request_files(request_id, process_state, order_index)
             `;
         })().catch((error) => {
             uploadQueueSchemaReadyPromise = null;

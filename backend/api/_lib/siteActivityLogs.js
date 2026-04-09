@@ -63,7 +63,7 @@ export async function ensureSiteActivityLogsSchema() {
     if (!siteActivityLogsReadyPromise) {
         siteActivityLogsReadyPromise = (async () => {
             await sql`
-              create table if not exists site_activity_logs (
+              create table if not exists public.site_activity_logs (
                 id bigserial primary key,
                 event_type text not null,
                 source text,
@@ -77,15 +77,15 @@ export async function ensureSiteActivityLogsSchema() {
 
             await sql`
               create index if not exists site_activity_logs_created_at_idx
-              on site_activity_logs(created_at desc)
+              on public.site_activity_logs(created_at desc)
             `;
             await sql`
               create index if not exists site_activity_logs_event_type_idx
-              on site_activity_logs(event_type, created_at desc)
+              on public.site_activity_logs(event_type, created_at desc)
             `;
             await sql`
               create index if not exists site_activity_logs_session_id_idx
-              on site_activity_logs(session_id, created_at desc)
+              on public.site_activity_logs(session_id, created_at desc)
             `;
         })().catch((error) => {
             siteActivityLogsReadyPromise = null;
@@ -101,7 +101,7 @@ export async function addSiteActivityLogs(eventsRaw) {
     await ensureSiteActivityLogsSchema();
     for (const event of events) {
         await sql`
-          insert into site_activity_logs (
+          insert into public.site_activity_logs (
             event_type,
             source,
             page_path,

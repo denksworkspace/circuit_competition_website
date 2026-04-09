@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     report("auth");
     const authRes = await sql`
       select id, role, abc_verify_timeout_seconds
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
     const pointsResRaw = pointId
         ? await sql`
           select id, benchmark, file_name, status, lifecycle_status
-          from points
+          from public.points
           where id = ${pointId}
             and benchmark <> 'test'
             and (${includeDeleted}::boolean or lower(coalesce(lifecycle_status, 'main')) <> 'deleted')
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
         `
         : await sql`
           select id, benchmark, file_name, status, lifecycle_status
-          from points
+          from public.points
           where benchmark <> 'test'
             and (${includeDeleted}::boolean or lower(coalesce(lifecycle_status, 'main')) <> 'deleted')
           order by created_at desc

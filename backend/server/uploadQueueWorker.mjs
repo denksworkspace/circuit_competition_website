@@ -30,8 +30,8 @@ function scheduleIdleCheck() {
 async function listActiveRequests() {
     const result = await sql`
       select upload_requests.id, commands.auth_key
-      from upload_requests
-      join commands on commands.id = upload_requests.command_id
+      from public.upload_requests
+      join public.commands on commands.id = upload_requests.command_id
       where lower(coalesce(upload_requests.status, '')) in ('queued', 'processing')
       order by
         case when lower(coalesce(upload_requests.status, '')) = 'processing' then 0 else 1 end asc,

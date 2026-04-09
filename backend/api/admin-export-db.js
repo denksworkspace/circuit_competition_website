@@ -25,6 +25,10 @@ function quoteIdentifier(identRaw) {
     return `"${ident.replace(/"/g, "\"\"")}"`;
 }
 
+function quotePublicTable(tableName) {
+    return `"public".${quoteIdentifier(tableName)}`;
+}
+
 function toSqlLiteral(value) {
     if (value == null) return "NULL";
     if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -52,7 +56,7 @@ async function getTableColumns(tableName) {
 function buildInsertStatements(tableName, columns, rows) {
     if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(columns) || columns.length === 0) return [];
     const quotedColumns = columns.map(quoteIdentifier).join(", ");
-    const tableIdent = quoteIdentifier(tableName);
+    const tableIdent = quotePublicTable(tableName);
     const statements = [];
     for (const row of rows) {
         const values = columns.map((column) => toSqlLiteral(row[column])).join(", ");
@@ -94,11 +98,11 @@ export default async function handler(req, res) {
 
     try {
         const [commandsRes, pointsRes, benchmarksRes, truthRes, logsRes] = await Promise.all([
-            sql`select * from commands order by id asc`,
-            sql`select * from points order by id asc`,
-            sql`select * from benchmark_registry order by benchmark asc`,
-            sql`select * from truth_tables order by benchmark asc`,
-            sql`select * from command_action_logs order by id asc`,
+            sql`select * from public.commands order by id asc`,
+            sql`select * from public.points order by id asc`,
+            sql`select * from public.benchmark_registry order by benchmark asc`,
+            sql`select * from public.truth_tables order by benchmark asc`,
+            sql`select * from public.command_action_logs order by id asc`,
         ]);
 
         const tableRows = {
@@ -123,7 +127,7 @@ export default async function handler(req, res) {
         lines.push(`-- exported_at: ${new Date().toISOString()}`);
         lines.push(`-- exported_by_command_id: ${Number(admin.id)}`);
         lines.push("BEGIN;");
-        lines.push(`TRUNCATE TABLE ${BACKUP_TABLES.map(quoteIdentifier).join(", ")} RESTART IDENTITY CASCADE;`);
+        lines.push(`TRUNCATE TABLE ${BACKUP_TABLES.map(quotePublicTable).join(", ")} RESTART IDENTITY CASCADE;`);
 
         let doneTables = 0;
         for (const tableName of BACKUP_TABLES) {

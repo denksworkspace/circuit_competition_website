@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     await ensurePointsStatusConstraint();
     const authRes = await sql`
       select id
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
 
     const pointRes = await sql`
       select file_name
-      from points
+      from public.points
       where id = ${pointId}
         and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
       limit 1

@@ -20,7 +20,7 @@ async function markHasNewParetoForAllIfNeeded({ pointId, benchmark, delay, area 
 
     const dominatedRes = await sql`
       select 1
-      from points
+      from public.points
       where benchmark = ${normalizedBenchmark}
         and id <> ${String(pointId || "")}
         and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
@@ -32,7 +32,7 @@ async function markHasNewParetoForAllIfNeeded({ pointId, benchmark, delay, area 
     if (dominatedRows.length > 0) return false;
 
     await sql`
-      update commands
+      update public.commands
       set has_new_pareto = true
       where coalesce(has_new_pareto, false) = false
     `;
@@ -113,7 +113,7 @@ export async function createPointForCommand({
     try {
         if (chargeBytes > 0) {
             const quotaUpdate = await sql`
-              update commands
+              update public.commands
               set uploaded_bytes_total = uploaded_bytes_total + ${chargeBytes}::bigint
               where id = ${command.id}
                 and uploaded_bytes_total + ${chargeBytes}::bigint <= total_upload_quota_bytes
@@ -130,7 +130,7 @@ export async function createPointForCommand({
         }
 
         const insert = await sql`
-            insert into points (
+            insert into public.points (
                 id, benchmark, delay, area, description, sender, file_name, status,
                 lifecycle_status, checker_version, manual_synthesis, command_id
             )
@@ -177,7 +177,7 @@ export async function createPointForCommand({
     } catch (error) {
         if (chargeBytes > 0) {
             await sql`
-              update commands
+              update public.commands
               set uploaded_bytes_total = greatest(0::bigint, uploaded_bytes_total - ${chargeBytes}::bigint)
               where id = ${command.id}
             `;

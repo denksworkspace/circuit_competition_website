@@ -54,25 +54,25 @@ export async function ensureTruthTablesSchema() {
     if (!truthTablesSchemaReadyPromise) {
         truthTablesSchemaReadyPromise = (async () => {
             await sql`
-              create table if not exists benchmark_registry (
+              create table if not exists public.benchmark_registry (
                 benchmark text primary key,
-                created_by_command_id bigint references commands(id) on delete set null,
+                created_by_command_id bigint references public.commands(id) on delete set null,
                 created_at timestamptz not null default now()
               )
             `;
             await sql`
-              create table if not exists truth_tables (
+              create table if not exists public.truth_tables (
                 benchmark text primary key,
                 file_name text not null unique,
-                uploaded_by_command_id bigint references commands(id) on delete set null,
+                uploaded_by_command_id bigint references public.commands(id) on delete set null,
                 created_at timestamptz not null default now(),
                 updated_at timestamptz not null default now()
               )
             `;
             await sql`
-              insert into benchmark_registry (benchmark)
+              insert into public.benchmark_registry (benchmark)
               select distinct benchmark
-              from points
+              from public.points
               where benchmark is not null
                 and benchmark <> 'test'
               on conflict (benchmark) do nothing
@@ -91,7 +91,7 @@ export async function benchmarkExists(benchmarkRaw) {
     await ensureTruthTablesSchema();
     const result = await sql`
       select exists(
-        select 1 from benchmark_registry where benchmark = ${benchmark}
+        select 1 from public.benchmark_registry where benchmark = ${benchmark}
       ) as exists
     `;
     return Boolean(result.rows[0]?.exists);
@@ -102,7 +102,7 @@ export async function ensureBenchmarkExists(benchmarkRaw, actorCommandId = null)
     if (!benchmark) return;
     await ensureTruthTablesSchema();
     await sql`
-      insert into benchmark_registry (benchmark, created_by_command_id)
+      insert into public.benchmark_registry (benchmark, created_by_command_id)
       values (${benchmark}, ${actorCommandId})
       on conflict (benchmark) do nothing
     `;
@@ -114,7 +114,7 @@ export async function getTruthTableByBenchmark(benchmarkRaw) {
     await ensureTruthTablesSchema();
     const result = await sql`
       select benchmark, file_name, uploaded_by_command_id, created_at, updated_at
-      from truth_tables
+      from public.truth_tables
       where benchmark = ${benchmark}
       limit 1
     `;

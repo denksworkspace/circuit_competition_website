@@ -148,7 +148,7 @@ export default async function handler(req, res) {
     await sql`begin`;
     try {
         await sql`
-          insert into upload_requests (
+          insert into public.upload_requests (
             id, command_id, status, selected_parser, selected_checker,
             parser_timeout_seconds, checker_timeout_seconds, description, manual_synthesis, auto_manual_window,
             total_count, done_count, verified_count, current_file_name, current_phase
@@ -172,7 +172,7 @@ export default async function handler(req, res) {
                 throw new Error("Queue S3 configuration is not complete.");
             }
             await sql`
-              insert into upload_request_files (
+              insert into public.upload_request_files (
                 id, request_id, order_index, original_file_name, queue_file_key, file_size
               )
               values (
@@ -196,7 +196,7 @@ export default async function handler(req, res) {
 
     const createdReq = await sql`
       select *
-      from upload_requests
+      from public.upload_requests
       where id = ${requestId}
       limit 1
     `;

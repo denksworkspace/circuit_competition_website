@@ -14,7 +14,7 @@ export default async function handler(req, res) {
 
     const authRes = await sql`
       select id
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
 
     const result = await sql`
       select id, name, color, role
-      from commands
+      from public.commands
       order by name asc
     `;
 

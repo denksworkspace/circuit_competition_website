@@ -26,7 +26,7 @@ export async function checkDuplicatePointByCircuit({
     const candidateHash = sha256Hex(circuitText);
     const sameMetricsRes = await sql`
       select id, file_name, sender
-      from points
+      from public.points
       where benchmark = ${benchmark}
         and delay = ${delay}
         and area = ${area}

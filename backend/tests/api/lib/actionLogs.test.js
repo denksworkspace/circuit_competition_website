@@ -32,7 +32,7 @@ describe("api/_lib/actionLogs", () => {
     it("getActionLogsForCommand maps rows", async () => {
         sql.mockImplementation((queryParts) => {
             const text = Array.isArray(queryParts) ? queryParts.join(" ") : "";
-            if (text.includes("from command_action_logs")) {
+            if (text.includes("from public.command_action_logs")) {
                 return Promise.resolve({
                     rows: [
                         {

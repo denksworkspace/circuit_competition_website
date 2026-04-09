@@ -37,7 +37,7 @@ export async function authenticateAdmin(authKey) {
 
     const { rows } = await sql`
       select id, role
-      from commands
+      from public.commands
       where auth_key = ${authKeyTrimmed}
       limit 1
     `;

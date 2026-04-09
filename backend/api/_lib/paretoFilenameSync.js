@@ -56,7 +56,7 @@ async function fetchParetoFileNamesByStatus(status) {
     const statusNormalized = String(status || "").trim().toLowerCase();
     const pointsRes = await sql`
       select benchmark, delay, area, file_name, created_at
-      from points
+      from public.points
       where benchmark <> 'test'
         and file_name is not null
         and btrim(file_name) <> ''
@@ -109,4 +109,3 @@ export async function syncParetoFilenameCsvs({ statuses } = {}) {
         });
     }
 }
-

@@ -74,7 +74,7 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     if (!resolvedCommandName) {
         const commandRes = await withDbRetry(() => sql`
           select name
-          from commands
+          from public.commands
           where id = ${commandId}
           limit 1
         `);
@@ -97,7 +97,7 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
         parsed_benchmark,
         parsed_delay,
         parsed_area
-      from upload_request_files
+      from public.upload_request_files
       where request_id = ${requestId}
       order by order_index asc
     `);
@@ -111,7 +111,7 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     await ensurePointsStatusConstraint();
     const pointsRes = await withDbRetry(() => sql`
       select id, benchmark, delay, area
-      from points
+      from public.points
       where sender = ${resolvedCommandName}
         and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
     `);
@@ -181,7 +181,7 @@ export async function getCommandByAuthKey(authKey) {
     const result = await withDbRetry(() => sql`
       select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
              abc_verify_timeout_seconds, abc_metrics_timeout_seconds
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `);
@@ -219,7 +219,7 @@ export async function loadUploadRequestSnapshot({
         created_at,
         updated_at,
         finished_at
-      from upload_requests
+      from public.upload_requests
       where id = ${requestId}
         and command_id = ${commandId}
       limit 1
@@ -248,7 +248,7 @@ export async function loadUploadRequestSnapshot({
             final_file_name,
             pareto_state,
             replaced_pareto_coords
-          from upload_request_files
+          from public.upload_request_files
           where request_id = ${requestId}
           order by order_index asc
         `);
@@ -282,8 +282,8 @@ export async function refreshUploadRequestCounters(requestId) {
         count(*) filter (where lower(coalesce(process_state, '')) = 'pending')::int as pending_count,
         count(*) filter (where not applied and can_apply)::int as savable_pending_count,
         count(*) filter (where not applied and can_apply and manual_review_required)::int as manual_pending_count
-      from upload_request_files
-      join upload_requests on upload_requests.id = upload_request_files.request_id
+      from public.upload_request_files
+      join public.upload_requests on upload_requests.id = upload_request_files.request_id
       where upload_request_files.request_id = ${requestId}
     `);
     const row = counters.rows[0] || {};
@@ -303,7 +303,7 @@ export async function refreshUploadRequestCounters(requestId) {
         nextStatus = REQUEST_STATUS_COMPLETED;
     }
     await withDbRetry(() => sql`
-      update upload_requests
+      update public.upload_requests
       set total_count = ${totalCount},
           done_count = ${doneCount},
           verified_count = ${verifiedCount},
@@ -336,7 +336,7 @@ export async function finalizeUploadRequestPareto({ requestId, commandId = 0, co
     if (resolvedCommandId <= 0) {
         const reqMetaRes = await withDbRetry(() => sql`
           select command_id
-          from upload_requests
+          from public.upload_requests
           where id = ${requestId}
           limit 1
         `);
@@ -353,13 +353,13 @@ export async function finalizeUploadRequestPareto({ requestId, commandId = 0, co
     });
 
     await withDbRetry(() => sql`
-      update upload_requests
+      update public.upload_requests
       set pareto_front_count = ${Math.max(0, Number(paretoState.paretoFrontCount || 0))}
       where id = ${requestId}
     `);
     for (const [fileId, meta] of paretoState.fileMetaById.entries()) {
         await withDbRetry(() => sql`
-          update upload_request_files
+          update public.upload_request_files
           set pareto_state = ${String(meta?.paretoState || "")},
               replaced_pareto_coords = ${buildReplacedCoordsPayload(meta?.replacedParetoCoords || [])}
           where id = ${fileId}
@@ -379,7 +379,7 @@ export async function markRemainingAsNonProcessed(
     } = {}
 ) {
     await withDbRetry(() => sql`
-      update upload_request_files
+      update public.upload_request_files
       set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
           verdict = ${FILE_VERDICT_NON_PROCESSED},
           verdict_reason = case
@@ -406,7 +406,7 @@ export async function markRemainingAsNonProcessed(
         await finalizeUploadRequestPareto({ requestId });
     }
     await withDbRetry(() => sql`
-      update upload_requests
+      update public.upload_requests
       set status = ${REQUEST_STATUS_INTERRUPTED},
           finished_at = coalesce(finished_at, now()),
           current_phase = '',
@@ -419,7 +419,7 @@ export async function markRemainingAsNonProcessed(
 export async function isUploadStopRequested(requestId) {
     const requestRes = await withDbRetry(() => sql`
       select stop_requested
-      from upload_requests
+      from public.upload_requests
       where id = ${requestId}
       limit 1
     `);
@@ -432,7 +432,7 @@ export async function findLatestBlockingUploadRequest(commandId) {
       select
         upload_requests.id,
         upload_requests.status
-      from upload_requests
+      from public.upload_requests
       where command_id = ${commandId}
         and lower(coalesce(upload_requests.status, '')) in (
             'queued',
@@ -461,7 +461,7 @@ export async function findLatestVisibleUploadRequest(commandId) {
       select
         upload_requests.id,
         upload_requests.status
-      from upload_requests
+      from public.upload_requests
       where command_id = ${commandId}
         and lower(coalesce(upload_requests.status, '')) in (
             'queued',
@@ -503,7 +503,7 @@ export async function findNextPendingUploadFile(requestId) {
         queue_file_key,
         file_size,
         process_state
-      from upload_request_files
+      from public.upload_request_files
       where request_id = ${requestId}
         and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PENDING}
       order by order_index asc
@@ -515,7 +515,7 @@ export async function findNextPendingUploadFile(requestId) {
 
 export async function resumeFreezedUploadRequests() {
     const resumed = await withDbRetry(() => sql`
-      update upload_requests
+      update public.upload_requests
       set status = ${REQUEST_STATUS_PROCESSING},
           error = null,
           finished_at = null,

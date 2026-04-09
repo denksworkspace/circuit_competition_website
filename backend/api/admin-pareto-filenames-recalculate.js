@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     await ensureCommandRolesSchema();
     const authRes = await sql`
       select id, role
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -36,4 +36,3 @@ export default async function handler(req, res) {
         statuses: ["verified", "non-verified"],
     });
 }
-

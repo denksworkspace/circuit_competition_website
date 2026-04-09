@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     }
 
     await sql`
-      update upload_requests
+      update public.upload_requests
       set stop_requested = true,
           error = case
               when lower(coalesce(status, '')) in ('failed', 'closed', 'completed', 'interrupted') then error

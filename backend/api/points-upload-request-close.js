@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     }
 
     await sql`
-      update upload_request_files
+      update public.upload_request_files
       set can_apply = false,
           default_checked = false,
           manual_review_required = false,
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
         });
     }
     await sql`
-      update upload_requests
+      update public.upload_requests
       set status = case
             when lower(coalesce(status, '')) in ('waiting_manual_verdict', 'completed', 'interrupted', 'failed', 'closed')
                 then ${REQUEST_STATUS_CLOSED}

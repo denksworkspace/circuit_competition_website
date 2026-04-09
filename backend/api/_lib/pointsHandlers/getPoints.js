@@ -13,7 +13,7 @@ export async function handleGetPoints(req, res) {
 
     const authRes = await sql`
       select id
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -38,8 +38,8 @@ export async function handleGetPoints(req, res) {
         p.manual_synthesis,
         p.created_at,
         (t.benchmark is not null) as has_truth
-      from points p
-      left join truth_tables t on t.benchmark = p.benchmark
+      from public.points p
+      left join public.truth_tables t on t.benchmark = p.benchmark
       where lower(coalesce(p.lifecycle_status, 'main')) <> 'deleted'
       order by p.created_at desc
     `;

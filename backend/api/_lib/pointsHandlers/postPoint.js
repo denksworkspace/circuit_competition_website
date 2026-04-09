@@ -37,7 +37,7 @@ export async function handlePostPoint(req, res) {
 
     const cmdRes = await sql`
       select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count
-      from commands
+      from public.commands
       where auth_key = ${authKey}
     `;
     if (cmdRes.rows.length === 0) {

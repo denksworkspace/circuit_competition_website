@@ -7,15 +7,15 @@ export async function ensurePointsStatusConstraint() {
     if (!pointsStatusConstraintReadyPromise) {
         pointsStatusConstraintReadyPromise = (async () => {
             await sql`
-              alter table points
+              alter table public.points
               add column if not exists lifecycle_status text
             `;
             await sql`
-              alter table points
+              alter table public.points
               add column if not exists manual_synthesis boolean not null default false
             `;
             await sql`
-              update points
+              update public.points
               set lifecycle_status = case
                 when lower(coalesce(status, '')) = 'deleted' then 'deleted'
                 else 'main'
@@ -24,20 +24,20 @@ export async function ensurePointsStatusConstraint() {
                  or btrim(lifecycle_status) = ''
             `;
             await sql`
-              update points
+              update public.points
               set status = 'non-verified'
               where lower(coalesce(status, '')) in ('main', 'deleted')
             `;
             await sql`
-              alter table points
+              alter table public.points
               alter column lifecycle_status set default 'main'
             `;
             await sql`
-              alter table points
+              alter table public.points
               drop constraint if exists points_lifecycle_status_check
             `;
             await sql`
-              alter table points
+              alter table public.points
               add constraint points_lifecycle_status_check
               check (
                 lower(coalesce(lifecycle_status, '')) in (
@@ -47,11 +47,11 @@ export async function ensurePointsStatusConstraint() {
               )
             `;
             await sql`
-              alter table points
+              alter table public.points
               drop constraint if exists points_status_check
             `;
             await sql`
-              alter table points
+              alter table public.points
               add constraint points_status_check
               check (
                 lower(coalesce(status, '')) in (

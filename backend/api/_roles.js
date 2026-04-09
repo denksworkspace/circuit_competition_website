@@ -20,15 +20,15 @@ export function normalizeRole(rawRole) {
 export async function ensureCommandRolesSchema() {
     if (!rolesSchemaReadyPromise) {
         rolesSchemaReadyPromise = (async () => {
-            await sql`alter table commands add column if not exists role text`;
+            await sql`alter table public.commands add column if not exists role text`;
             await sql`
-              update commands
+              update public.commands
               set role = 'participant'
               where role is null
                  or btrim(role) = ''
                  or lower(role) not in ('admin', 'leader', 'participant')
             `;
-            await sql`alter table commands alter column role set default 'participant'`;
+            await sql`alter table public.commands alter column role set default 'participant'`;
         })().catch((err) => {
             rolesSchemaReadyPromise = null;
             throw err;

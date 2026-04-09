@@ -161,7 +161,7 @@ export default async function handler(req, res) {
 
     const authRes = await sql`
       select id, last_pareto_export_at, has_new_pareto
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;
@@ -178,7 +178,7 @@ export default async function handler(req, res) {
         const pointsRes = bench === "all"
             ? await sql`
               select benchmark, delay, area, file_name, created_at, status, manual_synthesis
-              from points
+              from public.points
               where benchmark <> 'test'
                 and file_name is not null
                 and btrim(file_name) <> ''
@@ -187,7 +187,7 @@ export default async function handler(req, res) {
             `
             : await sql`
               select benchmark, delay, area, file_name, created_at, status, manual_synthesis
-              from points
+              from public.points
               where benchmark = ${bench}
                 and benchmark <> 'test'
                 and file_name is not null
@@ -299,7 +299,7 @@ export default async function handler(req, res) {
 
         const chargedBytes = Math.max(0, Number(totalSchemesBytes || 0));
         const chargeRes = await sql`
-          update commands
+          update public.commands
           set uploaded_bytes_total = uploaded_bytes_total + ${chargedBytes}::bigint,
               last_pareto_export_at = now(),
               has_new_pareto = false

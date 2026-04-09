@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     await ensureCommandUploadSettingsSchema();
     const authRes = await sql`
       select id, role, abc_verify_timeout_seconds
-      from commands
+      from public.commands
       where auth_key = ${authKey}
       limit 1
     `;

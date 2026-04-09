@@ -15,7 +15,7 @@ export async function handleDeletePoint(req, res) {
         return;
     }
 
-    const cmdRes = await sql`select id from commands where auth_key = ${authKey}`;
+    const cmdRes = await sql`select id from public.commands where auth_key = ${authKey}`;
     if (cmdRes.rows.length === 0) {
         res.status(401).json({ error: "Invalid auth key." });
         return;
@@ -24,7 +24,7 @@ export async function handleDeletePoint(req, res) {
     const commandId = cmdRes.rows[0].id;
     const pointRes = await sql`
       select id, command_id, lifecycle_status, benchmark, delay, area, file_name, status
-      from points
+      from public.points
       where id = ${id}
       limit 1
     `;
@@ -43,7 +43,7 @@ export async function handleDeletePoint(req, res) {
     }
 
     await sql`
-      update points
+      update public.points
       set lifecycle_status = 'deleted',
           checker_version = null
       where id = ${id}

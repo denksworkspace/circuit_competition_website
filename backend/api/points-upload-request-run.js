@@ -128,7 +128,7 @@ async function listSavableUploadFiles(requestId) {
         parsed_benchmark,
         parsed_delay,
         parsed_area
-      from upload_request_files
+      from public.upload_request_files
       where request_id = ${requestId}
         and not applied
         and can_apply
@@ -139,7 +139,7 @@ async function listSavableUploadFiles(requestId) {
 
 async function markAutoSkippedRowsClosed(requestId) {
     await sql`
-      update upload_request_files
+      update public.upload_request_files
       set can_apply = false,
           default_checked = false,
           manual_review_required = false,
@@ -164,7 +164,7 @@ async function saveAutoEligibleRows({
 
     if (rowsToSave.length > 0) {
         await sql`
-          update upload_requests
+          update public.upload_requests
           set current_phase = 'saving',
               current_file_name = '',
               updated_at = now()
@@ -189,7 +189,7 @@ async function saveAutoEligibleRows({
         }
         statusesToSync.add(String(applied?.point?.status || "").trim().toLowerCase());
         await sql`
-          update upload_request_files
+          update public.upload_request_files
           set applied = true,
               point_id = ${applied.pointId},
               final_file_name = ${applied.finalFileName},
@@ -259,7 +259,7 @@ export default async function handler(req, res) {
     });
     if (maintenance.blocked) {
         await sql`
-          update upload_requests
+          update public.upload_requests
           set status = ${REQUEST_STATUS_FREEZED},
               error = ${String(maintenance.state?.message || "Technical maintenance is in progress.")},
               finished_at = null,
@@ -311,7 +311,7 @@ export default async function handler(req, res) {
             }
         } catch (error) {
             await sql`
-              update upload_requests
+              update public.upload_requests
               set status = ${REQUEST_STATUS_FAILED},
                   error = ${String(error?.message || "Failed to finish upload request.")},
                   finished_at = coalesce(finished_at, now()),
@@ -329,7 +329,7 @@ export default async function handler(req, res) {
             return;
         }
         await sql`
-          update upload_requests
+          update public.upload_requests
           set current_phase = '',
               current_file_name = '',
               updated_at = now()
@@ -345,13 +345,13 @@ export default async function handler(req, res) {
     }
 
     await sql`
-      update upload_request_files
+      update public.upload_request_files
       set process_state = ${FILE_PROCESS_STATE_PROCESSING},
           updated_at = now()
       where id = ${nextFile.id}
     `;
     await sql`
-      update upload_requests
+      update public.upload_requests
       set status = ${REQUEST_STATUS_PROCESSING},
           current_file_name = ${nextFile.originalFileName},
           current_phase = 'download',
@@ -361,7 +361,7 @@ export default async function handler(req, res) {
 
     const phaseReporter = async (phase) => {
         await sql`
-          update upload_requests
+          update public.upload_requests
           set current_phase = ${String(phase || "")},
               updated_at = now()
           where id = ${requestId}
@@ -378,7 +378,7 @@ export default async function handler(req, res) {
                 throw createAbortError();
             }
             await sql`
-              update upload_request_files
+              update public.upload_request_files
               set process_state = 'processed',
                   verdict = ${FILE_VERDICT_FAILED},
                   verdict_reason = ${String(downloaded.reason || "Failed to download queue file.")},
@@ -392,7 +392,7 @@ export default async function handler(req, res) {
             refreshedCounters = await refreshUploadRequestCounters(requestId);
             await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
             await sql`
-              update upload_requests
+              update public.upload_requests
               set current_phase = '',
                   current_file_name = '',
                   updated_at = now()
@@ -418,7 +418,7 @@ export default async function handler(req, res) {
             },
         });
         await sql`
-          update upload_request_files
+          update public.upload_request_files
           set process_state = ${processed.processState},
               verdict = ${processed.verdict},
               verdict_reason = ${processed.verdictReason},
@@ -441,7 +441,7 @@ export default async function handler(req, res) {
     } catch (error) {
         if (isAbortLikeError(error) || stopMonitor.signal.aborted) {
             await sql`
-              update upload_request_files
+              update public.upload_request_files
               set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
                   verdict = ${FILE_VERDICT_NON_PROCESSED},
                   verdict_reason = ${String(error?.message || "Upload was interrupted by user.")},
@@ -458,7 +458,7 @@ export default async function handler(req, res) {
                 reason: "Upload was interrupted by user.",
             });
             await sql`
-              update upload_requests
+              update public.upload_requests
               set error = ${String(error?.message || "Upload was interrupted by user.")},
                   current_phase = '',
                   current_file_name = '',
@@ -475,7 +475,7 @@ export default async function handler(req, res) {
         }
         if (isRetryableDbError(error)) {
             await sql`
-              update upload_request_files
+              update public.upload_request_files
               set process_state = ${FILE_PROCESS_STATE_NON_PROCESSED},
                   verdict = ${FILE_VERDICT_NON_PROCESSED},
                   verdict_reason = ${String(error?.message || "Skipped due to temporary database connectivity issue.")},
@@ -489,7 +489,7 @@ export default async function handler(req, res) {
             refreshedCounters = await refreshUploadRequestCounters(requestId);
             await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
             await sql`
-              update upload_requests
+              update public.upload_requests
               set error = ${String(error?.message || "Temporary database connectivity issue; file skipped.")},
                   current_phase = '',
                   current_file_name = '',
@@ -505,7 +505,7 @@ export default async function handler(req, res) {
             return;
         }
         await sql`
-          update upload_request_files
+          update public.upload_request_files
           set process_state = 'processed',
               verdict = ${FILE_VERDICT_FAILED},
               verdict_reason = ${String(error?.message || "Failed to process queue file.")},
@@ -518,7 +518,7 @@ export default async function handler(req, res) {
         `;
         refreshedCounters = await refreshUploadRequestCounters(requestId);
         await sql`
-          update upload_requests
+          update public.upload_requests
           set status = ${REQUEST_STATUS_FAILED},
               error = ${String(error?.message || "Failed to process upload request.")},
               finished_at = coalesce(finished_at, now()),
@@ -571,7 +571,7 @@ export default async function handler(req, res) {
                     await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
                 }
                 await sql`
-                  update upload_requests
+                  update public.upload_requests
                   set current_phase = '',
                       current_file_name = '',
                       updated_at = now()
@@ -579,7 +579,7 @@ export default async function handler(req, res) {
                 `;
             } else {
                 await sql`
-                  update upload_requests
+                  update public.upload_requests
                   set current_phase = '',
                       current_file_name = '',
                       updated_at = now()
@@ -589,7 +589,7 @@ export default async function handler(req, res) {
         }
     } catch (error) {
         await sql`
-          update upload_requests
+          update public.upload_requests
           set status = ${REQUEST_STATUS_FAILED},
               error = ${String(error?.message || "Failed to finish upload request.")},
               finished_at = coalesce(finished_at, now()),
