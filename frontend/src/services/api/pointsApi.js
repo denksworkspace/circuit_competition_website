@@ -42,6 +42,7 @@ export async function exportParetoPointsZip({
     fromDate = "",
     bench = "all",
     paretoOnly = true,
+    manualSynthesisOnly = false,
     includedStatuses = [],
     progressToken = "",
     signal = undefined,
@@ -61,6 +62,7 @@ export async function exportParetoPointsZip({
             fromDate: String(fromDate || ""),
             bench: String(bench || "all"),
             paretoOnly: paretoOnly ? "1" : "0",
+            manualSynthesisOnly: manualSynthesisOnly ? "1" : "0",
             includedStatuses: normalizedStatuses.join(","),
         },
     });
@@ -89,6 +91,8 @@ export async function createPointsUploadRequest({
     selectedChecker,
     parserTimeoutSeconds,
     checkerTimeoutSeconds,
+    manualSynthesis = false,
+    autoManualWindow = true,
     signal,
 }) {
     const response = await fetch(apiUrl("/api/points-upload-request-create"), {
@@ -103,6 +107,8 @@ export async function createPointsUploadRequest({
             selectedChecker,
             parserTimeoutSeconds,
             checkerTimeoutSeconds,
+            manualSynthesis,
+            autoManualWindow,
         }),
     });
     const data = await parseJsonSafe(response);

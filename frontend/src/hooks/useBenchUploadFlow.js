@@ -16,6 +16,7 @@ import {
 import { uid } from "../utils/pointUtils.js";
 
 const RUNNABLE_REQUEST_STATUSES = new Set(["queued", "processing"]);
+const TERMINAL_REQUEST_STATUSES = new Set(["completed", "closed", "interrupted", "failed"]);
 const FREEZED_REQUEST_STATUS = "freezed";
 const WAITING_MANUAL_REQUEST_STATUS = "waiting_manual_verdict";
 
@@ -29,12 +30,25 @@ function isExternallyManagedQueueStatus(statusRaw) {
 }
 
 function hasManualVerdictPending(row) {
-    return !row?.applied && Boolean(row?.canApply);
+    return !row?.applied && Boolean(row?.canApply) && Boolean(row?.manualReviewRequired);
+}
+
+function isManualFlowEnabledForRequest(request) {
+    return request?.autoManualWindow !== true;
+}
+
+function isTerminalRequestStatus(statusRaw) {
+    return TERMINAL_REQUEST_STATUSES.has(String(statusRaw || "").trim().toLowerCase());
+}
+
+function isBlockingRequestStatus(statusRaw) {
+    return isRunnableRequestStatus(statusRaw) || isExternallyManagedQueueStatus(statusRaw);
 }
 
 function mapPhase(phaseRaw, statusRaw) {
     const phase = String(phaseRaw || "").trim().toLowerCase();
     const status = String(statusRaw || "").trim().toLowerCase();
+    if (isTerminalRequestStatus(status)) return "finished";
     if (phase === "parser") return "parser";
     if (phase === "checker") return "checker";
     if (phase === "saving") return "saving";
@@ -46,13 +60,15 @@ function mapPhase(phaseRaw, statusRaw) {
     return "preparing";
 }
 
-function buildUploadLogText(files) {
+function buildUploadLogText(files, { manualFlowEnabled = true } = {}) {
     if (!Array.isArray(files) || files.length === 0) return "";
     const rows = files
         .filter((row) => ["processed", "non-processed"].includes(String(row?.processState || "").toLowerCase()))
         .map((row) => {
             const success = Boolean(row?.applied);
-            const verdict = hasManualVerdictPending(row) ? "waiting manual verdict" : String(row?.verdict || "pending");
+            const verdict = manualFlowEnabled && hasManualVerdictPending(row)
+                ? "waiting manual verdict"
+                : String(row?.verdict || "pending");
             const reason = String(row?.verdictReason || "").trim();
             const paretoState = String(row?.paretoState || "").trim().toLowerCase();
             const replacedCoords = Array.isArray(row?.replacedParetoCoords) ? row.replacedParetoCoords : [];
@@ -64,8 +80,8 @@ function buildUploadLogText(files) {
     return rows.join("\n");
 }
 
-function buildManualRows(files) {
-    if (!Array.isArray(files)) return [];
+function buildManualRows(files, { manualFlowEnabled = true } = {}) {
+    if (!manualFlowEnabled || !Array.isArray(files)) return [];
     return files
         .filter((row) => hasManualVerdictPending(row))
         .map((row) => {
@@ -88,6 +104,7 @@ function buildManualRows(files) {
 
 function getUploadDisabledReason({
     isUploading,
+    uploadPhase,
     manualApplyRowsLength,
     blockingRequestStatus,
     waitManualRequestStatus,
@@ -106,7 +123,8 @@ function getUploadDisabledReason({
     formatGb,
     descriptionDraft,
 }) {
-    if (isUploading) return "Upload is already in progress.";
+    const normalizedPhase = String(uploadPhase || "").trim().toLowerCase();
+    if (isUploading && normalizedPhase !== "finished") return "Upload is already in progress.";
     if (blockingRequestStatus === FREEZED_REQUEST_STATUS) {
         return "Upload queue is paused by maintenance mode.";
     }
@@ -248,6 +266,7 @@ export function useBenchUploadFlow({
     currentCommand,
     setPoints,
     setLastAddedId,
+    onPointsPersisted,
     maxSingleUploadBytes,
     remainingUploadBytes,
     maxMultiFileBatchCount,
@@ -272,6 +291,8 @@ export function useBenchUploadFlow({
     const [selectedParser, setSelectedParser] = useState("ABC");
     const [checkerTleSecondsDraft, setCheckerTleSecondsDraft] = useState("60");
     const [parserTleSecondsDraft, setParserTleSecondsDraft] = useState("60");
+    const [manualSynthesis, setManualSynthesis] = useState(false);
+    const [autoManualWindow, setAutoManualWindow] = useState(true);
     const [isUploadSettingsOpen, setIsUploadSettingsOpen] = useState(false);
     const [manualApplyRows, setManualApplyRows] = useState(() => []);
     const [isManualApplyOpen, setIsManualApplyOpen] = useState(false);
@@ -291,6 +312,7 @@ export function useBenchUploadFlow({
     const pollPausedExternallyRef = useRef(false);
     const isPageUnloadingRef = useRef(false);
     const queueUploadInFlightRef = useRef(false);
+    const runDriverRef = useRef({ requestId: "", controller: null });
 
     useEffect(() => {
         if (typeof window === "undefined") return undefined;
@@ -310,6 +332,10 @@ export function useBenchUploadFlow({
             if (uploadAbortRef.current && !isPageUnloadingRef.current) {
                 uploadAbortRef.current.abort();
                 uploadAbortRef.current = null;
+            }
+            if (runDriverRef.current?.controller && !isPageUnloadingRef.current) {
+                runDriverRef.current.controller.abort();
+                runDriverRef.current = { requestId: "", controller: null };
             }
         };
     }, []);
@@ -406,11 +432,9 @@ export function useBenchUploadFlow({
         }
     }, [authKeyDraft, setLastAddedId, setPoints]);
 
-    const clearVisibleBlockingRequestState = useCallback(() => {
+    const clearBlockingRequestControls = useCallback(() => {
         activeRequestIdRef.current = "";
         setBlockingRequestStatus("");
-        setUploadProgress(null);
-        setUploadLiveRows([]);
         setManualApplyRows([]);
         setManualApplyProgress(null);
         setIsManualApplyOpen(false);
@@ -429,7 +453,7 @@ export function useBenchUploadFlow({
             hiddenRequestIdRef.current = "";
             setIsUploading(false);
             setIsUploadStopping(false);
-            clearVisibleBlockingRequestState();
+            clearBlockingRequestControls();
             return;
         }
         const requestId = String(request.id || "");
@@ -441,13 +465,19 @@ export function useBenchUploadFlow({
         const doneCount = Number(request.doneCount || 0);
         const totalCount = Number(request.totalCount || 0);
         const isAllFilesProcessed = totalCount > 0 && doneCount >= totalCount;
+        const manualFlowEnabled = isManualFlowEnabledForRequest(request);
         const runnable = isRunnableRequestStatus(lowerStatus);
+        const terminal = isTerminalRequestStatus(lowerStatus);
         const externallyManaged = isExternallyManagedQueueStatus(lowerStatus);
-        const manualRows = runnable ? [] : buildManualRows(files);
-        const hasPendingManualVerdict = manualRows.length > 0;
-        const shouldKeepMonitor = runnable || hasPendingManualVerdict || externallyManaged;
         const hiddenRequestId = String(hiddenRequestIdRef.current || "");
         const isHiddenRequest = hiddenRequestId && hiddenRequestId === requestId;
+        const rawManualRows = runnable ? [] : buildManualRows(files, { manualFlowEnabled });
+        const manualRows = isHiddenRequest ? [] : rawManualRows;
+        const hasPendingManualVerdict = manualRows.length > 0;
+        const shouldKeepMonitor = runnable || rawManualRows.length > 0 || externallyManaged || terminal;
+        const nextPhase = hasPendingManualVerdict && !runnable
+            ? "waiting-manual"
+            : mapPhase(request.currentPhase, request.status);
 
         if (queueUploadInFlightRef.current && lowerStatus === "queued") {
             activeRequestIdRef.current = requestId;
@@ -456,47 +486,37 @@ export function useBenchUploadFlow({
             return;
         }
 
-        if (isHiddenRequest) {
-            // Keep polling this request in background while close/apply finalization settles,
-            // but do not re-open monitor/modal from stale snapshots.
-            setIsUploading(false);
-            setIsUploadStopping(false);
-            clearVisibleBlockingRequestState();
-            if (!runnable && !hasPendingManualVerdict) {
-                hiddenRequestIdRef.current = "";
-            }
-            return;
-        }
-
         if (shouldKeepMonitor) {
-            activeRequestIdRef.current = requestId;
-            setBlockingRequestStatus(lowerStatus);
+            activeRequestIdRef.current = runnable || externallyManaged ? requestId : "";
+            setBlockingRequestStatus(runnable || externallyManaged ? lowerStatus : "");
             setUploadProgress({
                 done: doneCount,
                 total: totalCount,
                 verified: Number(request.verifiedCount || 0),
                 paretoFront: Number(request.paretoFrontCount || 0),
-                phase: hasPendingManualVerdict && !runnable ? "waiting-manual" : mapPhase(request.currentPhase, request.status),
+                phase: nextPhase,
+                requestStatus: lowerStatus,
                 currentFileName: String(request.currentFileName || ""),
                 secondsRemaining: null,
                 transitionTarget: "next-circuit",
             });
             setUploadLiveRows(buildLiveRows(files, { showParetoLabels: isAllFilesProcessed }));
         } else {
-            clearVisibleBlockingRequestState();
+            clearBlockingRequestControls();
         }
 
         setIsUploading(runnable);
         if (!runnable) {
             setIsUploadStopping(false);
         }
-        setUploadLogText(buildUploadLogText(files));
+        setUploadLogText(buildUploadLogText(files, { manualFlowEnabled }));
         setManualApplyRows(manualRows);
-        if (hasPendingManualVerdict
-            && (lowerStatus === "interrupted" || lowerStatus === "failed")
-            && dismissedManualRequestIdRef.current !== requestId) {
-            setIsManualApplyOpen(true);
-        } else if (!hasPendingManualVerdict) {
+        if (isHiddenRequest) {
+            setIsManualApplyOpen(false);
+            if (!runnable && rawManualRows.length < 1) {
+                hiddenRequestIdRef.current = "";
+            }
+        } else if (!hasPendingManualVerdict || !manualFlowEnabled) {
             setIsManualApplyOpen(false);
         }
 
@@ -507,7 +527,57 @@ export function useBenchUploadFlow({
         } else {
             setUploadError(" ");
         }
-    }, [clearVisibleBlockingRequestState]);
+    }, [clearBlockingRequestControls]);
+
+    const startUploadRunDriver = useCallback(({ authKey, requestId }) => {
+        const normalizedAuthKey = String(authKey || "").trim();
+        const normalizedRequestId = String(requestId || "").trim();
+        if (!normalizedAuthKey || !normalizedRequestId || queueUploadInFlightRef.current) return;
+
+        const activeDriver = runDriverRef.current;
+        if (activeDriver?.requestId === normalizedRequestId && activeDriver?.controller) {
+            return;
+        }
+        if (activeDriver?.controller) {
+            activeDriver.controller.abort();
+        }
+
+        const controller = new AbortController();
+        runDriverRef.current = {
+            requestId: normalizedRequestId,
+            controller,
+        };
+
+        void (async () => {
+            try {
+                while (!controller.signal.aborted) {
+                    const snapshot = await runPointsUploadRequest({
+                        authKey: normalizedAuthKey,
+                        requestId: normalizedRequestId,
+                        signal: controller.signal,
+                    });
+                    updateStateFromSnapshot(snapshot);
+                    const status = String(snapshot?.request?.status || "").trim().toLowerCase();
+                    if (!isRunnableRequestStatus(status)) {
+                        if (status && status !== WAITING_MANUAL_REQUEST_STATUS && status !== FREEZED_REQUEST_STATUS) {
+                            await refreshPointsAfterRequest();
+                            if (status === "completed" && typeof onPointsPersisted === "function") {
+                                await onPointsPersisted(normalizedAuthKey);
+                            }
+                        }
+                        break;
+                    }
+                }
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+                wakePolling();
+            } finally {
+                if (runDriverRef.current?.controller === controller) {
+                    runDriverRef.current = { requestId: "", controller: null };
+                }
+            }
+        })();
+    }, [onPointsPersisted, refreshPointsAfterRequest, updateStateFromSnapshot, wakePolling]);
 
     async function requestStopUpload() {
         if (!isUploading || !activeRequestIdRef.current) return;
@@ -570,6 +640,7 @@ export function useBenchUploadFlow({
             verified: 0,
             paretoFront: 0,
             phase: "uploading",
+            requestStatus: "queued",
             currentFileName: "",
             queueUploaded: 0,
             queueTotal: benchFiles.length,
@@ -596,6 +667,8 @@ export function useBenchUploadFlow({
                 selectedChecker: checkerSelection,
                 parserTimeoutSeconds,
                 checkerTimeoutSeconds,
+                manualSynthesis,
+                autoManualWindow,
                 signal: controller.signal,
             });
             const requestId = String(created?.request?.id || "");
@@ -619,6 +692,7 @@ export function useBenchUploadFlow({
                     setUploadProgress((prev) => (prev ? {
                         ...prev,
                         phase: "uploading",
+                        requestStatus: "queued",
                         currentFileName: file.name,
                         queueUploaded: index + 1,
                     } : prev));
@@ -651,16 +725,11 @@ export function useBenchUploadFlow({
                 queueUploadInFlightRef.current = false;
             }
 
-            const started = await runPointsUploadRequest({
+            startUploadRunDriver({
                 authKey: authKeyDraft,
                 requestId,
-                signal: controller.signal,
             });
-            updateStateFromSnapshot(started);
-            const startedStatus = String(started?.request?.status || "").toLowerCase();
-            if (!isRunnableRequestStatus(startedStatus)) {
-                await refreshPointsAfterRequest();
-            }
+            wakePolling();
             setDescriptionDraft("");
             clearFileInput();
         } catch (err) {
@@ -685,6 +754,7 @@ export function useBenchUploadFlow({
 
     const uploadDisabledReason = useMemo(() => getUploadDisabledReason({
         isUploading,
+        uploadPhase: uploadProgress?.phase,
         manualApplyRowsLength: manualApplyRows.length,
         blockingRequestStatus,
         waitManualRequestStatus: WAITING_MANUAL_REQUEST_STATUS,
@@ -704,6 +774,7 @@ export function useBenchUploadFlow({
         descriptionDraft,
     }), [
         isUploading,
+        uploadProgress?.phase,
         manualApplyRows.length,
         blockingRequestStatus,
         benchFiles,
@@ -777,6 +848,9 @@ export function useBenchUploadFlow({
             updateStateFromSnapshot(applied);
             setManualApplyProgress((prev) => (prev ? { ...prev, processed: selected.length } : prev));
             await refreshPointsAfterRequest();
+            if (typeof onPointsPersisted === "function") {
+                await onPointsPersisted(authKeyDraft);
+            }
             if ((applied?.errors || []).length > 0) {
                 setUploadError(String(applied.errors[0] || "Failed to apply selected files."));
             } else {
@@ -808,7 +882,7 @@ export function useBenchUploadFlow({
         wakePolling();
         setIsManualApplyOpen(false);
         setManualApplyRows([]);
-        clearVisibleBlockingRequestState();
+        clearBlockingRequestControls();
         setUploadError(" ");
         if (requestId) {
             try {
@@ -817,16 +891,39 @@ export function useBenchUploadFlow({
                     requestId,
                 });
                 updateStateFromSnapshot(closed);
-            } catch {
+                await refreshPointsAfterRequest();
+            } catch (error) {
+                try {
+                    const actualSnapshot = await fetchPointsUploadRequestStatus({
+                        authKey: authKeyDraft,
+                        requestId: normalizedRequestId,
+                    });
+                    const actualStatus = String(actualSnapshot?.request?.status || "").trim().toLowerCase();
+                    const hasManualRows = buildManualRows(actualSnapshot?.files || [], {
+                        manualFlowEnabled: isManualFlowEnabledForRequest(actualSnapshot?.request || null),
+                    }).length > 0;
+                    if (actualSnapshot?.request && (!isExternallyManagedQueueStatus(actualStatus) || !hasManualRows)) {
+                        hiddenRequestIdRef.current = "";
+                        dismissedManualRequestIdRef.current = "";
+                        updateStateFromSnapshot(actualSnapshot);
+                        if (!isRunnableRequestStatus(actualStatus)) {
+                            await refreshPointsAfterRequest();
+                        }
+                        setUploadError(" ");
+                        return;
+                    }
+                } catch {
+                    // Ignore status re-fetch failure and fall back to the last known snapshot.
+                }
+
                 hiddenRequestIdRef.current = "";
-                dismissedManualRequestIdRef.current = "";
+                dismissedManualRequestIdRef.current = normalizedRequestId;
                 const fallbackSnapshot = lastSnapshotRef.current;
                 const fallbackRequestId = String(fallbackSnapshot?.request?.id || "");
                 if (fallbackRequestId && fallbackRequestId === normalizedRequestId) {
                     updateStateFromSnapshot(fallbackSnapshot);
-                    setIsManualApplyOpen(true);
                 }
-                setUploadError("Failed to close manual verdict request.");
+                setUploadError(String(error?.message || "Failed to close manual verdict request."));
             }
         }
     }
@@ -872,7 +969,9 @@ export function useBenchUploadFlow({
                             return;
                         }
                         const status = String(hiddenSnapshot?.request?.status || "").toLowerCase();
-                        const hasManual = buildManualRows(hiddenSnapshot?.files || []).length > 0;
+                        const hasManual = buildManualRows(hiddenSnapshot?.files || [], {
+                            manualFlowEnabled: isManualFlowEnabledForRequest(hiddenSnapshot?.request || null),
+                        }).length > 0;
                         if (!status || (!isRunnableRequestStatus(status) && !hasManual)) {
                             hiddenRequestIdRef.current = "";
                             pollPausedExternallyRef.current = false;
@@ -882,6 +981,12 @@ export function useBenchUploadFlow({
                         if (isExternallyManagedQueueStatus(status)) {
                             pollPausedExternallyRef.current = true;
                             return;
+                        }
+                        if (isRunnableRequestStatus(status)) {
+                            startUploadRunDriver({
+                                authKey,
+                                requestId: hiddenRequestId,
+                            });
                         }
                         pollPausedExternallyRef.current = false;
                         scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
@@ -916,7 +1021,13 @@ export function useBenchUploadFlow({
                         updateStateFromSnapshot(trackedSnapshot);
                         const status = String(trackedSnapshot?.request?.status || "").toLowerCase();
                         const hasRunnableRequest = Boolean(trackedSnapshot?.request?.id) && isRunnableRequestStatus(status);
-                        const hasBlockingRequest = Boolean(trackedSnapshot?.request?.id);
+                        const hasBlockingRequest = Boolean(trackedSnapshot?.request?.id) && isBlockingRequestStatus(status);
+                        if (hasRunnableRequest) {
+                            startUploadRunDriver({
+                                authKey,
+                                requestId: trackedRequestId,
+                            });
+                        }
                         if (isExternallyManagedQueueStatus(status)) {
                             pollPausedExternallyRef.current = true;
                             if (pollTimerRef.current) {
@@ -957,7 +1068,13 @@ export function useBenchUploadFlow({
                 updateStateFromSnapshot(active);
                 const status = String(active?.request?.status || "").toLowerCase();
                 const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
-                const hasBlockingRequest = Boolean(active?.request?.id);
+                const hasBlockingRequest = Boolean(active?.request?.id) && isBlockingRequestStatus(status);
+                if (hasRunnableRequest) {
+                    startUploadRunDriver({
+                        authKey,
+                        requestId: String(active?.request?.id || ""),
+                    });
+                }
                 if (isExternallyManagedQueueStatus(status)) {
                     pollPausedExternallyRef.current = true;
                     if (pollTimerRef.current) {
@@ -1006,7 +1123,7 @@ export function useBenchUploadFlow({
             pollPausedExternallyRef.current = false;
             pollLoopRef.current = null;
         };
-    }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
+    }, [authKeyDraft, currentCommand, startUploadRunDriver, updateStateFromSnapshot]);
 
     const showUploadMonitor = Boolean(uploadProgress) || uploadLiveRows.length > 0;
 
@@ -1038,6 +1155,10 @@ export function useBenchUploadFlow({
         setCheckerTleSecondsDraft,
         parserTleSecondsDraft,
         setParserTleSecondsDraft,
+        manualSynthesis,
+        setManualSynthesis,
+        autoManualWindow,
+        setAutoManualWindow,
         isUploadSettingsOpen,
         setIsUploadSettingsOpen,
         manualApplyRows,

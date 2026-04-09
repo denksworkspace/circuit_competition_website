@@ -35,6 +35,8 @@ export default async function handler(req, res) {
     const description = String(body?.description || "").trim() || "circuit";
     const selectedParser = normalizeParserSelection(body?.selectedParser);
     const selectedChecker = normalizeCheckerVersion(body?.selectedChecker);
+    const manualSynthesis = Boolean(body?.manualSynthesis);
+    const autoManualWindow = body?.autoManualWindow == null ? true : Boolean(body.autoManualWindow);
     if (!authKey) {
         res.status(401).json({ error: "Missing auth key." });
         return;
@@ -148,12 +150,12 @@ export default async function handler(req, res) {
         await sql`
           insert into upload_requests (
             id, command_id, status, selected_parser, selected_checker,
-            parser_timeout_seconds, checker_timeout_seconds, description,
+            parser_timeout_seconds, checker_timeout_seconds, description, manual_synthesis, auto_manual_window,
             total_count, done_count, verified_count, current_file_name, current_phase
           )
           values (
             ${requestId}, ${command.id}, ${REQUEST_STATUS_QUEUED}, ${selectedParser}, ${selectedChecker},
-            ${parserTimeoutSeconds}, ${checkerTimeoutSeconds}, ${description},
+            ${parserTimeoutSeconds}, ${checkerTimeoutSeconds}, ${description}, ${manualSynthesis}, ${autoManualWindow},
             ${normalizedFiles.length}, 0, 0, '', ''
           )
         `;

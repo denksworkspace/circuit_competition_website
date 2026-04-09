@@ -27,6 +27,11 @@ export function CustomTooltip({ active, payload }) {
             </div>
 
             <div className="tooltipRow">
+                <span className="tooltipKey">manual synthesis:</span>
+                <span className="tooltipVal">{point.manualSynthesis ? "yes" : "no"}</span>
+            </div>
+
+            <div className="tooltipRow">
                 <span className="tooltipKey">checker:</span>
                 <span className="tooltipVal">{point.checkerVersion || "null"}</span>
             </div>

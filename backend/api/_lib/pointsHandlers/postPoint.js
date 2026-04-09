@@ -25,6 +25,7 @@ export async function handlePostPoint(req, res) {
         status,
         authKey,
         checkerVersion,
+        manualSynthesis,
         fileSize,
         batchSize,
     } = body || {};
@@ -56,6 +57,7 @@ export async function handlePostPoint(req, res) {
         fileName,
         status,
         checkerVersion,
+        manualSynthesis: Boolean(manualSynthesis),
         fileSize,
         batchSize,
     });

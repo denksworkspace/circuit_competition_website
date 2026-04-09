@@ -323,7 +323,8 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         expect(await screen.findByText("Live processed")).toBeInTheDocument();
-        expect(await screen.findByText(/adding files to queue\.\.\.\s*0\s*\/\s*1/i)).toBeInTheDocument();
+        expect(await screen.findByText(/status:\s*saving to queue/i)).toBeInTheDocument();
+        expect(await screen.findByText(/saving to queue\.\.\.\s*0\s*\/\s*1/i)).toBeInTheDocument();
 
         await waitFor(() => {
             expect(resolveCreateRequest).toEqual(expect.any(Function));
@@ -403,6 +404,7 @@ describe("App integration", () => {
                             verdict: "non-verified",
                             verdictReason: "verification skipped or checker unavailable",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -444,6 +446,11 @@ describe("App integration", () => {
                     errors: [],
                 }));
             },
+            "GET /api/pareto-export-status?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    hasNewPareto: true,
+                    lastParetoExportAt: "2026-04-08T10:00:00.000Z",
+                })),
         });
 
         render(<App />);
@@ -484,6 +491,9 @@ describe("App integration", () => {
         });
         expect(await screen.findByText(/schema-test/)).toBeInTheDocument();
         expect(screen.getAllByText("delay=").length).toBeGreaterThan(0);
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Open Pareto export" })).toHaveClass("hasNew");
+        });
     });
 
     it("blocks upload when ABC metrics validation fails", async () => {
@@ -539,6 +549,7 @@ describe("App integration", () => {
                             verdict: "failed",
                             verdictReason: "Metric mismatch: area expected 40, actual 41",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -575,6 +586,62 @@ describe("App integration", () => {
         expect(calls).toEqual(["create-request", "put-queue", "run-request"]);
     });
 
+    it("allows a new upload while finished monitor remains visible", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_finished",
+                        status: "completed",
+                        totalCount: 1,
+                        doneCount: 1,
+                        verifiedCount: 1,
+                        paretoFrontCount: 1,
+                        currentFileName: "",
+                        currentPhase: "saving",
+                    },
+                    files: [
+                        {
+                            id: "f_finished",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "verified",
+                            verdictReason: "",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: true,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        expect(await screen.findByText("Live processed")).toBeInTheDocument();
+        expect(await screen.findByText(/status:\s*finished/i)).toBeInTheDocument();
+
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [new File(["bench data"], "bench254_16_41.bench", { type: "text/plain" })] },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Upload & create point" })).toBeEnabled();
+        });
+        expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute("title", "");
+    });
+
     it("restores waiting manual verdict after reload and blocks a new upload", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         localStorage.setItem("bench_auth_key", "key_ok");
@@ -602,6 +669,7 @@ describe("App integration", () => {
                             verdict: "non-verified",
                             verdictReason: "verification skipped or checker unavailable",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -622,6 +690,151 @@ describe("App integration", () => {
         await configureUploadSettings({ checker: "none", parser: "ABC" });
         fireEvent.change(screen.getByLabelText("file"), {
             target: { files: [new File(["bench data"], "bench254_16_41.bench", { type: "text/plain" })] },
+        });
+
+        expect(screen.getByRole("button", { name: "Upload & create point" })).toBeDisabled();
+        expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute(
+            "title",
+            "Resolve manual verdict for the previous upload first.",
+        );
+    });
+
+    it("restores interrupted request with auto manual window enabled without opening manual flow", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_interrupted_auto",
+                        status: "interrupted",
+                        autoManualWindow: true,
+                        totalCount: 2,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                        error: "Upload was interrupted by user.",
+                    },
+                    files: [
+                        {
+                            id: "f_interrupted_auto",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            manualReviewRequired: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                        {
+                            id: "f_interrupted_pending",
+                            originalFileName: "bench254_16_41.bench",
+                            processState: "non-processed",
+                            verdict: "non-processed",
+                            verdictReason: "Upload was interrupted by user.",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        expect(await screen.findByText("Live processed")).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Apply manual verdict" })).not.toBeInTheDocument();
+
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [new File(["bench data"], "bench254_17_42.bench", { type: "text/plain" })] },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Upload & create point" })).toBeEnabled();
+        });
+        expect(screen.getByTestId("upload-submit-wrap")).toHaveAttribute("title", "");
+    });
+
+    it("restores interrupted request with manual flow enabled and shows apply button below live processed", async () => {
+        const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
+        localStorage.setItem("bench_auth_key", "key_ok");
+
+        installFetchRouter({
+            ...bootstrapRoutes({
+                authBody: { command },
+            }),
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, {
+                    request: {
+                        id: "req_interrupted_manual",
+                        status: "interrupted",
+                        autoManualWindow: false,
+                        totalCount: 2,
+                        doneCount: 1,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
+                        error: "Upload was interrupted by user.",
+                    },
+                    files: [
+                        {
+                            id: "f_interrupted_manual",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "processed",
+                            verdict: "non-verified",
+                            verdictReason: "verification skipped or checker unavailable",
+                            canApply: true,
+                            manualReviewRequired: true,
+                            defaultChecked: true,
+                            applied: false,
+                            parsedBenchmark: "254",
+                            parsedDelay: 15,
+                            parsedArea: 40,
+                        },
+                        {
+                            id: "f_interrupted_manual_pending",
+                            originalFileName: "bench254_16_41.bench",
+                            processState: "non-processed",
+                            verdict: "non-processed",
+                            verdictReason: "Upload was interrupted by user.",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                })),
+        });
+
+        render(<App />);
+
+        await screen.findByText("Add a point");
+        expect(await screen.findByText("Live processed")).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
+
+        await configureUploadSettings({ checker: "none", parser: "ABC" });
+        fireEvent.change(screen.getByLabelText("file"), {
+            target: { files: [new File(["bench data"], "bench254_17_42.bench", { type: "text/plain" })] },
         });
 
         expect(screen.getByRole("button", { name: "Upload & create point" })).toBeDisabled();
@@ -659,6 +872,7 @@ describe("App integration", () => {
                             verdict: "failed",
                             verdictReason: "checker/parser failed with unknown reason",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: false,
                             applied: false,
                             parsedBenchmark: "254",
@@ -708,6 +922,7 @@ describe("App integration", () => {
                             verdict: "non-verified",
                             verdictReason: "verification skipped or checker unavailable",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -752,7 +967,7 @@ describe("App integration", () => {
         resolveCloseRequest();
     }, 12000);
 
-    it("reopens manual modal with error when close request fails", async () => {
+    it("keeps manual modal closed and shows manual action button when close request fails", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         localStorage.setItem("bench_auth_key", "key_ok");
 
@@ -779,6 +994,7 @@ describe("App integration", () => {
                             verdict: "non-verified",
                             verdictReason: "verification skipped or checker unavailable",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -804,8 +1020,9 @@ describe("App integration", () => {
             expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
         });
 
-        expect(await screen.findByText("Failed to close manual verdict request.")).toBeInTheDocument();
-        expect(await screen.findByText("Manual point apply")).toBeInTheDocument();
+        expect(await screen.findByText("close failed")).toBeInTheDocument();
+        expect(screen.queryByText("Manual point apply")).not.toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Apply manual verdict" })).toBeInTheDocument();
     });
 
     it("apply without selected manual rows closes request without confirm dialog", async () => {
@@ -837,6 +1054,7 @@ describe("App integration", () => {
                             verdict: "failed",
                             verdictReason: "checker/parser failed with unknown reason",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: false,
                             applied: false,
                             parsedBenchmark: "254",
@@ -934,6 +1152,7 @@ describe("App integration", () => {
                             verdict: "non-verified",
                             verdictReason: "verification skipped or checker unavailable",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",
@@ -947,6 +1166,7 @@ describe("App integration", () => {
                             verdict: "failed",
                             verdictReason: "Metric mismatch",
                             canApply: true,
+                            manualReviewRequired: true,
                             defaultChecked: true,
                             applied: false,
                             parsedBenchmark: "254",

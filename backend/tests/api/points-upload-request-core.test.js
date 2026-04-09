@@ -35,6 +35,7 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
 vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
     finalizeUploadRequestPareto: vi.fn(),
     findLatestBlockingUploadRequest: vi.fn(),
+    findLatestVisibleUploadRequest: vi.fn(),
     getCommandByAuthKey: vi.fn(),
     loadUploadRequestSnapshot: vi.fn(),
 }));
@@ -54,7 +55,12 @@ vi.mock("../../api/_lib/maintenanceMode.js", () => ({
 }));
 
 import { sql } from "@vercel/postgres";
-import { findLatestBlockingUploadRequest, getCommandByAuthKey, loadUploadRequestSnapshot } from "../../api/_lib/uploadQueueOps.js";
+import {
+    findLatestBlockingUploadRequest,
+    findLatestVisibleUploadRequest,
+    getCommandByAuthKey,
+    loadUploadRequestSnapshot,
+} from "../../api/_lib/uploadQueueOps.js";
 import { uid } from "../../api/_lib/uploadQueueToken.js";
 import createHandler from "../../api/points-upload-request-create.js";
 import activeHandler from "../../api/points-upload-request-active.js";
@@ -147,7 +153,7 @@ describe("upload request core handlers", () => {
 
     it("returns active request snapshot", async () => {
         getCommandByAuthKey.mockResolvedValueOnce({ id: 10 });
-        findLatestBlockingUploadRequest.mockResolvedValueOnce({ id: "req_1", status: "queued" });
+        findLatestVisibleUploadRequest.mockResolvedValueOnce({ id: "req_1", status: "queued" });
         loadUploadRequestSnapshot.mockResolvedValueOnce({
             request: { id: "req_1", status: "queued" },
             files: [{ id: "file_1" }],
@@ -160,6 +166,25 @@ describe("upload request core handlers", () => {
 
         expect(res.statusCode).toBe(200);
         expect(res.body.request.id).toBe("req_1");
+        expect(res.body.files).toHaveLength(1);
+    });
+
+    it("returns latest terminal request snapshot when no blocking request exists", async () => {
+        getCommandByAuthKey.mockResolvedValueOnce({ id: 10 });
+        findLatestVisibleUploadRequest.mockResolvedValueOnce({ id: "req_finished", status: "completed" });
+        loadUploadRequestSnapshot.mockResolvedValueOnce({
+            request: { id: "req_finished", status: "completed" },
+            files: [{ id: "file_finished" }],
+        });
+
+        const req = createMockReq({ method: "GET" });
+        req.query = { authKey: "k" };
+        const res = createMockRes();
+        await activeHandler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.request.id).toBe("req_finished");
+        expect(res.body.request.status).toBe("completed");
         expect(res.body.files).toHaveLength(1);
     });
 

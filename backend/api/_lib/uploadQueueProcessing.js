@@ -185,6 +185,13 @@ function computeFinalStatus({ parserKind, checkerEnabled, checkerVerdict }) {
     return FILE_VERDICT_NON_VERIFIED;
 }
 
+function normalizeSavedPointStatus(verdictRaw) {
+    const verdict = String(verdictRaw || "").trim().toLowerCase();
+    if (verdict === FILE_VERDICT_VERIFIED) return FILE_VERDICT_VERIFIED;
+    if (verdict === FILE_VERDICT_FAILED) return FILE_VERDICT_FAILED;
+    return FILE_VERDICT_NON_VERIFIED;
+}
+
 function hasWarningGateCombo(circuitTextRaw) {
     const lines = String(circuitTextRaw || "").split(/\r?\n/);
     let hasLut = false;
@@ -235,6 +242,50 @@ async function uploadPointFileToPrimaryBucket(fileName, circuitText, { signal = 
     }
 }
 
+async function resolveApplyFileMetrics({
+    fileRow,
+    requestRow,
+    circuitText,
+    signal = null,
+}) {
+    const parsedBenchmark = String(fileRow?.parsedBenchmark || "").trim();
+    const parsedDelay = Number(fileRow?.parsedDelay);
+    const parsedArea = Number(fileRow?.parsedArea);
+    if (parsedBenchmark && Number.isFinite(parsedDelay) && Number.isFinite(parsedArea)) {
+        return {
+            benchmark: parsedBenchmark,
+            delay: parsedDelay,
+            area: parsedArea,
+        };
+    }
+
+    const parsedInputName = parseInputBenchFileName(fileRow?.originalFileName);
+    if (!parsedInputName?.ok) return null;
+
+    let resolvedDelay = Number(parsedInputName.delay);
+    let resolvedArea = Number(parsedInputName.area);
+    const parserSelection = normalizeParserSelection(requestRow?.selectedParser);
+    if (parserSelection === "ABC") {
+        throwIfAborted(signal);
+        const timeoutMs = Math.max(1, Number(requestRow?.parserTimeoutSeconds || 60)) * 1000;
+        const stats = await getAigStatsFromBenchText(circuitText, { timeoutMs, signal });
+        throwIfAborted(signal);
+        if (stats?.ok && Number.isFinite(Number(stats.depth)) && Number.isFinite(Number(stats.area))) {
+            resolvedDelay = Number(stats.depth);
+            resolvedArea = Number(stats.area);
+        }
+    }
+
+    if (!Number.isFinite(resolvedDelay) || !Number.isFinite(resolvedArea)) {
+        return null;
+    }
+    return {
+        benchmark: String(parsedInputName.benchmark || ""),
+        delay: resolvedDelay,
+        area: resolvedArea,
+    };
+}
+
 export async function processUploadQueueFile({
     fileRow,
     requestRow,
@@ -270,8 +321,9 @@ export async function processUploadQueueFile({
             processState: FILE_PROCESS_STATE_PROCESSED,
             verdict: FILE_VERDICT_FAILED,
             verdictReason: String(parserOut.reason || "Invalid file name."),
-            canApply: true,
+            canApply: false,
             defaultChecked: false,
+            manualReviewRequired: false,
             checkerVersion: null,
             parsedBenchmark: null,
             parsedDelay: null,
@@ -333,42 +385,9 @@ export async function processUploadQueueFile({
         verdictReason = checkerOut.checkerErrorReason || parserOut.reason || "verification skipped or checker unavailable";
     }
 
-    const canApply = verdict !== FILE_VERDICT_VERIFIED || duplicateCheck.duplicate || duplicateCheck.blockedByCheckError;
+    const canApply = Number.isFinite(Number(parserOut.parsed.delay)) && Number.isFinite(Number(parserOut.parsed.area));
     const defaultChecked = verdict === FILE_VERDICT_NON_VERIFIED;
-
-    let pointId = null;
-    let finalFileName = null;
-    let applied = false;
-    if (verdict === FILE_VERDICT_VERIFIED && !duplicateCheck.duplicate && !duplicateCheck.blockedByCheckError) {
-        reportPhase("saving");
-        pointId = uid();
-        finalFileName = buildStoredFileName({
-            benchmark: parserOut.parsed.benchmark,
-            delay: parserOut.parsed.delay,
-            area: parserOut.parsed.area,
-            sender: command.name,
-            pointId,
-        });
-        await uploadPointFileToPrimaryBucket(finalFileName, circuitText, { signal });
-        throwIfAborted(signal);
-        const created = await createPointForCommand({
-            command,
-            id: pointId,
-            benchmark: parserOut.parsed.benchmark,
-            delay: parserOut.parsed.delay,
-            area: parserOut.parsed.area,
-            description: requestRow.description,
-            fileName: finalFileName,
-            status: FILE_VERDICT_VERIFIED,
-            checkerVersion: checkerOut.checkerVersion || null,
-            fileSize: fileRow.fileSize,
-            batchSize: requestRow.totalCount,
-        });
-        if (!created.ok) {
-            throw new Error(created.error || "Failed to save point.");
-        }
-        applied = true;
-    }
+    const manualReviewRequired = canApply && verdict !== FILE_VERDICT_VERIFIED;
 
     return {
         processState: FILE_PROCESS_STATE_PROCESSED,
@@ -376,13 +395,14 @@ export async function processUploadQueueFile({
         verdictReason,
         canApply,
         defaultChecked,
+        manualReviewRequired,
         checkerVersion: checkerOut.checkerVersion || null,
         parsedBenchmark: String(parserOut.parsed.benchmark || ""),
         parsedDelay: Number(parserOut.parsed.delay),
         parsedArea: Number(parserOut.parsed.area),
-        finalFileName,
-        pointId,
-        applied,
+        finalFileName: null,
+        pointId: null,
+        applied: false,
     };
 }
 
@@ -391,36 +411,42 @@ export async function applyUploadQueueFileRow({
     requestRow,
     fileRow,
     circuitText,
+    signal = null,
 }) {
     if (!fileRow.canApply || fileRow.applied) {
         return { ok: false, error: "File cannot be applied." };
     }
-    if (!fileRow.parsedBenchmark || !Number.isFinite(fileRow.parsedDelay) || !Number.isFinite(fileRow.parsedArea)) {
+    const resolvedMetrics = await resolveApplyFileMetrics({
+        fileRow,
+        requestRow,
+        circuitText,
+        signal,
+    });
+    if (!resolvedMetrics) {
         return { ok: false, error: "File has no parsed benchmark metrics." };
     }
 
     const pointId = uid();
     const finalFileName = buildStoredFileName({
-        benchmark: fileRow.parsedBenchmark,
-        delay: fileRow.parsedDelay,
-        area: fileRow.parsedArea,
+        benchmark: resolvedMetrics.benchmark,
+        delay: resolvedMetrics.delay,
+        area: resolvedMetrics.area,
         sender: command.name,
         pointId,
     });
-    await uploadPointFileToPrimaryBucket(finalFileName, circuitText);
+    await uploadPointFileToPrimaryBucket(finalFileName, circuitText, { signal });
 
     const created = await createPointForCommand({
         command,
         id: pointId,
-        benchmark: fileRow.parsedBenchmark,
-        delay: fileRow.parsedDelay,
-        area: fileRow.parsedArea,
+        benchmark: resolvedMetrics.benchmark,
+        delay: resolvedMetrics.delay,
+        area: resolvedMetrics.area,
         description: requestRow.description,
         fileName: finalFileName,
-        status: (fileRow.verdict === FILE_VERDICT_DUPLICATE || fileRow.verdict === FILE_VERDICT_WARNING)
-            ? FILE_VERDICT_NON_VERIFIED
-            : fileRow.verdict,
+        status: normalizeSavedPointStatus(fileRow.verdict),
         checkerVersion: fileRow.checkerVersion || null,
+        manualSynthesis: Boolean(requestRow.manualSynthesis),
         fileSize: fileRow.fileSize,
         batchSize: requestRow.totalCount,
     });

@@ -30,6 +30,12 @@ function parseParetoOnly(raw) {
     return true;
 }
 
+function parseManualSynthesisOnly(raw) {
+    const value = String(raw ?? "0").trim().toLowerCase();
+    if (value === "1" || value === "true") return true;
+    return false;
+}
+
 function parseIncludedStatuses(raw) {
     if (raw == null) return [...ALL_POINT_STATUSES];
     const values = Array.isArray(raw) ? raw : [raw];
@@ -124,6 +130,7 @@ export default async function handler(req, res) {
     const fromDate = String(req?.query?.fromDate || "").trim();
     const bench = normalizeBench(req?.query?.bench);
     const paretoOnly = parseParetoOnly(req?.query?.paretoOnly);
+    const manualSynthesisOnly = parseManualSynthesisOnly(req?.query?.manualSynthesisOnly);
     const includedStatuses = parseIncludedStatuses(req?.query?.includedStatuses);
     const progressToken = String(req?.query?.progressToken || "").trim();
     const reportProgress = (patch) => setExportProgress(progressToken, patch);
@@ -170,7 +177,7 @@ export default async function handler(req, res) {
     try {
         const pointsRes = bench === "all"
             ? await sql`
-              select benchmark, delay, area, file_name, created_at, status
+              select benchmark, delay, area, file_name, created_at, status, manual_synthesis
               from points
               where benchmark <> 'test'
                 and file_name is not null
@@ -179,7 +186,7 @@ export default async function handler(req, res) {
               order by created_at desc
             `
             : await sql`
-              select benchmark, delay, area, file_name, created_at, status
+              select benchmark, delay, area, file_name, created_at, status, manual_synthesis
               from points
               where benchmark = ${bench}
                 and benchmark <> 'test'
@@ -188,9 +195,12 @@ export default async function handler(req, res) {
                 and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
               order by created_at desc
             `;
-        const rowsByStatus = (Array.isArray(pointsRes.rows) ? pointsRes.rows : []).filter((row) =>
-            includedStatuses.includes(String(row?.status || "").trim().toLowerCase())
-        );
+        const rowsByStatus = (Array.isArray(pointsRes.rows) ? pointsRes.rows : []).filter((row) => {
+            const statusMatches = includedStatuses.includes(String(row?.status || "").trim().toLowerCase());
+            if (!statusMatches) return false;
+            if (!manualSynthesisOnly) return true;
+            return Boolean(row?.manual_synthesis);
+        });
         const paretoBaseRows = paretoOnly ? selectParetoRows(rowsByStatus) : rowsByStatus;
         const selectedRows = filterRowsByStartMs(paretoBaseRows, startMs);
         if (selectedRows.length < 1) {
@@ -220,6 +230,7 @@ export default async function handler(req, res) {
                         sourceFileName,
                         benchmark: String(row?.benchmark || "").trim(),
                         createdAt: row?.created_at || null,
+                        manualSynthesis: Boolean(row?.manual_synthesis),
                     });
                 }
                 return acc;
@@ -276,6 +287,7 @@ export default async function handler(req, res) {
                 fileName: row.sourceFileName,
                 benchmark: row.benchmark,
                 createdAt: row.createdAt,
+                manualSynthesis: Boolean(row.manualSynthesis),
                 fileBuffer,
             });
             reportProgress({
@@ -315,11 +327,13 @@ export default async function handler(req, res) {
             startedFrom: startMs == null ? null : new Date(startMs).toISOString(),
             bench,
             paretoOnly,
+            manualSynthesisOnly,
             includedStatuses,
             points: downloadedFiles.map((item) => ({
                 benchmark: item.benchmark,
                 fileName: item.fileName,
                 createdAt: item.createdAt,
+                manualSynthesis: Boolean(item.manualSynthesis),
                 bytes: item.fileBuffer.length,
             })),
             totalPoints: downloadedFiles.length,

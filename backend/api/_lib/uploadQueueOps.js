@@ -124,10 +124,13 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
         .map((file) => toFrontPoint(file.parsedBenchmark, file.parsedDelay, file.parsedArea, "upload", String(file.id || "")));
 
     const pointsByBenchmark = new Map();
+    const baselinePointsByBenchmark = new Map();
     for (const point of baselinePoints) {
         const benchmark = String(point?.benchmark || "");
         if (!pointsByBenchmark.has(benchmark)) pointsByBenchmark.set(benchmark, []);
         pointsByBenchmark.get(benchmark).push(point);
+        if (!baselinePointsByBenchmark.has(benchmark)) baselinePointsByBenchmark.set(benchmark, []);
+        baselinePointsByBenchmark.get(benchmark).push(point);
     }
     for (const point of uploadCandidatePoints) {
         const benchmark = String(point?.benchmark || "");
@@ -141,14 +144,17 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     }
 
     let paretoFrontCount = 0;
-    for (const benchmarkPoints of pointsByBenchmark.values()) {
+    for (const [benchmark, benchmarkPoints] of pointsByBenchmark.entries()) {
         const frontMask = computeFrontMask(benchmarkPoints);
+        const baselineBenchmarkPoints = baselinePointsByBenchmark.get(String(benchmark || "")) || [];
+        const baselineFrontMask = computeFrontMask(baselineBenchmarkPoints);
+        const baselineFrontPoints = baselineBenchmarkPoints.filter((_, index) => baselineFrontMask[index]);
         const frontPoints = benchmarkPoints.filter((_, index) => frontMask[index]);
         for (const point of frontPoints) {
             if (point.origin !== "upload" || !point.fileId) continue;
             paretoFrontCount += 1;
-            const replacedParetoCoords = benchmarkPoints
-                .filter((candidate, index) => !frontMask[index] && dominatesPoint(point, candidate))
+            const replacedParetoCoords = baselineFrontPoints
+                .filter((candidate) => dominatesPoint(point, candidate))
                 .map((candidate) => ({ delay: Number(candidate.delay), area: Number(candidate.area) }))
                 .filter((candidate) => Number.isFinite(candidate.delay) && Number.isFinite(candidate.area));
             fileMetaById.set(String(point.fileId), {
@@ -201,6 +207,8 @@ export async function loadUploadRequestSnapshot({
         parser_timeout_seconds,
         checker_timeout_seconds,
         description,
+        manual_synthesis,
+        auto_manual_window,
         total_count,
         done_count,
         verified_count,
@@ -230,6 +238,7 @@ export async function loadUploadRequestSnapshot({
             verdict_reason,
             can_apply,
             default_checked,
+            manual_review_required,
             applied,
             point_id,
             checker_version,
@@ -266,24 +275,31 @@ export async function loadUploadRequestSnapshot({
 export async function refreshUploadRequestCounters(requestId) {
     const counters = await withDbRetry(() => sql`
       select
+        coalesce(max(case when upload_requests.auto_manual_window then 1 else 0 end), 1)::int as auto_manual_window,
         count(*)::int as total_count,
         count(*) filter (where lower(coalesce(process_state, '')) in ('processed', 'non-processed'))::int as done_count,
         count(*) filter (where lower(coalesce(verdict, '')) = 'verified')::int as verified_count,
         count(*) filter (where lower(coalesce(process_state, '')) = 'pending')::int as pending_count,
-        count(*) filter (where not applied and can_apply)::int as manual_pending_count
+        count(*) filter (where not applied and can_apply)::int as savable_pending_count,
+        count(*) filter (where not applied and can_apply and manual_review_required)::int as manual_pending_count
       from upload_request_files
-      where request_id = ${requestId}
+      join upload_requests on upload_requests.id = upload_request_files.request_id
+      where upload_request_files.request_id = ${requestId}
     `);
     const row = counters.rows[0] || {};
+    const autoManualWindow = row.auto_manual_window == null
+        ? true
+        : Number(row.auto_manual_window) !== 0;
     const totalCount = Math.max(0, Number(row.total_count || 0));
     const doneCount = Math.max(0, Number(row.done_count || 0));
     const verifiedCount = Math.max(0, Number(row.verified_count || 0));
     const pendingCount = Math.max(0, Number(row.pending_count || 0));
+    const savablePendingCount = Math.max(0, Number(row.savable_pending_count || 0));
     const manualPendingCount = Math.max(0, Number(row.manual_pending_count || 0));
     let nextStatus = null;
-    if (pendingCount <= 0 && manualPendingCount > 0) {
+    if (pendingCount <= 0 && manualPendingCount > 0 && !autoManualWindow) {
         nextStatus = REQUEST_STATUS_WAITING_MANUAL_VERDICT;
-    } else if (pendingCount <= 0) {
+    } else if (pendingCount <= 0 && savablePendingCount <= 0) {
         nextStatus = REQUEST_STATUS_COMPLETED;
     }
     await withDbRetry(() => sql`
@@ -309,6 +325,7 @@ export async function refreshUploadRequestCounters(requestId) {
         doneCount,
         verifiedCount,
         pendingCount,
+        savablePendingCount,
         manualPendingCount,
         nextStatus,
     };
@@ -371,6 +388,7 @@ export async function markRemainingAsNonProcessed(
           end,
           can_apply = false,
           default_checked = false,
+          manual_review_required = false,
           updated_at = now(),
           processed_at = now()
       where request_id = ${requestId}
@@ -430,6 +448,44 @@ export async function findLatestBlockingUploadRequest(commandId) {
             when lower(coalesce(upload_requests.status, '')) = 'waiting_manual_verdict' then 3
             else 4
         end asc,
+        upload_requests.updated_at desc,
+        upload_requests.created_at desc
+      limit 1
+    `);
+    if (requestRes.rows.length === 0) return null;
+    return requestRes.rows[0];
+}
+
+export async function findLatestVisibleUploadRequest(commandId) {
+    const requestRes = await withDbRetry(() => sql`
+      select
+        upload_requests.id,
+        upload_requests.status
+      from upload_requests
+      where command_id = ${commandId}
+        and lower(coalesce(upload_requests.status, '')) in (
+            'queued',
+            'processing',
+            'freezed',
+            'waiting_manual_verdict',
+            'completed',
+            'interrupted',
+            'failed',
+            'closed'
+        )
+      order by
+        case
+            when lower(coalesce(upload_requests.status, '')) = 'processing' then 0
+            when lower(coalesce(upload_requests.status, '')) = 'queued' then 1
+            when lower(coalesce(upload_requests.status, '')) = 'freezed' then 2
+            when lower(coalesce(upload_requests.status, '')) = 'waiting_manual_verdict' then 3
+            when lower(coalesce(upload_requests.status, '')) = 'completed' then 4
+            when lower(coalesce(upload_requests.status, '')) = 'interrupted' then 5
+            when lower(coalesce(upload_requests.status, '')) = 'failed' then 6
+            when lower(coalesce(upload_requests.status, '')) = 'closed' then 7
+            else 8
+        end asc,
+        coalesce(upload_requests.finished_at, upload_requests.updated_at, upload_requests.created_at) desc,
         upload_requests.updated_at desc,
         upload_requests.created_at desc
       limit 1

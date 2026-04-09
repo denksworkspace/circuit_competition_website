@@ -36,7 +36,7 @@ export function AdminModals({
     return (
         <>
             {isTruthConflictModalOpen ? (
-                <div className="pointModalBackdrop" onClick={closeTruthConflictModal}>
+                <div className="pointModalBackdrop">
                     <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
                         <div className="pointModalTitle">Resolve truth upload conflicts</div>
                         <div className="truthConflictList">
@@ -84,7 +84,7 @@ export function AdminModals({
             ) : null}
 
             {isBulkVerifyApplyModalOpen ? (
-                <div className="pointModalBackdrop" onClick={closeBulkVerifyApplyModal}>
+                <div className="pointModalBackdrop">
                     <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
                         <div className="pointModalTitle">Apply bulk verification statuses</div>
                         <div className="truthConflictList">
@@ -132,7 +132,7 @@ export function AdminModals({
             ) : null}
 
             {isBulkIdenticalApplyModalOpen ? (
-                <div className="pointModalBackdrop" onClick={closeBulkIdenticalApplyModal}>
+                <div className="pointModalBackdrop">
                     <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
                         <div className="pointModalTitle">Resolve identical points</div>
                         <div className="cardHint">Choose one point to keep in each duplicate group. Others will be marked as deleted.</div>
@@ -191,7 +191,7 @@ export function AdminModals({
             ) : null}
 
             {isAdminSchemesExportModalOpen ? (
-                <div className="pointModalBackdrop" onClick={closeAdminSchemesExportModal}>
+                <div className="pointModalBackdrop">
                     <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
                         <div className="pointModalTitle">Schemes export options</div>
                         <div className="truthConflictList">

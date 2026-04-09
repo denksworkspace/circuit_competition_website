@@ -98,7 +98,7 @@ export function ChartSection({
                     ) : null}
 
                     <button className="btn ghost" onClick={onDownloadBenchmarksExcel}>
-                        Export benchmarks (Excel)
+                        Export benchmarks (CSV)
                     </button>
                 </div>
             </div>

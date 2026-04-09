@@ -179,6 +179,7 @@ export function SentPointsSection({
                                 <div className="compactMain">
                                     <div className="compactTop">
                                         <span className="pill">benchmark: {p.benchmark}</span>
+                                        <span className="pill">manual synthesis: {p.manualSynthesis ? "yes" : "no"}</span>
                                         <span className="pill">
                                             <span className="dot" style={{ background: statusColor(p.status) }} />
                                             {p.status}

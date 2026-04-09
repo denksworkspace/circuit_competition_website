@@ -375,6 +375,13 @@
     gap: 8px;
 }
 
+.uploadLiveHeaderMeta {
+    display: grid;
+    gap: 2px;
+    justify-items: end;
+    text-align: right;
+}
+
 .uploadLiveList {
     max-height: 260px;
     min-height: 120px;
@@ -440,6 +447,30 @@
     min-width: 0;
     display: grid;
     gap: 4px;
+}
+
+.uploadFinishedText {
+    color: #15803d;
+}
+
+.uploadFinishedText b {
+    color: #15803d;
+}
+
+.uploadFailedText {
+    color: #b91c1c;
+}
+
+.uploadFailedText b {
+    color: #b91c1c;
+}
+
+.uploadStoppedText {
+    color: #475569;
+}
+
+.uploadStoppedText b {
+    color: #475569;
 }
 
 .uploadLiveFile {

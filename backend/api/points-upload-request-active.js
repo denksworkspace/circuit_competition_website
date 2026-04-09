@@ -2,7 +2,7 @@
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { rejectMethod } from "./_lib/http.js";
 import { ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
-import { findLatestBlockingUploadRequest, getCommandByAuthKey, loadUploadRequestSnapshot } from "./_lib/uploadQueueOps.js";
+import { findLatestVisibleUploadRequest, getCommandByAuthKey, loadUploadRequestSnapshot } from "./_lib/uploadQueueOps.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["GET"])) return;
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
         return;
     }
 
-    const active = await findLatestBlockingUploadRequest(command.id);
+    const active = await findLatestVisibleUploadRequest(command.id);
     if (!active) {
         res.status(200).json({ request: null, files: [] });
         return;

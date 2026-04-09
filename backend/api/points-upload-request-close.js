@@ -2,6 +2,8 @@
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
+import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import { REQUEST_STATUS_CLOSED, ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
 import {
     finalizeUploadRequestPareto,
@@ -25,6 +27,8 @@ export default async function handler(req, res) {
     }
 
     await ensureCommandRolesSchema();
+    await ensureCommandUploadSettingsSchema();
+    await ensurePointsStatusConstraint();
     await ensureUploadQueueSchema();
     const command = await getCommandByAuthKey(authKey);
     if (!command) {
@@ -48,6 +52,7 @@ export default async function handler(req, res) {
       update upload_request_files
       set can_apply = false,
           default_checked = false,
+          manual_review_required = false,
           updated_at = now()
       where request_id = ${requestId}
         and applied = false

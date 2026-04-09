@@ -17,7 +17,7 @@ export function PointActionModal({
     if (!actionPoint) return null;
 
     return (
-        <div className="pointModalBackdrop" onClick={closePointActionModal}>
+        <div className="pointModalBackdrop">
             <div className="pointModal" onClick={(e) => e.stopPropagation()}>
                 <div className="pointModalTitle">Point actions</div>
                 <div className="pointModalFile mono">{actionPoint.fileName}</div>

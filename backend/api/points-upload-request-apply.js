@@ -53,6 +53,8 @@ export default async function handler(req, res) {
         parser_timeout_seconds,
         checker_timeout_seconds,
         description,
+        manual_synthesis,
+        auto_manual_window,
         total_count,
         done_count,
         verified_count
@@ -77,6 +79,7 @@ export default async function handler(req, res) {
         verdict,
         can_apply,
         default_checked,
+        manual_review_required,
         applied,
         checker_version,
         parsed_benchmark,
@@ -94,7 +97,20 @@ export default async function handler(req, res) {
     const selectedIds = new Set(fileIds);
     const unresolvedSelectedIds = new Set(fileIds);
     const statusesToSync = new Set();
-    const totalCount = Math.max(0, Number(selectedIds.size || 0));
+    const rowsToSave = rows.filter((row) => !row.manualReviewRequired || selectedIds.has(row.id));
+    const rowsToDrop = rows.filter((row) => row.manualReviewRequired && !selectedIds.has(row.id));
+    const availableRowIds = new Set(rows.map((row) => row.id));
+    for (const row of rowsToDrop) {
+        await sql`
+          update upload_request_files
+          set can_apply = false,
+              default_checked = false,
+              manual_review_required = false,
+              updated_at = now()
+          where id = ${row.id}
+        `;
+    }
+    const totalCount = rowsToSave.length + Array.from(selectedIds).filter((id) => !availableRowIds.has(id)).length;
     let doneCount = 0;
     const report = (patch = {}) => setVerifyProgress(progressToken, {
         status: "apply",
@@ -107,18 +123,10 @@ export default async function handler(req, res) {
     });
     report();
 
-    for (const row of rows) {
-        if (!selectedIds.has(row.id)) {
-            await sql`
-              update upload_request_files
-              set can_apply = false,
-                  default_checked = false,
-                  updated_at = now()
-              where id = ${row.id}
-            `;
-            continue;
+    for (const row of rowsToSave) {
+        if (selectedIds.has(row.id)) {
+            unresolvedSelectedIds.delete(row.id);
         }
-        unresolvedSelectedIds.delete(row.id);
         report({ currentFileName: String(row.originalFileName || "") });
         const downloaded = await downloadQueueFileText(row.queueFileKey);
         if (!downloaded.ok) {
@@ -148,6 +156,7 @@ export default async function handler(req, res) {
               final_file_name = ${applied.finalFileName},
               can_apply = false,
               default_checked = false,
+              manual_review_required = false,
               updated_at = now()
           where id = ${row.id}
         `;

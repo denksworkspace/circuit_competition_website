@@ -35,6 +35,7 @@ export async function handleGetPoints(req, res) {
         p.file_name,
         p.status,
         p.checker_version,
+        p.manual_synthesis,
         p.created_at,
         (t.benchmark is not null) as has_truth
       from points p

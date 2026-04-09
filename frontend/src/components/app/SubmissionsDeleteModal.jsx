@@ -10,7 +10,7 @@ export function SubmissionsDeleteModal({
     if (!open) return null;
 
     return (
-        <div className="pointModalBackdrop" onClick={onClose}>
+        <div className="pointModalBackdrop">
             <div className="pointModal manualApplyModal" onClick={(e) => e.stopPropagation()}>
                 <div className="manualApplyHeader">
                     <div className="pointModalTitle">Delete submissions</div>

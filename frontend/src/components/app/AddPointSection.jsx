@@ -1,6 +1,38 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { MAX_DESCRIPTION_LEN, MAX_INPUT_FILENAME_LEN } from "../../constants/appConstants.js";
 
+function getTerminalStatusLabel(requestStatusRaw) {
+    const requestStatus = String(requestStatusRaw || "").trim().toLowerCase();
+    if (requestStatus === "completed") return "finished";
+    if (requestStatus === "failed") return "failed";
+    if (requestStatus === "interrupted") return "stopped";
+    if (requestStatus === "closed") return "closed";
+    return "";
+}
+
+function getTerminalStatusClass(requestStatusRaw) {
+    const requestStatus = String(requestStatusRaw || "").trim().toLowerCase();
+    if (requestStatus === "completed") return "uploadFinishedText";
+    if (requestStatus === "failed") return "uploadFailedText";
+    if (requestStatus === "interrupted" || requestStatus === "closed") return "uploadStoppedText";
+    return "";
+}
+
+function getLiveProcessedStatusLabel(uploadProgress) {
+    const terminalLabel = getTerminalStatusLabel(uploadProgress?.requestStatus);
+    if (terminalLabel) return terminalLabel;
+    const phase = String(uploadProgress?.phase || "").trim().toLowerCase();
+    if (!phase) return "";
+    if (phase === "finished") return "finished";
+    if (phase === "saving") return "adding to database and saving points";
+    if (phase === "waiting-manual") return "waiting for manual verdict";
+    if (phase === "processing" || phase === "parser" || phase === "checker" || phase === "working") {
+        return "working with circuits";
+    }
+    if (phase === "uploading" || phase === "preparing") return "saving to queue";
+    return "";
+}
+
 export function AddPointSection({
     formatGb,
     maxSingleUploadBytes,
@@ -35,12 +67,26 @@ export function AddPointSection({
     parserTleSecondsDraft,
     onParserTleSecondsDraftChange,
     parserTleMaxSeconds,
+    manualSynthesis,
+    onManualSynthesisChange,
+    autoManualWindow,
+    onAutoManualWindowChange,
     isUploadSettingsOpen,
     onToggleUploadSettings,
     showManualApplyButton,
     onOpenManualApply,
     uploadDisabledReason,
 }) {
+    const requestStatus = String(uploadProgress?.requestStatus || "").trim().toLowerCase();
+    const terminalStatusLabel = getTerminalStatusLabel(requestStatus);
+    const terminalStatusClass = getTerminalStatusClass(requestStatus);
+    const liveProcessedStatus = getLiveProcessedStatusLabel(uploadProgress);
+    const isFinishedPhase = String(uploadProgress?.phase || "").trim().toLowerCase() === "finished";
+    const bodyStatusLabel = terminalStatusLabel || (isFinishedPhase ? "finished" : "");
+    const bodyStatusClass = terminalStatusClass || (isFinishedPhase ? "uploadFinishedText" : "");
+    const headerStatusClass = terminalStatusClass || (isFinishedPhase ? "uploadFinishedText" : "");
+    const isUploadBusy = isUploading && !terminalStatusLabel && !isFinishedPhase;
+
     return (
         <section className="card">
             <div className="cardHeader tight addPointHeader">
@@ -169,6 +215,24 @@ export function AddPointSection({
                             />
                         </label>
 
+                        <label className="check compactCheck">
+                            <input
+                                type="checkbox"
+                                checked={manualSynthesis}
+                                onChange={(e) => onManualSynthesisChange(Boolean(e.target.checked))}
+                            />
+                            <span className="paretoOnlyText">manual synthesis</span>
+                        </label>
+
+                        <label className="check compactCheck">
+                            <input
+                                type="checkbox"
+                                checked={autoManualWindow}
+                                onChange={(e) => onAutoManualWindowChange(Boolean(e.target.checked))}
+                            />
+                            <span className="paretoOnlyText">auto manual window</span>
+                        </label>
+
                     </div>
                 ) : null}
 
@@ -182,10 +246,10 @@ export function AddPointSection({
                     data-testid="upload-submit-wrap"
                 >
                     <button className="btn primary" type="submit" disabled={!canAdd}>
-                        {isUploading ? "Uploading..." : "Upload & create point"}
+                        {isUploadBusy ? "Uploading..." : "Upload & create point"}
                     </button>
                 </span>
-                {isUploading ? (
+                {isUploadBusy ? (
                     <button className="btn danger" type="button" onClick={onStopUpload} disabled={isUploadStopping}>
                         {isUploadStopping ? "Stopping..." : "Stop upload"}
                     </button>
@@ -210,7 +274,7 @@ export function AddPointSection({
                         ) : null}
                         {uploadProgress.phase === "uploading" ? (
                             <div className="cardHint">
-                                adding files to queue... {Number(uploadProgress.queueUploaded || 0)} / {Number(uploadProgress.queueTotal || uploadProgress.total || 0)}
+                                saving to queue... {Number(uploadProgress.queueUploaded || 0)} / {Number(uploadProgress.queueTotal || uploadProgress.total || 0)}
                             </div>
                         ) : null}
                         {uploadProgress.phase === "waiting-manual" ? (
@@ -218,7 +282,7 @@ export function AddPointSection({
                                 Waiting for manual verdict before the upload can finish.
                             </div>
                         ) : null}
-                        {uploadProgress.phase === "processing" ? (
+                        {(uploadProgress.phase === "processing" || uploadProgress.phase === "working") ? (
                             <div className="cardHint">
                                 Processing {uploadProgress.currentFileName || "current file"}...
                             </div>
@@ -235,7 +299,7 @@ export function AddPointSection({
                         ) : null}
                         {uploadProgress.phase === "saving" ? (
                             <div className="cardHint">
-                                Saving files and points...
+                                adding to database and saving points...
                             </div>
                         ) : null}
                         {(uploadProgress.phase === "parser" || uploadProgress.phase === "checker") &&
@@ -246,6 +310,11 @@ export function AddPointSection({
                                     : uploadProgress.transitionTarget === "next-step"
                                         ? "Switching to the next step..."
                                         : "Switching to the next circuit..."}
+                            </div>
+                        ) : null}
+                        {bodyStatusLabel ? (
+                            <div className={bodyStatusClass ? `cardHint ${bodyStatusClass}` : "cardHint"}>
+                                {bodyStatusLabel}
                             </div>
                         ) : null}
                         {Number(uploadProgress.total || 0) > 0
@@ -261,7 +330,14 @@ export function AddPointSection({
                     <div className="uploadLivePanel" role="status" aria-live="polite">
                         <div className="uploadLiveHeader">
                             <div className="pointModalTitle">Live processed</div>
-                            <div className="cardHint">{uploadLiveRows.length} files in current upload</div>
+                            <div className="uploadLiveHeaderMeta">
+                                {liveProcessedStatus ? (
+                                    <div className={headerStatusClass ? `cardHint ${headerStatusClass}` : "cardHint"}>
+                                        status: <b>{liveProcessedStatus}</b>
+                                    </div>
+                                ) : null}
+                                <div className="cardHint">{uploadLiveRows.length} files in current upload</div>
+                            </div>
                         </div>
                             <div className="uploadLiveList">
                                 {uploadLiveRows.map((row) => (

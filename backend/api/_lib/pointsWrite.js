@@ -49,6 +49,7 @@ export async function createPointForCommand({
     fileName,
     status,
     checkerVersion = null,
+    manualSynthesis = false,
     fileSize,
     batchSize,
 }) {
@@ -129,9 +130,15 @@ export async function createPointForCommand({
         }
 
         const insert = await sql`
-            insert into points (id, benchmark, delay, area, description, sender, file_name, status, lifecycle_status, checker_version, command_id)
-            values (${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus}, 'main', ${checkerVersion ?? null}, ${command.id})
-            returning id, benchmark, delay, area, description, sender, file_name, status, checker_version
+            insert into points (
+                id, benchmark, delay, area, description, sender, file_name, status,
+                lifecycle_status, checker_version, manual_synthesis, command_id
+            )
+            values (
+                ${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus},
+                'main', ${checkerVersion ?? null}, ${Boolean(manualSynthesis)}, ${command.id}
+            )
+            returning id, benchmark, delay, area, description, sender, file_name, status, checker_version, manual_synthesis
         `;
         const nextQuota = quotaRow
             ? normalizeCommandUploadSettings(quotaRow)
@@ -156,6 +163,7 @@ export async function createPointForCommand({
                 area,
                 fileName,
                 fileSize,
+                manualSynthesis: Boolean(manualSynthesis),
                 isMultiFileBatch,
                 chargedBytes: chargeBytes,
             },

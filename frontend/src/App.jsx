@@ -43,7 +43,12 @@ import { usePointTesting } from "./hooks/usePointTesting.js";
 import { useAdminUserSettings } from "./hooks/useAdminUserSettings.js";
 import { useTruthUploadFlow } from "./hooks/useTruthUploadFlow.js";
 import { downloadBlobAsFile, downloadTextAsFile } from "./utils/fileDownloadUtils.js";
-import { exportParetoPointsZip, fetchAdminExportProgress, fetchMaintenanceStatus } from "./services/apiClient.js";
+import {
+    exportParetoPointsZip,
+    fetchAdminExportProgress,
+    fetchMaintenanceStatus,
+    fetchParetoExportStatus,
+} from "./services/apiClient.js";
 import paretoPortraitImage from "./assets/vilfredo-pareto-portrait.jpg";
 
 const CHECKER_ABC = "ABC";
@@ -172,12 +177,30 @@ export default function App() {
     const maintenanceEnabledPrevRef = useRef(false);
     const [hasNewPareto, setHasNewPareto] = useState(() => Boolean(currentCommand?.hasNewPareto));
     const [lastParetoExportAt, setLastParetoExportAt] = useState(() => currentCommand?.lastParetoExportAt || null);
+    const authKeySnapshotRef = useRef(String(authKeyDraft || "").trim());
+    useEffect(() => {
+        authKeySnapshotRef.current = String(authKeyDraft || "").trim();
+    }, [authKeyDraft]);
+
+    const refreshParetoExportState = useCallback(async (authKey = authKeyDraft) => {
+        const normalizedAuthKey = String(authKey || "").trim();
+        if (!normalizedAuthKey) return;
+        try {
+            const status = await fetchParetoExportStatus(normalizedAuthKey);
+            if (authKeySnapshotRef.current !== normalizedAuthKey) return;
+            setHasNewPareto(Boolean(status?.hasNewPareto));
+            setLastParetoExportAt(status?.lastParetoExportAt || null);
+        } catch {
+            // Ignore transient sync failures and keep the current UI state.
+        }
+    }, [authKeyDraft]);
     const [isParetoExportModalOpen, setIsParetoExportModalOpen] = useState(false);
     const [paretoExportDateMode, setParetoExportDateMode] = useState("since_last_export");
     const [paretoExportDate, setParetoExportDate] = useState(() => toIsoDateLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS));
     const [paretoExportBench, setParetoExportBench] = useState("all");
     const [paretoExportBenchmarkInputValue, setParetoExportBenchmarkInputValue] = useState("all");
     const [paretoExportParetoOnly, setParetoExportParetoOnly] = useState(true);
+    const [paretoExportManualSynthesisOnly, setParetoExportManualSynthesisOnly] = useState(false);
     const [paretoExportStatusFilter, setParetoExportStatusFilter] = useState(() => ({
         "non-verified": false,
         verified: true,
@@ -428,6 +451,10 @@ export default function App() {
         setCheckerTleSecondsDraft,
         parserTleSecondsDraft,
         setParserTleSecondsDraft,
+        manualSynthesis,
+        setManualSynthesis,
+        autoManualWindow,
+        setAutoManualWindow,
         isUploadSettingsOpen,
         setIsUploadSettingsOpen,
         manualApplyRows,
@@ -450,6 +477,7 @@ export default function App() {
         currentCommand,
         setPoints,
         setLastAddedId,
+        onPointsPersisted: refreshParetoExportState,
         maxSingleUploadBytes,
         remainingUploadBytes,
         maxMultiFileBatchCount,
@@ -781,42 +809,10 @@ export default function App() {
 
     function downloadBenchmarksExcel() {
         const rows = points.filter((p) => p.benchmark !== "test");
-        const maxDelay = rows.reduce((max, p) => {
-            const delay = Number(p.delay);
-            if (!Number.isFinite(delay)) return max;
-            return Math.max(max, Math.trunc(delay));
-        }, 0);
-
-        const minAreaByBenchDelay = new Map();
-        for (const p of rows) {
-            const bench = Number(p.benchmark);
-            const delay = Math.trunc(Number(p.delay));
-            const area = Number(p.area);
-            if (!Number.isInteger(bench) || bench < 200 || bench > 299) continue;
-            if (!Number.isInteger(delay) || delay < 1) continue;
-            if (!Number.isFinite(area)) continue;
-
-            const key = `${bench}:${delay}`;
-            const prev = minAreaByBenchDelay.get(key);
-            if (prev === undefined || area < prev) {
-                minAreaByBenchDelay.set(key, area);
-            }
-        }
-
-        const header = ["bench/delay"];
-        for (let delay = 1; delay <= maxDelay; delay += 1) {
-            header.push(String(delay));
-        }
-        header.push("pareto_points");
+        const header = ["bench", "pareto_front", "minimal_area"];
 
         const lines = [header];
         for (let bench = 200; bench <= 299; bench += 1) {
-            const row = [String(bench)];
-            for (let delay = 1; delay <= maxDelay; delay += 1) {
-                const value = minAreaByBenchDelay.get(`${bench}:${delay}`);
-                row.push(value === undefined ? "" : String(value));
-            }
-
             const benchPoints = rows
                 .filter((p) => Number(p.benchmark) === bench)
                 .map((p) => ({
@@ -827,7 +823,12 @@ export default function App() {
             const paretoPoints = computeParetoFrontOriginal(benchPoints)
                 .map((p) => `(${Math.trunc(p.delay)}, ${Math.trunc(p.area)})`)
                 .join(", ");
-            row.push(paretoPoints);
+            const minimalArea = benchPoints.reduce((best, point) => Math.min(best, Number(point.area)), Number.POSITIVE_INFINITY);
+            const row = [
+                String(bench),
+                paretoPoints,
+                Number.isFinite(minimalArea) ? String(Math.trunc(minimalArea)) : "",
+            ];
 
             lines.push(row);
         }
@@ -994,6 +995,7 @@ export default function App() {
                 fromDate: mode === "from_date" ? paretoExportDate : "",
                 bench: paretoExportBench,
                 paretoOnly: paretoExportParetoOnly,
+                manualSynthesisOnly: paretoExportManualSynthesisOnly,
                 includedStatuses,
                 progressToken,
                 signal: controller.signal,
@@ -1002,6 +1004,7 @@ export default function App() {
             setIsParetoExportModalOpen(false);
             setHasNewPareto(false);
             setLastParetoExportAt(new Date().toISOString());
+            await refreshParetoExportState(authKeyDraft);
         } catch (error) {
             if (error?.name === "AbortError") {
                 setParetoExportError("Export cancelled.");
@@ -1250,6 +1253,28 @@ export default function App() {
         setHasNewPareto(Boolean(currentCommand?.hasNewPareto));
         setLastParetoExportAt(currentCommand?.lastParetoExportAt || null);
     }, [currentCommand?.hasNewPareto, currentCommand?.lastParetoExportAt]);
+
+    useEffect(() => {
+        const authKey = String(authKeyDraft || "").trim();
+        if (!authKey || !currentCommand?.id || typeof window === "undefined" || typeof document === "undefined") {
+            return undefined;
+        }
+        const refreshOnFocus = () => {
+            if (document.visibilityState && document.visibilityState !== "visible") return;
+            void refreshParetoExportState(authKey);
+        };
+        const refreshOnVisible = () => {
+            if (document.visibilityState === "visible") {
+                void refreshParetoExportState(authKey);
+            }
+        };
+        window.addEventListener("focus", refreshOnFocus);
+        document.addEventListener("visibilitychange", refreshOnVisible);
+        return () => {
+            window.removeEventListener("focus", refreshOnFocus);
+            document.removeEventListener("visibilitychange", refreshOnVisible);
+        };
+    }, [authKeyDraft, currentCommand?.id, refreshParetoExportState]);
 
     useEffect(() => {
         if (paretoExportBenchmarkOptions.includes(paretoExportBench)) return;
@@ -1621,6 +1646,10 @@ export default function App() {
                         parserTleSecondsDraft={parserTleSecondsDraft}
                         onParserTleSecondsDraftChange={setParserTleSecondsDraft}
                         parserTleMaxSeconds={metricsTimeoutQuotaSeconds}
+                        manualSynthesis={manualSynthesis}
+                        onManualSynthesisChange={setManualSynthesis}
+                        autoManualWindow={autoManualWindow}
+                        onAutoManualWindowChange={setAutoManualWindow}
                         isUploadSettingsOpen={isUploadSettingsOpen}
                         onToggleUploadSettings={() => setIsUploadSettingsOpen((v) => !v)}
                         showManualApplyButton={showManualApplyButton}
@@ -1834,6 +1863,8 @@ export default function App() {
                 onSelectBench={onSelectParetoExportBenchmark}
                 paretoOnly={paretoExportParetoOnly}
                 onParetoOnlyChange={setParetoExportParetoOnly}
+                manualSynthesisOnly={paretoExportManualSynthesisOnly}
+                onManualSynthesisOnlyChange={setParetoExportManualSynthesisOnly}
                 statusFilter={paretoExportStatusFilter}
                 onToggleStatus={toggleParetoExportStatus}
                 isExporting={isParetoExporting}

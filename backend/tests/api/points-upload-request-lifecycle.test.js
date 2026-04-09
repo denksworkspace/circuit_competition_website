@@ -295,5 +295,7 @@ describe("upload request lifecycle handlers", () => {
         await closeHandler(req, res);
 
         expect(res.statusCode).toBe(200);
+        expect(downloadQueueFileText).not.toHaveBeenCalled();
+        expect(applyUploadQueueFileRow).not.toHaveBeenCalled();
     });
 });

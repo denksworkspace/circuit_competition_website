@@ -42,6 +42,8 @@ export async function ensureUploadQueueSchema() {
                 parser_timeout_seconds integer not null default 60,
                 checker_timeout_seconds integer not null default 60,
                 description text not null default 'circuit',
+                manual_synthesis boolean not null default false,
+                auto_manual_window boolean not null default true,
                 total_count integer not null default 0,
                 done_count integer not null default 0,
                 verified_count integer not null default 0,
@@ -61,6 +63,14 @@ export async function ensureUploadQueueSchema() {
             await sql`
               alter table upload_requests
               alter column description set default 'circuit'
+            `;
+            await sql`
+              alter table upload_requests
+              add column if not exists manual_synthesis boolean not null default false
+            `;
+            await sql`
+              alter table upload_requests
+              add column if not exists auto_manual_window boolean not null default true
             `;
             await sql`
               alter table upload_requests
@@ -100,6 +110,7 @@ export async function ensureUploadQueueSchema() {
                 verdict_reason text not null default '',
                 can_apply boolean not null default false,
                 default_checked boolean not null default false,
+                manual_review_required boolean not null default false,
                 applied boolean not null default false,
                 point_id text,
                 checker_version text,
@@ -121,6 +132,10 @@ export async function ensureUploadQueueSchema() {
             await sql`
               alter table upload_request_files
               add column if not exists replaced_pareto_coords text not null default ''
+            `;
+            await sql`
+              alter table upload_request_files
+              add column if not exists manual_review_required boolean not null default false
             `;
             await sql`
               alter table upload_request_files
@@ -172,6 +187,8 @@ export function normalizeUploadRequestRow(row) {
         parserTimeoutSeconds: Math.max(1, Number(row.parser_timeout_seconds || 60)),
         checkerTimeoutSeconds: Math.max(1, Number(row.checker_timeout_seconds || 60)),
         description: String(row.description || "circuit"),
+        manualSynthesis: Boolean(row.manual_synthesis),
+        autoManualWindow: row.auto_manual_window == null ? true : Boolean(row.auto_manual_window),
         totalCount: Math.max(0, Number(row.total_count || 0)),
         doneCount: Math.max(0, Number(row.done_count || 0)),
         verifiedCount: Math.max(0, Number(row.verified_count || 0)),
@@ -199,6 +216,7 @@ export function normalizeUploadRequestFileRow(row) {
         verdictReason: String(row.verdict_reason || ""),
         canApply: Boolean(row.can_apply),
         defaultChecked: Boolean(row.default_checked),
+        manualReviewRequired: Boolean(row.manual_review_required),
         applied: Boolean(row.applied),
         pointId: row.point_id ? String(row.point_id) : null,
         checkerVersion: row.checker_version ? String(row.checker_version) : null,

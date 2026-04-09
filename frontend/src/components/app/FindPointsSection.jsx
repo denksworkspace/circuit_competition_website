@@ -59,6 +59,7 @@ export function FindPointsSection({
                             <div className="compactTop">
                                 <span className="pill subtle">by {p.sender}</span>
                                 <span className="pill">name: {p.description}</span>
+                                <span className="pill">manual synthesis: {p.manualSynthesis ? "yes" : "no"}</span>
                                 <span className="pill">
                                     <span className="dot" style={{ background: statusColor(p.status) }} />
                                     {p.status}

@@ -22,6 +22,8 @@ export function ParetoExportModal({
     onSelectBench,
     paretoOnly,
     onParetoOnlyChange,
+    manualSynthesisOnly,
+    onManualSynthesisOnlyChange,
     statusFilter,
     onToggleStatus,
     isExporting,
@@ -33,7 +35,7 @@ export function ParetoExportModal({
     if (!open) return null;
 
     return (
-        <div className="pointModalBackdrop" onClick={onClose}>
+        <div className="pointModalBackdrop">
             <div className="pointModal truthConflictModal" onClick={(e) => e.stopPropagation()}>
                 <div className="pointModalTitle">Export points</div>
 
@@ -104,6 +106,16 @@ export function ParetoExportModal({
                         disabled={isExporting}
                     />
                     <span className="paretoOnlyText">Pareto points only</span>
+                </label>
+
+                <label className="check compactCheck">
+                    <input
+                        type="checkbox"
+                        checked={manualSynthesisOnly}
+                        onChange={(e) => onManualSynthesisOnlyChange(Boolean(e.target.checked))}
+                        disabled={isExporting}
+                    />
+                    <span className="paretoOnlyText">manual synthesis only</span>
                 </label>
 
                 <label className="field">

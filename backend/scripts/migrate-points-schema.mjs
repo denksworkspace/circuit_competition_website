@@ -15,6 +15,10 @@ async function migratePointsSchema() {
           add column if not exists content_hash text
         `;
         await sql`
+          alter table points
+          add column if not exists manual_synthesis boolean not null default false
+        `;
+        await sql`
           update points
           set lifecycle_status = case
             when lower(coalesce(status, '')) = 'deleted' then 'deleted'

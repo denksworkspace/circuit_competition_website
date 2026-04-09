@@ -16,6 +16,7 @@ import {
     REQUEST_STATUS_PROCESSING,
     REQUEST_STATUS_WAITING_MANUAL_VERDICT,
     ensureUploadQueueSchema,
+    normalizeUploadRequestFileRow,
 } from "./_lib/uploadQueue.js";
 import { isRetryableDbError } from "./_lib/dbRetry.js";
 import {
@@ -28,7 +29,7 @@ import {
     refreshUploadRequestCounters,
 } from "./_lib/uploadQueueOps.js";
 import { downloadQueueFileText } from "./_lib/queueS3.js";
-import { processUploadQueueFile } from "./_lib/uploadQueueProcessing.js";
+import { applyUploadQueueFileRow, processUploadQueueFile } from "./_lib/uploadQueueProcessing.js";
 import { checkMaintenanceBlock } from "./_lib/maintenanceMode.js";
 import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
 
@@ -108,6 +109,100 @@ async function finalizeParetoIfCompleted({ requestId, command, counters }) {
         commandId: command.id,
         commandName: command.name,
     });
+}
+
+async function listSavableUploadFiles(requestId) {
+    const filesRes = await sql`
+      select
+        id,
+        order_index,
+        original_file_name,
+        queue_file_key,
+        file_size,
+        verdict,
+        can_apply,
+        default_checked,
+        manual_review_required,
+        applied,
+        checker_version,
+        parsed_benchmark,
+        parsed_delay,
+        parsed_area
+      from upload_request_files
+      where request_id = ${requestId}
+        and not applied
+        and can_apply
+      order by order_index asc
+    `;
+    return filesRes.rows.map(normalizeUploadRequestFileRow);
+}
+
+async function markAutoSkippedRowsClosed(requestId) {
+    await sql`
+      update upload_request_files
+      set can_apply = false,
+          default_checked = false,
+          manual_review_required = false,
+          updated_at = now()
+      where request_id = ${requestId}
+        and not applied
+        and can_apply
+        and manual_review_required
+        and not default_checked
+    `;
+}
+
+async function saveAutoEligibleRows({
+    requestId,
+    command,
+    requestRow,
+    signal,
+}) {
+    const rows = await listSavableUploadFiles(requestId);
+    const rowsToSave = rows.filter((row) => !row.manualReviewRequired || row.defaultChecked);
+    const statusesToSync = new Set();
+
+    if (rowsToSave.length > 0) {
+        await sql`
+          update upload_requests
+          set current_phase = 'saving',
+              current_file_name = '',
+              updated_at = now()
+          where id = ${requestId}
+        `;
+    }
+
+    for (const row of rowsToSave) {
+        const downloaded = await downloadQueueFileText(row.queueFileKey, { signal });
+        if (!downloaded.ok) {
+            throw new Error(downloaded.reason || `Failed to download queue file: ${row.originalFileName}`);
+        }
+        const applied = await applyUploadQueueFileRow({
+            command,
+            requestRow,
+            fileRow: row,
+            circuitText: downloaded.circuitText,
+            signal,
+        });
+        if (!applied.ok) {
+            throw new Error(applied.error || `Failed to save point: ${row.originalFileName}`);
+        }
+        statusesToSync.add(String(applied?.point?.status || "").trim().toLowerCase());
+        await sql`
+          update upload_request_files
+          set applied = true,
+              point_id = ${applied.pointId},
+              final_file_name = ${applied.finalFileName},
+              can_apply = false,
+              default_checked = false,
+              manual_review_required = false,
+              updated_at = now()
+          where id = ${row.id}
+        `;
+    }
+
+    await markAutoSkippedRowsClosed(requestId);
+    return { statusesToSync };
 }
 
 export default async function handler(req, res) {
@@ -195,8 +290,44 @@ export default async function handler(req, res) {
 
     const nextFile = await findNextPendingUploadFile(requestId);
     if (!nextFile) {
-        const counters = await refreshUploadRequestCounters(requestId);
-        await finalizeParetoIfCompleted({ requestId, command, counters });
+        try {
+            let counters = await refreshUploadRequestCounters(requestId);
+            await finalizeParetoIfCompleted({ requestId, command, counters });
+            let statusesToSync = new Set();
+            if (Number(counters?.pendingCount || 0) <= 0
+                && (Boolean(initialRequest.autoManualWindow) || Number(counters?.manualPendingCount || 0) <= 0)
+                && Number(counters?.savablePendingCount || 0) > 0) {
+                const autoSaved = await saveAutoEligibleRows({
+                    requestId,
+                    command,
+                    requestRow: initialRequest,
+                });
+                statusesToSync = autoSaved.statusesToSync;
+                counters = await refreshUploadRequestCounters(requestId);
+                await finalizeParetoIfCompleted({ requestId, command, counters });
+                if (statusesToSync.size > 0) {
+                    await syncParetoFilenameCsvs({ statuses: Array.from(statusesToSync) });
+                }
+            }
+        } catch (error) {
+            await sql`
+              update upload_requests
+              set status = ${REQUEST_STATUS_FAILED},
+                  error = ${String(error?.message || "Failed to finish upload request.")},
+                  finished_at = coalesce(finished_at, now()),
+                  current_phase = '',
+                  current_file_name = '',
+                  updated_at = now()
+              where id = ${requestId}
+            `;
+            const ready = await loadRunResponseSnapshot({
+                requestId,
+                command,
+                includeFiles: includeFilesInResponse,
+            });
+            res.status(200).json(ready);
+            return;
+        }
         await sql`
           update upload_requests
           set current_phase = '',
@@ -239,6 +370,7 @@ export default async function handler(req, res) {
 
     const stopMonitor = createStopMonitor(requestId);
     let refreshedCounters = null;
+    let autoSavedStatusesToSync = new Set();
     try {
         const downloaded = await downloadQueueFileText(nextFile.queueFileKey, { signal: stopMonitor.signal });
         if (!downloaded.ok) {
@@ -250,8 +382,9 @@ export default async function handler(req, res) {
               set process_state = 'processed',
                   verdict = ${FILE_VERDICT_FAILED},
                   verdict_reason = ${String(downloaded.reason || "Failed to download queue file.")},
-                  can_apply = true,
-                  default_checked = true,
+                  can_apply = false,
+                  default_checked = false,
+                  manual_review_required = false,
                   processed_at = now(),
                   updated_at = now()
               where id = ${nextFile.id}
@@ -291,6 +424,7 @@ export default async function handler(req, res) {
               verdict_reason = ${processed.verdictReason},
               can_apply = ${processed.canApply},
               default_checked = ${processed.defaultChecked},
+              manual_review_required = ${processed.manualReviewRequired},
               applied = ${processed.applied},
               point_id = ${processed.pointId},
               checker_version = ${processed.checkerVersion},
@@ -313,6 +447,7 @@ export default async function handler(req, res) {
                   verdict_reason = ${String(error?.message || "Upload was interrupted by user.")},
                   can_apply = false,
                   default_checked = false,
+                  manual_review_required = false,
                   processed_at = now(),
                   updated_at = now()
               where id = ${nextFile.id}
@@ -346,6 +481,7 @@ export default async function handler(req, res) {
                   verdict_reason = ${String(error?.message || "Skipped due to temporary database connectivity issue.")},
                   can_apply = false,
                   default_checked = false,
+                  manual_review_required = false,
                   processed_at = now(),
                   updated_at = now()
               where id = ${nextFile.id}
@@ -375,6 +511,7 @@ export default async function handler(req, res) {
               verdict_reason = ${String(error?.message || "Failed to process queue file.")},
               can_apply = false,
               default_checked = false,
+              manual_review_required = false,
               processed_at = now(),
               updated_at = now()
           where id = ${nextFile.id}
@@ -402,37 +539,72 @@ export default async function handler(req, res) {
         stopMonitor.close();
     }
 
-    const postRunSnapshot = await loadUploadRequestSnapshot({
-        requestId,
-        commandId: command.id,
-        includeFiles: false,
-        commandName: command.name,
-    });
-    if (postRunSnapshot?.request?.stopRequested) {
-        await markRemainingAsNonProcessed(requestId);
-    } else {
-        const pending = await findNextPendingUploadFile(requestId);
-        if (!pending) {
-            if (!refreshedCounters || Number(refreshedCounters.pendingCount || 0) > 0) {
-                refreshedCounters = await refreshUploadRequestCounters(requestId);
-                await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
-            }
-            await sql`
-              update upload_requests
-              set current_phase = '',
-                  current_file_name = '',
-                  updated_at = now()
-              where id = ${requestId}
-            `;
+    try {
+        const postRunSnapshot = await loadUploadRequestSnapshot({
+            requestId,
+            commandId: command.id,
+            includeFiles: false,
+            commandName: command.name,
+        });
+        if (postRunSnapshot?.request?.stopRequested) {
+            await markRemainingAsNonProcessed(requestId);
         } else {
-            await sql`
-              update upload_requests
-              set current_phase = '',
-                  current_file_name = '',
-                  updated_at = now()
-              where id = ${requestId}
-            `;
+            const pending = await findNextPendingUploadFile(requestId);
+            if (!pending) {
+                if (!refreshedCounters || Number(refreshedCounters.pendingCount || 0) > 0) {
+                    refreshedCounters = await refreshUploadRequestCounters(requestId);
+                    await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
+                }
+                if (Number(refreshedCounters?.pendingCount || 0) <= 0
+                    && (
+                        Boolean(postRunSnapshot?.request?.autoManualWindow ?? initialRequest.autoManualWindow)
+                        || Number(refreshedCounters?.manualPendingCount || 0) <= 0
+                    )
+                    && Number(refreshedCounters?.savablePendingCount || 0) > 0) {
+                    const autoSaved = await saveAutoEligibleRows({
+                        requestId,
+                        command,
+                        requestRow: postRunSnapshot?.request || initialRequest,
+                    });
+                    autoSavedStatusesToSync = autoSaved.statusesToSync;
+                    refreshedCounters = await refreshUploadRequestCounters(requestId);
+                    await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
+                }
+                await sql`
+                  update upload_requests
+                  set current_phase = '',
+                      current_file_name = '',
+                      updated_at = now()
+                  where id = ${requestId}
+                `;
+            } else {
+                await sql`
+                  update upload_requests
+                  set current_phase = '',
+                      current_file_name = '',
+                      updated_at = now()
+                  where id = ${requestId}
+                `;
+            }
         }
+    } catch (error) {
+        await sql`
+          update upload_requests
+          set status = ${REQUEST_STATUS_FAILED},
+              error = ${String(error?.message || "Failed to finish upload request.")},
+              finished_at = coalesce(finished_at, now()),
+              current_phase = '',
+              current_file_name = '',
+              updated_at = now()
+          where id = ${requestId}
+        `;
+        const ready = await loadRunResponseSnapshot({
+            requestId,
+            command,
+            includeFiles: includeFilesInResponse,
+        });
+        res.status(200).json(ready);
+        return;
     }
 
     const ready = await loadRunResponseSnapshot({
@@ -440,12 +612,9 @@ export default async function handler(req, res) {
         command,
         includeFiles: includeFilesInResponse,
     });
-    const finalStatus = String(ready?.request?.status || "").toLowerCase();
-    const shouldSyncParetoCsvs = (initialStatus === "queued" || initialStatus === "processing")
-        && TERMINAL.has(finalStatus);
     try {
-        if (shouldSyncParetoCsvs) {
-            await syncParetoFilenameCsvs({ statuses: ["verified", "non-verified"] });
+        if (autoSavedStatusesToSync.size > 0) {
+            await syncParetoFilenameCsvs({ statuses: Array.from(autoSavedStatusesToSync) });
         }
     } catch {
         res.status(500).json({ error: "Upload step completed, but pareto filename CSV sync failed." });

@@ -198,6 +198,67 @@ describe("api/_lib/uploadQueueProcessing", () => {
         }));
     });
 
+    it("restores missing parsed metrics during apply from filename and parser stats", async () => {
+        process.env.AWS_ACCESS_KEY_ID = "x";
+        process.env.AWS_SECRET_ACCESS_KEY = "y";
+        process.env.AWS_REGION = "us-east-1";
+        process.env.S3_BUCKET = "points";
+        uid.mockReturnValueOnce("pid_2");
+        parseInputBenchFileName.mockReturnValueOnce({
+            ok: true,
+            benchmark: 254,
+            delay: 15,
+            area: 40,
+        });
+        getAigStatsFromBenchText.mockResolvedValueOnce({
+            ok: true,
+            area: 39,
+            depth: 13,
+        });
+        buildStoredFileName.mockReturnValueOnce("bench254_13_39_team1_pid_2.bench");
+        buildPresignedPutUrl.mockReturnValueOnce("https://upload.example/points/bench254_13_39_team1_pid_2.bench");
+        global.fetch = vi.fn(async () => ({ ok: true }));
+        createPointForCommand.mockResolvedValueOnce({
+            ok: true,
+            point: { id: "pid_2" },
+        });
+
+        const result = await applyUploadQueueFileRow({
+            command: { name: "team1" },
+            requestRow: {
+                description: "schema",
+                totalCount: 1,
+                selectedParser: "ABC",
+                parserTimeoutSeconds: 60,
+            },
+            fileRow: {
+                originalFileName: "bench254_15_40.bench",
+                canApply: true,
+                applied: false,
+                parsedBenchmark: null,
+                parsedDelay: null,
+                parsedArea: null,
+                verdict: "verified",
+                checkerVersion: "ABC",
+                fileSize: 128,
+            },
+            circuitText: "bench data",
+        });
+
+        expect(result.ok).toBe(true);
+        expect(buildStoredFileName).toHaveBeenCalledWith(expect.objectContaining({
+            benchmark: "254",
+            delay: 13,
+            area: 39,
+        }));
+        expect(createPointForCommand).toHaveBeenCalledWith(expect.objectContaining({
+            benchmark: "254",
+            delay: 13,
+            area: 39,
+            status: "verified",
+        }));
+    });
+
     it("maps ABC assertion parser crash to user-friendly failed reason", async () => {
         parseInputBenchFileName
             .mockReturnValueOnce({
