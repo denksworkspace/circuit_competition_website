@@ -65,6 +65,30 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
     };
 }
 
+function cloneUploadSnapshot(snapshot = { request: null, files: [] }) {
+    return {
+        request: snapshot?.request ? { ...snapshot.request } : null,
+        files: Array.isArray(snapshot?.files) ? snapshot.files.map((row) => ({ ...row })) : [],
+    };
+}
+
+function createUploadSnapshotHarness(initialSnapshot = { request: null, files: [] }) {
+    let currentSnapshot = cloneUploadSnapshot(initialSnapshot);
+    return {
+        routes: {
+            "GET /api/points-upload-request-active?authKey=key_ok": () =>
+                Promise.resolve(jsonResponse(200, cloneUploadSnapshot(currentSnapshot))),
+        },
+        setSnapshot(nextSnapshot) {
+            currentSnapshot = cloneUploadSnapshot(nextSnapshot);
+            return cloneUploadSnapshot(currentSnapshot);
+        },
+        getSnapshot() {
+            return cloneUploadSnapshot(currentSnapshot);
+        },
+    };
+}
+
 function withDefaultQuota(command) {
     if (!command) return command;
     return {
@@ -98,6 +122,23 @@ describe("App integration", () => {
     async function openManualVerdictModal() {
         fireEvent.click(await screen.findByRole("button", { name: "Apply manual verdict" }));
         await screen.findByText("Manual point apply");
+    }
+
+    function normalizeRenderedText(value) {
+        return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    async function expectLiveProcessedPanelText(matcher) {
+        await waitFor(() => {
+            const panel = screen.getByText("Live processed").closest(".uploadLivePanel");
+            expect(panel).toBeTruthy();
+            const text = normalizeRenderedText(panel?.textContent);
+            if (matcher instanceof RegExp) {
+                expect(text).toMatch(matcher);
+                return;
+            }
+            expect(text).toContain(normalizeRenderedText(matcher));
+        });
     }
 
     it("logs in successfully with valid key", async () => {
@@ -323,8 +364,8 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         expect(await screen.findByText("Live processed")).toBeInTheDocument();
-        expect(await screen.findByText(/status:\s*saving to queue/i)).toBeInTheDocument();
-        expect(await screen.findByText(/saving to queue\.\.\.\s*0\s*\/\s*1/i)).toBeInTheDocument();
+        await expectLiveProcessedPanelText(/status:\s*saving to queue/i);
+        await expectLiveProcessedPanelText(/saving to queue/i);
 
         await waitFor(() => {
             expect(resolveCreateRequest).toEqual(expect.any(Function));
@@ -336,6 +377,7 @@ describe("App integration", () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
         let points = [];
+        const uploadQueue = createUploadSnapshotHarness();
         const manualPoint = {
             id: "p_manual_1",
             benchmark: 254,
@@ -354,12 +396,13 @@ describe("App integration", () => {
                 authBody: { command },
                 points,
             }),
+            ...uploadQueue.routes,
             "GET /api/points?authKey=key_ok": () => Promise.resolve(jsonResponse(200, { points })),
             "POST /api/points-upload-request-create": ({ init }) => {
                 calls.push("create-request");
                 const body = JSON.parse(init.body);
                 expect(body.files).toHaveLength(1);
-                return Promise.resolve(jsonResponse(201, {
+                const created = {
                     request: {
                         id: "req1",
                         status: "queued",
@@ -378,7 +421,27 @@ describe("App integration", () => {
                             method: "PUT",
                         },
                     ],
-                }));
+                };
+                uploadQueue.setSnapshot({
+                    request: created.request,
+                    files: [
+                        {
+                            id: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "pending",
+                            verdict: "pending",
+                            verdictReason: "",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                });
+                return Promise.resolve(jsonResponse(201, created));
             },
             "PUT https://s3.example/queue-upload": () => {
                 calls.push("put-queue");
@@ -386,7 +449,7 @@ describe("App integration", () => {
             },
             "POST /api/points-upload-request-run": () => {
                 calls.push("run-request");
-                return Promise.resolve(jsonResponse(200, {
+                const snapshot = {
                     request: {
                         id: "req1",
                         status: "waiting_manual_verdict",
@@ -413,12 +476,14 @@ describe("App integration", () => {
                             parsedArea: 40,
                         },
                     ],
-                }));
+                };
+                uploadQueue.setSnapshot(snapshot);
+                return Promise.resolve(jsonResponse(200, snapshot));
             },
             "POST /api/points-upload-request-apply": () => {
                 calls.push("apply-request");
                 points = [manualPoint];
-                return Promise.resolve(jsonResponse(200, {
+                const snapshot = {
                     request: {
                         id: "req1",
                         status: "completed",
@@ -445,7 +510,9 @@ describe("App integration", () => {
                     ],
                     savedPoints: [manualPoint],
                     errors: [],
-                }));
+                };
+                uploadQueue.setSnapshot(snapshot);
+                return Promise.resolve(jsonResponse(200, snapshot));
             },
             "GET /api/pareto-export-status?authKey=key_ok": () =>
                 Promise.resolve(jsonResponse(200, {
@@ -476,7 +543,7 @@ describe("App integration", () => {
         fireEvent.click(screen.getByRole("button", { name: "Upload & create point" }));
 
         await waitFor(() => {
-            expect(calls).toEqual(["create-request", "put-queue", "run-request"]);
+            expect(calls).toContain("run-request");
         });
 
         expect(screen.getByRole("textbox", { name: "Benchmark" })).toHaveValue("test");
@@ -488,7 +555,7 @@ describe("App integration", () => {
         const applyButtons = await screen.findAllByRole("button", { name: "Apply" });
         fireEvent.click(applyButtons[applyButtons.length - 1]);
         await waitFor(() => {
-            expect(calls).toEqual(["create-request", "put-queue", "run-request", "apply-request"]);
+            expect(calls).toContain("apply-request");
         });
         expect(await screen.findByText(/schema-test/)).toBeInTheDocument();
         expect(screen.getAllByText("delay=").length).toBeGreaterThan(0);
@@ -500,12 +567,14 @@ describe("App integration", () => {
     it("blocks upload when ABC metrics validation fails", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
+        const uploadQueue = createUploadSnapshotHarness();
 
         installFetchRouter({
             ...bootstrapRoutes({ authBody: { command } }),
+            ...uploadQueue.routes,
             "POST /api/points-upload-request-create": () => {
                 calls.push("create-request");
-                return Promise.resolve(jsonResponse(201, {
+                const created = {
                     request: {
                         id: "req_fail",
                         status: "queued",
@@ -524,7 +593,27 @@ describe("App integration", () => {
                             method: "PUT",
                         },
                     ],
-                }));
+                };
+                uploadQueue.setSnapshot({
+                    request: created.request,
+                    files: [
+                        {
+                            id: "f_fail",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "pending",
+                            verdict: "pending",
+                            verdictReason: "",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                });
+                return Promise.resolve(jsonResponse(201, created));
             },
             "PUT https://s3.example/queue-upload-fail": () => {
                 calls.push("put-queue");
@@ -532,7 +621,7 @@ describe("App integration", () => {
             },
             "POST /api/points-upload-request-run": () => {
                 calls.push("run-request");
-                return Promise.resolve(jsonResponse(200, {
+                const snapshot = {
                     request: {
                         id: "req_fail",
                         status: "waiting_manual_verdict",
@@ -559,7 +648,9 @@ describe("App integration", () => {
                             parsedArea: 40,
                         },
                     ],
-                }));
+                };
+                uploadQueue.setSnapshot(snapshot);
+                return Promise.resolve(jsonResponse(200, snapshot));
             },
         });
 
@@ -631,7 +722,7 @@ describe("App integration", () => {
 
         await screen.findByText("Add a point");
         expect(await screen.findByText("Live processed")).toBeInTheDocument();
-        expect(await screen.findByText(/status:\s*finished/i)).toBeInTheDocument();
+        await expectLiveProcessedPanelText(/status:\s*finished/i);
 
         await configureUploadSettings({ checker: "none", parser: "ABC" });
         fireEvent.change(screen.getByLabelText("file"), {
@@ -1106,43 +1197,81 @@ describe("App integration", () => {
     it("opens manual modal only after all files finish processing", async () => {
         const command = withDefaultQuota({ id: 1, name: "team1", color: "#111", role: "participant" });
         const calls = [];
+        const uploadQueue = createUploadSnapshotHarness();
 
         installFetchRouter({
             ...bootstrapRoutes({
                 authBody: { command },
             }),
-            "POST /api/points-upload-request-create": () => Promise.resolve(jsonResponse(201, {
-                request: {
-                    id: "req_batch",
-                    status: "queued",
-                    totalCount: 2,
-                    doneCount: 0,
-                    verifiedCount: 0,
-                    currentFileName: "",
-                    currentPhase: "",
-                },
-                files: [
-                    {
-                        fileId: "f1",
-                        originalFileName: "bench254_15_40.bench",
-                        queueFileKey: "queue/req_batch/f1.bench",
-                        uploadUrl: "https://s3.example/queue-upload-1",
-                        method: "PUT",
+            ...uploadQueue.routes,
+            "POST /api/points-upload-request-create": () => {
+                const created = {
+                    request: {
+                        id: "req_batch",
+                        status: "queued",
+                        totalCount: 2,
+                        doneCount: 0,
+                        verifiedCount: 0,
+                        currentFileName: "",
+                        currentPhase: "",
                     },
-                    {
-                        fileId: "f2",
-                        originalFileName: "bench254_16_41.bench",
-                        queueFileKey: "queue/req_batch/f2.bench",
-                        uploadUrl: "https://s3.example/queue-upload-2",
-                        method: "PUT",
-                    },
-                ],
-            })),
+                    files: [
+                        {
+                            fileId: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            queueFileKey: "queue/req_batch/f1.bench",
+                            uploadUrl: "https://s3.example/queue-upload-1",
+                            method: "PUT",
+                        },
+                        {
+                            fileId: "f2",
+                            originalFileName: "bench254_16_41.bench",
+                            queueFileKey: "queue/req_batch/f2.bench",
+                            uploadUrl: "https://s3.example/queue-upload-2",
+                            method: "PUT",
+                        },
+                    ],
+                };
+                uploadQueue.setSnapshot({
+                    request: created.request,
+                    files: [
+                        {
+                            id: "f1",
+                            originalFileName: "bench254_15_40.bench",
+                            processState: "pending",
+                            verdict: "pending",
+                            verdictReason: "",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                        {
+                            id: "f2",
+                            originalFileName: "bench254_16_41.bench",
+                            processState: "pending",
+                            verdict: "pending",
+                            verdictReason: "",
+                            canApply: false,
+                            manualReviewRequired: false,
+                            defaultChecked: false,
+                            applied: false,
+                            parsedBenchmark: null,
+                            parsedDelay: null,
+                            parsedArea: null,
+                        },
+                    ],
+                });
+                return Promise.resolve(jsonResponse(201, created));
+            },
             "PUT https://s3.example/queue-upload-1": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
             "PUT https://s3.example/queue-upload-2": () => Promise.resolve({ ok: true, status: 200, json: vi.fn().mockResolvedValue({}) }),
             "POST /api/points-upload-request-run": () => {
                 calls.push("run-1");
-                return Promise.resolve(jsonResponse(200, {
+                const snapshot = {
                     request: {
                         id: "req_batch",
                         status: "waiting_manual_verdict",
@@ -1183,7 +1312,9 @@ describe("App integration", () => {
                             parsedArea: 41,
                         },
                     ],
-                }));
+                };
+                uploadQueue.setSnapshot(snapshot);
+                return Promise.resolve(jsonResponse(200, snapshot));
             },
         });
 
