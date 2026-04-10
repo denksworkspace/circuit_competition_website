@@ -180,7 +180,6 @@ export function SentPointsSection({
                                 <div className="compactMain">
                                     <div className="compactTop">
                                         <span className="pill">benchmark: {p.benchmark}</span>
-                                        <span className="pill">description: {p.description}</span>
                                         <span className="pill">manual synthesis: {p.manualSynthesis ? "yes" : "no"}</span>
                                         <span className="pill subtle">added at: {formatPointCreatedAt(p.createdAt)}</span>
                                         <span className="pill">
