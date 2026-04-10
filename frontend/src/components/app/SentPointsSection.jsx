@@ -1,6 +1,7 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { statusColor } from "../../utils/pointUtils.js";
 import { formatIntNoGrouping } from "../../utils/numberUtils.js";
+import { formatPointCreatedAt } from "../../utils/dateTime.js";
 
 const PARETO_FRONT_ONLY_LABEL = "pareto front only";
 
@@ -179,7 +180,9 @@ export function SentPointsSection({
                                 <div className="compactMain">
                                     <div className="compactTop">
                                         <span className="pill">benchmark: {p.benchmark}</span>
+                                        <span className="pill">description: {p.description}</span>
                                         <span className="pill">manual synthesis: {p.manualSynthesis ? "yes" : "no"}</span>
+                                        <span className="pill subtle">added at: {formatPointCreatedAt(p.createdAt)}</span>
                                         <span className="pill">
                                             <span className="dot" style={{ background: statusColor(p.status) }} />
                                             {p.status}

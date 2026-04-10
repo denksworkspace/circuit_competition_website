@@ -31,6 +31,7 @@ import { buildStoredFileName, uid } from "../../../api/_lib/uploadQueueToken.js"
 import { parseInputBenchFileName } from "../../../api/_lib/benchInputName.js";
 import { getAigStatsFromBenchText } from "../../../api/_lib/abc.js";
 import { checkDuplicatePointByCircuit } from "../../../api/_lib/duplicateCheck.js";
+import { verifyCircuitWithTruth } from "../../../api/_lib/pointVerification.js";
 import { buildPresignedPutUrl } from "../../../api/_lib/s3Presign.js";
 import { createPointForCommand } from "../../../api/_lib/pointsWrite.js";
 import { applyUploadQueueFileRow, processUploadQueueFile } from "../../../api/_lib/uploadQueueProcessing.js";
@@ -77,6 +78,10 @@ describe("api/_lib/uploadQueueProcessing", () => {
             duplicate: false,
             blockedByCheckError: false,
         });
+        verifyCircuitWithTruth.mockResolvedValueOnce({
+            ok: true,
+            equivalent: false,
+        });
 
         const result = await processUploadQueueFile({
             fileRow: { originalFileName: "bench254_15_40.bench" },
@@ -87,6 +92,45 @@ describe("api/_lib/uploadQueueProcessing", () => {
 
         expect(result.verdict).toBe("non-verified");
         expect(result.defaultChecked).toBe(true);
+        expect(result.canApply).toBe(true);
+        expect(result.manualReviewRequired).toBe(true);
+    });
+
+    it("keeps failed verdict rows available for manual apply without preselecting them", async () => {
+        parseInputBenchFileName
+            .mockReturnValueOnce({
+                ok: true,
+                benchmark: 254,
+                delay: 15,
+                area: 40,
+            })
+            .mockReturnValueOnce({
+                ok: true,
+                benchmark: 254,
+                delay: 15,
+                area: 40,
+            });
+        getAigStatsFromBenchText.mockResolvedValueOnce({
+            ok: true,
+            area: 40,
+            depth: 15,
+        });
+        checkDuplicatePointByCircuit.mockResolvedValueOnce({
+            duplicate: false,
+            blockedByCheckError: false,
+        });
+
+        const result = await processUploadQueueFile({
+            fileRow: { originalFileName: "bench254_15_40.bench" },
+            requestRow: { selectedParser: "ABC", selectedChecker: "ABC" },
+            command: { name: "team1" },
+            circuitText: "bench data",
+        });
+
+        expect(result.verdict).toBe("failed");
+        expect(result.canApply).toBe(true);
+        expect(result.manualReviewRequired).toBe(true);
+        expect(result.defaultChecked).toBe(false);
     });
 
     it("does not preselect manual apply for duplicates", async () => {

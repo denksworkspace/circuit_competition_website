@@ -8,6 +8,10 @@ async function migratePointsSchema() {
     try {
         await sql`
           alter table public.points
+          add column if not exists description text
+        `;
+        await sql`
+          alter table public.points
           add column if not exists lifecycle_status text
         `;
         await sql`
@@ -17,6 +21,29 @@ async function migratePointsSchema() {
         await sql`
           alter table public.points
           add column if not exists manual_synthesis boolean not null default false
+        `;
+        await sql`
+          do $$
+          begin
+            if exists (
+              select 1
+              from information_schema.columns
+              where table_schema = 'public'
+                and table_name = 'points'
+                and column_name = 'name'
+            ) then
+              update public.points
+              set description = coalesce(nullif(btrim(description), ''), nullif(btrim(name), ''), 'circuit')
+              where description is null
+                 or btrim(description) = '';
+            else
+              update public.points
+              set description = 'circuit'
+              where description is null
+                 or btrim(description) = '';
+            end if;
+          end
+          $$;
         `;
         await sql`
           update public.points
@@ -31,6 +58,10 @@ async function migratePointsSchema() {
           update public.points
           set status = 'non-verified'
           where lower(coalesce(btrim(status), '')) not in ('non-verified', 'verified', 'failed')
+        `;
+        await sql`
+          alter table public.points
+          alter column description set default 'circuit'
         `;
         await sql`
           alter table public.points

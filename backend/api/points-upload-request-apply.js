@@ -8,6 +8,7 @@ import { ensureUploadQueueSchema, normalizeUploadRequestRow, normalizeUploadRequ
 import {
     finalizeUploadRequestPareto,
     getCommandByAuthKey,
+    isManualApplyCandidate,
     loadUploadRequestSnapshot,
     refreshUploadRequestCounters,
 } from "./_lib/uploadQueueOps.js";
@@ -97,8 +98,8 @@ export default async function handler(req, res) {
     const selectedIds = new Set(fileIds);
     const unresolvedSelectedIds = new Set(fileIds);
     const statusesToSync = new Set();
-    const rowsToSave = rows.filter((row) => !row.manualReviewRequired || selectedIds.has(row.id));
-    const rowsToDrop = rows.filter((row) => row.manualReviewRequired && !selectedIds.has(row.id));
+    const rowsToSave = rows.filter((row) => !isManualApplyCandidate(row) || selectedIds.has(row.id));
+    const rowsToDrop = rows.filter((row) => isManualApplyCandidate(row) && !selectedIds.has(row.id));
     const availableRowIds = new Set(rows.map((row) => row.id));
     for (const row of rowsToDrop) {
         await sql`

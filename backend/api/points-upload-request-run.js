@@ -23,6 +23,7 @@ import {
     finalizeUploadRequestPareto,
     findNextPendingUploadFile,
     getCommandByAuthKey,
+    isManualApplyCandidate,
     isUploadStopRequested,
     loadUploadRequestSnapshot,
     markRemainingAsNonProcessed,
@@ -159,7 +160,7 @@ async function saveAutoEligibleRows({
     signal,
 }) {
     const rows = await listSavableUploadFiles(requestId);
-    const rowsToSave = rows.filter((row) => !row.manualReviewRequired || row.defaultChecked);
+    const rowsToSave = rows.filter((row) => !isManualApplyCandidate(row) || row.defaultChecked);
     const statusesToSync = new Set();
 
     if (rowsToSave.length > 0) {

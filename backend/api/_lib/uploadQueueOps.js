@@ -177,6 +177,10 @@ function shouldComputeParetoForSnapshot({ paretoMode }) {
     return true;
 }
 
+export function isManualApplyCandidate(fileRow) {
+    return !Boolean(fileRow?.applied) && Boolean(fileRow?.canApply) && Boolean(fileRow?.manualReviewRequired);
+}
+
 export async function getCommandByAuthKey(authKey) {
     const result = await withDbRetry(() => sql`
       select id, name, role, max_single_upload_bytes, total_upload_quota_bytes, uploaded_bytes_total, max_multi_file_batch_count,
@@ -296,8 +300,9 @@ export async function refreshUploadRequestCounters(requestId) {
     const pendingCount = Math.max(0, Number(row.pending_count || 0));
     const savablePendingCount = Math.max(0, Number(row.savable_pending_count || 0));
     const manualPendingCount = Math.max(0, Number(row.manual_pending_count || 0));
+    const actionableManualPendingCount = manualPendingCount;
     let nextStatus = null;
-    if (pendingCount <= 0 && manualPendingCount > 0 && !autoManualWindow) {
+    if (pendingCount <= 0 && actionableManualPendingCount > 0 && !autoManualWindow) {
         nextStatus = REQUEST_STATUS_WAITING_MANUAL_VERDICT;
     } else if (pendingCount <= 0 && savablePendingCount <= 0) {
         nextStatus = REQUEST_STATUS_COMPLETED;
@@ -326,7 +331,7 @@ export async function refreshUploadRequestCounters(requestId) {
         verifiedCount,
         pendingCount,
         savablePendingCount,
-        manualPendingCount,
+        manualPendingCount: actionableManualPendingCount,
         nextStatus,
     };
 }

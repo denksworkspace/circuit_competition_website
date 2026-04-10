@@ -6,7 +6,7 @@ vi.mock("../../api/_lib/pointsStatus.js", () => ({
 }));
 
 import { sql } from "@vercel/postgres";
-import { refreshUploadRequestCounters } from "../../api/_lib/uploadQueueOps.js";
+import { isManualApplyCandidate, refreshUploadRequestCounters } from "../../api/_lib/uploadQueueOps.js";
 
 describe("uploadQueueOps", () => {
     beforeEach(() => {
@@ -34,5 +34,23 @@ describe("uploadQueueOps", () => {
         const updateSql = String(sql.mock.calls[1]?.[0]?.raw?.join(" ") || "");
         expect(updateSql).toContain("status = case");
         expect(updateSql).toContain("finished_at = case");
+    });
+
+    it("treats only apply-able manual review rows as manual apply candidates", () => {
+        expect(isManualApplyCandidate({
+            applied: false,
+            canApply: true,
+            manualReviewRequired: true,
+        })).toBe(true);
+        expect(isManualApplyCandidate({
+            applied: false,
+            canApply: false,
+            manualReviewRequired: true,
+        })).toBe(false);
+        expect(isManualApplyCandidate({
+            applied: true,
+            canApply: true,
+            manualReviewRequired: true,
+        })).toBe(false);
     });
 });

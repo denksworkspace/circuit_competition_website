@@ -2,6 +2,7 @@
 import { DELETE_PREVIEW_LIMIT } from "../../constants/appConstants.js";
 import { statusColor } from "../../utils/pointUtils.js";
 import { formatIntNoGrouping } from "../../utils/numberUtils.js";
+import { formatPointCreatedAt } from "../../utils/dateTime.js";
 
 export function FindPointsSection({
     deletePrefix,
@@ -58,8 +59,9 @@ export function FindPointsSection({
                         <div className="compactMain">
                             <div className="compactTop">
                                 <span className="pill subtle">by {p.sender}</span>
-                                <span className="pill">name: {p.description}</span>
+                                <span className="pill">description: {p.description}</span>
                                 <span className="pill">manual synthesis: {p.manualSynthesis ? "yes" : "no"}</span>
+                                <span className="pill subtle">added at: {formatPointCreatedAt(p.createdAt)}</span>
                                 <span className="pill">
                                     <span className="dot" style={{ background: statusColor(p.status) }} />
                                     {p.status}

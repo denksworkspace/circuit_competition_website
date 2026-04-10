@@ -1,5 +1,6 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { formatIntNoGrouping } from "../utils/numberUtils.js";
+import { formatPointCreatedAt } from "../utils/dateTime.js";
 
 export function CustomTooltip({ active, payload }) {
     if (!active || !payload || payload.length === 0) return null;
@@ -37,8 +38,13 @@ export function CustomTooltip({ active, payload }) {
             </div>
 
             <div className="tooltipRow">
-                <span className="tooltipKey">name:</span>
+                <span className="tooltipKey">description:</span>
                 <span className="tooltipVal">{point.description}</span>
+            </div>
+
+            <div className="tooltipRow">
+                <span className="tooltipKey">added at:</span>
+                <span className="tooltipVal">{formatPointCreatedAt(point.createdAt)}</span>
             </div>
 
             <div className="tooltipRow">

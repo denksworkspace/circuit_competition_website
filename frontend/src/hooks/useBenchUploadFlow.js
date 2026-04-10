@@ -89,7 +89,7 @@ function buildManualRows(files, { manualFlowEnabled = true } = {}) {
             return {
                 key: String(row.id || ""),
                 fileId: String(row.id || ""),
-                checked: Boolean(row?.defaultChecked) && verdict === "non-verified",
+                checked: Boolean(row?.defaultChecked),
                 disabled: !row?.canApply,
                 bench: row?.parsedBenchmark || "-",
                 delay: Number.isFinite(Number(row?.parsedDelay)) ? Number(row.parsedDelay) : "-",

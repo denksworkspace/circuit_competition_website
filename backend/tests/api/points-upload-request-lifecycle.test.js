@@ -40,6 +40,7 @@ vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
     finalizeUploadRequestPareto: vi.fn(),
     findNextPendingUploadFile: vi.fn(),
     getCommandByAuthKey: vi.fn(),
+    isManualApplyCandidate: vi.fn((row) => !row?.applied && Boolean(row?.canApply) && Boolean(row?.manualReviewRequired)),
     isUploadStopRequested: vi.fn(async () => false),
     loadUploadRequestSnapshot: vi.fn(),
     markRemainingAsNonProcessed: vi.fn(),
