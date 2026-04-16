@@ -155,6 +155,8 @@ export default async function handler(req, res) {
                   manual_review_required = false,
                   updated_at = now()
               where id = ${row.id}
+                and not applied
+                and point_id is null
             `;
             doneCount += 1;
             report({ doneCount });
@@ -170,7 +172,8 @@ export default async function handler(req, res) {
         statusesToSync.add(String(applied?.point?.status || "").trim().toLowerCase());
         await sql`
           update public.upload_request_files
-          set applied = true,
+          set verdict = coalesce(${String(row?.verdict || "").trim() || null}, verdict),
+              applied = true,
               point_id = ${applied.pointId},
               final_file_name = ${applied.finalFileName},
               can_apply = false,

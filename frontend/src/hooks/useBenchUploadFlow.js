@@ -312,7 +312,6 @@ export function useBenchUploadFlow({
     const pollPausedExternallyRef = useRef(false);
     const isPageUnloadingRef = useRef(false);
     const queueUploadInFlightRef = useRef(false);
-    const runDriverRef = useRef({ requestId: "", controller: null });
 
     useEffect(() => {
         if (typeof window === "undefined") return undefined;
@@ -332,10 +331,6 @@ export function useBenchUploadFlow({
             if (uploadAbortRef.current && !isPageUnloadingRef.current) {
                 uploadAbortRef.current.abort();
                 uploadAbortRef.current = null;
-            }
-            if (runDriverRef.current?.controller && !isPageUnloadingRef.current) {
-                runDriverRef.current.controller.abort();
-                runDriverRef.current = { requestId: "", controller: null };
             }
         };
     }, []);
@@ -529,56 +524,6 @@ export function useBenchUploadFlow({
         }
     }, [clearBlockingRequestControls]);
 
-    const startUploadRunDriver = useCallback(({ authKey, requestId }) => {
-        const normalizedAuthKey = String(authKey || "").trim();
-        const normalizedRequestId = String(requestId || "").trim();
-        if (!normalizedAuthKey || !normalizedRequestId || queueUploadInFlightRef.current) return;
-
-        const activeDriver = runDriverRef.current;
-        if (activeDriver?.requestId === normalizedRequestId && activeDriver?.controller) {
-            return;
-        }
-        if (activeDriver?.controller) {
-            activeDriver.controller.abort();
-        }
-
-        const controller = new AbortController();
-        runDriverRef.current = {
-            requestId: normalizedRequestId,
-            controller,
-        };
-
-        void (async () => {
-            try {
-                while (!controller.signal.aborted) {
-                    const snapshot = await runPointsUploadRequest({
-                        authKey: normalizedAuthKey,
-                        requestId: normalizedRequestId,
-                        signal: controller.signal,
-                    });
-                    updateStateFromSnapshot(snapshot);
-                    const status = String(snapshot?.request?.status || "").trim().toLowerCase();
-                    if (!isRunnableRequestStatus(status)) {
-                        if (status && status !== WAITING_MANUAL_REQUEST_STATUS && status !== FREEZED_REQUEST_STATUS) {
-                            await refreshPointsAfterRequest();
-                            if (status === "completed" && typeof onPointsPersisted === "function") {
-                                await onPointsPersisted(normalizedAuthKey);
-                            }
-                        }
-                        break;
-                    }
-                }
-            } catch (error) {
-                if (error?.name === "AbortError") return;
-                wakePolling();
-            } finally {
-                if (runDriverRef.current?.controller === controller) {
-                    runDriverRef.current = { requestId: "", controller: null };
-                }
-            }
-        })();
-    }, [onPointsPersisted, refreshPointsAfterRequest, updateStateFromSnapshot, wakePolling]);
-
     async function requestStopUpload() {
         if (!isUploading || !activeRequestIdRef.current) return;
         setIsUploadStopping(true);
@@ -677,7 +622,6 @@ export function useBenchUploadFlow({
             }
             activeRequestIdRef.current = requestId;
             isPreRunUploadRef.current = false;
-            wakePolling();
 
             const uploadRows = Array.isArray(created?.files) ? created.files : [];
             if (uploadRows.length !== benchFiles.length) {
@@ -725,10 +669,12 @@ export function useBenchUploadFlow({
                 queueUploadInFlightRef.current = false;
             }
 
-            startUploadRunDriver({
+            const initialRunSnapshot = await runPointsUploadRequest({
                 authKey: authKeyDraft,
                 requestId,
+                signal: controller.signal,
             });
+            updateStateFromSnapshot(initialRunSnapshot);
             wakePolling();
             setDescriptionDraft("");
             clearFileInput();
@@ -982,12 +928,6 @@ export function useBenchUploadFlow({
                             pollPausedExternallyRef.current = true;
                             return;
                         }
-                        if (isRunnableRequestStatus(status)) {
-                            startUploadRunDriver({
-                                authKey,
-                                requestId: hiddenRequestId,
-                            });
-                        }
                         pollPausedExternallyRef.current = false;
                         scheduleNext(ACTIVE_QUEUE_STATUS_POLL_MS);
                     } catch (error) {
@@ -1022,12 +962,6 @@ export function useBenchUploadFlow({
                         const status = String(trackedSnapshot?.request?.status || "").toLowerCase();
                         const hasRunnableRequest = Boolean(trackedSnapshot?.request?.id) && isRunnableRequestStatus(status);
                         const hasBlockingRequest = Boolean(trackedSnapshot?.request?.id) && isBlockingRequestStatus(status);
-                        if (hasRunnableRequest) {
-                            startUploadRunDriver({
-                                authKey,
-                                requestId: trackedRequestId,
-                            });
-                        }
                         if (isExternallyManagedQueueStatus(status)) {
                             pollPausedExternallyRef.current = true;
                             if (pollTimerRef.current) {
@@ -1069,12 +1003,6 @@ export function useBenchUploadFlow({
                 const status = String(active?.request?.status || "").toLowerCase();
                 const hasRunnableRequest = Boolean(active?.request?.id) && isRunnableRequestStatus(status);
                 const hasBlockingRequest = Boolean(active?.request?.id) && isBlockingRequestStatus(status);
-                if (hasRunnableRequest) {
-                    startUploadRunDriver({
-                        authKey,
-                        requestId: String(active?.request?.id || ""),
-                    });
-                }
                 if (isExternallyManagedQueueStatus(status)) {
                     pollPausedExternallyRef.current = true;
                     if (pollTimerRef.current) {
@@ -1123,7 +1051,7 @@ export function useBenchUploadFlow({
             pollPausedExternallyRef.current = false;
             pollLoopRef.current = null;
         };
-    }, [authKeyDraft, currentCommand, startUploadRunDriver, updateStateFromSnapshot]);
+    }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
 
     const showUploadMonitor = Boolean(uploadProgress) || uploadLiveRows.length > 0;
 

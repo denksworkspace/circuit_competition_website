@@ -1,4 +1,5 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockReq, createMockRes } from "../helpers/mockHttp.js";
 
@@ -33,7 +34,10 @@ vi.mock("../../api/_lib/uploadQueue.js", () => ({
         originalFileName: String(row?.original_file_name || ""),
         queueFileKey: String(row?.queue_file_key || ""),
         canApply: Boolean(row?.can_apply),
+        defaultChecked: Boolean(row?.default_checked),
+        manualReviewRequired: Boolean(row?.manual_review_required),
         applied: Boolean(row?.applied),
+        verdict: String(row?.verdict || ""),
     })),
 }));
 vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
@@ -269,6 +273,19 @@ describe("upload request lifecycle handlers", () => {
         expect(lastProgress.done).toBe(true);
         expect(Number(lastProgress.doneCount || 0)).toBe(2);
         expect(Number(lastProgress.totalCount || 0)).toBe(2);
+    });
+
+    it("run duplicate update guards already applied rows in source", () => {
+        const source = readFileSync(new URL("../../api/points-upload-request-run.js", import.meta.url), "utf8");
+        expect(source).toContain("set verdict = 'duplicate'");
+        expect(source).toContain("and not applied");
+        expect(source).toContain("and point_id is null");
+    });
+
+    it("apply success keeps the processed verdict in source", () => {
+        const source = readFileSync(new URL("../../api/points-upload-request-apply.js", import.meta.url), "utf8");
+        expect(source).toContain("set verdict = coalesce(");
+        expect(source).toContain("applied = true");
     });
 
     it("close cleans up non-applied queue files", async () => {
