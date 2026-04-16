@@ -193,6 +193,19 @@ export async function getCommandByAuthKey(authKey) {
     return result.rows[0];
 }
 
+export async function withUploadRequestLock(requestId, task) {
+    const key = String(requestId || "").trim();
+    if (!key) {
+        return await task();
+    }
+    await sql`select pg_advisory_lock(hashtext(${key}))`;
+    try {
+        return await task();
+    } finally {
+        await sql`select pg_advisory_unlock(hashtext(${key}))`;
+    }
+}
+
 export async function loadUploadRequestSnapshot({
     requestId,
     commandId,
@@ -249,6 +262,7 @@ export async function loadUploadRequestSnapshot({
             parsed_benchmark,
             parsed_delay,
             parsed_area,
+            content_hash,
             final_file_name,
             pareto_state,
             replaced_pareto_coords

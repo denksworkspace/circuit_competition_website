@@ -13,6 +13,7 @@ vi.mock("../../../api/_lib/abc.js", () => ({
 }));
 vi.mock("../../../api/_lib/duplicateCheck.js", () => ({
     checkDuplicatePointByCircuit: vi.fn(),
+    findRequestBatchDuplicate: vi.fn(async () => null),
 }));
 vi.mock("../../../api/_lib/pointVerification.js", () => ({
     CHECKER_ABC: "ABC",
@@ -30,7 +31,7 @@ vi.mock("../../../api/_lib/pointsWrite.js", () => ({
 import { buildStoredFileName, uid } from "../../../api/_lib/uploadQueueToken.js";
 import { parseInputBenchFileName } from "../../../api/_lib/benchInputName.js";
 import { getAigStatsFromBenchText } from "../../../api/_lib/abc.js";
-import { checkDuplicatePointByCircuit } from "../../../api/_lib/duplicateCheck.js";
+import { checkDuplicatePointByCircuit, findRequestBatchDuplicate } from "../../../api/_lib/duplicateCheck.js";
 import { verifyCircuitWithTruth } from "../../../api/_lib/pointVerification.js";
 import { buildPresignedPutUrl } from "../../../api/_lib/s3Presign.js";
 import { createPointForCommand } from "../../../api/_lib/pointsWrite.js";
@@ -39,6 +40,7 @@ import { applyUploadQueueFileRow, processUploadQueueFile } from "../../../api/_l
 describe("api/_lib/uploadQueueProcessing", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        findRequestBatchDuplicate.mockResolvedValue(null);
     });
 
     it("does not preselect manual apply for invalid file names", async () => {

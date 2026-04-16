@@ -5,6 +5,7 @@ import { parseBody, rejectMethod } from "./_lib/http.js";
 import { ensureCommandUploadSettingsSchema } from "./_lib/commandUploadSettings.js";
 import { auditCircuitMetrics, downloadPointCircuitText } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
+import { readBoundedConcurrency, runAsyncPool } from "./_lib/asyncPool.js";
 
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["POST"])) return;
@@ -58,14 +59,16 @@ export default async function handler(req, res) {
     const totalCount = Number(pointsRes.rows.length || 0);
     let processedCount = 0;
     report("scan", { done: false, error: null, doneCount: 0, totalCount, currentFileName: "" });
-    for (const point of pointsRes.rows) {
+    const concurrency = readBoundedConcurrency(process.env.ADMIN_SCAN_CONCURRENCY, 4, 8);
+    await runAsyncPool(pointsRes.rows, concurrency, async (point) => {
+        if (req?.abortSignal?.aborted) return;
         const pointId = String(point.id);
         const benchmark = String(point.benchmark || "");
         const fileName = String(point.file_name || "");
         report("scan", { done: false, error: null, doneCount: processedCount, totalCount, currentFileName: fileName });
 
         try {
-            report("download_point");
+            report("download_point", { done: false, error: null, doneCount: processedCount, totalCount, currentFileName: fileName });
             const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
             if (!downloaded.ok) {
                 mismatches.push({
@@ -74,34 +77,32 @@ export default async function handler(req, res) {
                     fileName,
                     reason: downloaded.reason,
                 });
-                continue;
-            }
-            const audited = await auditCircuitMetrics({
-                delay: Number(point.delay),
-                area: Number(point.area),
-                circuitText: downloaded.circuitText,
-                timeoutMs: metricsTimeoutMs,
-                signal: req?.abortSignal || null,
-                onProgress: (status) => report(status),
-            });
-            if (!audited.ok) {
-                mismatches.push({
-                    pointId,
-                    benchmark,
-                    fileName,
-                    reason: audited.reason,
+            } else {
+                const audited = await auditCircuitMetrics({
+                    delay: Number(point.delay),
+                    area: Number(point.area),
+                    circuitText: downloaded.circuitText,
+                    timeoutMs: metricsTimeoutMs,
+                    signal: req?.abortSignal || null,
+                    onProgress: () => {},
                 });
-                continue;
-            }
-            if (audited.mismatch) {
-                mismatches.push({
-                    pointId,
-                    benchmark,
-                    fileName,
-                    reason: audited.reason,
-                    actualDelay: audited.actualDelay,
-                    actualArea: audited.actualArea,
-                });
+                if (!audited.ok) {
+                    mismatches.push({
+                        pointId,
+                        benchmark,
+                        fileName,
+                        reason: audited.reason,
+                    });
+                } else if (audited.mismatch) {
+                    mismatches.push({
+                        pointId,
+                        benchmark,
+                        fileName,
+                        reason: audited.reason,
+                        actualDelay: audited.actualDelay,
+                        actualArea: audited.actualArea,
+                    });
+                }
             }
         } catch (error) {
             mismatches.push({
@@ -113,11 +114,11 @@ export default async function handler(req, res) {
         }
         processedCount += 1;
         report("scan", { done: false, error: null, doneCount: processedCount, totalCount, currentFileName: fileName });
-    }
+    });
 
     res.status(200).json({
         ok: true,
-        mismatches,
+        mismatches: mismatches.sort((lhs, rhs) => String(lhs.pointId || "").localeCompare(String(rhs.pointId || ""))),
         scannedPoints: processedCount,
     });
     report("done", { done: true, error: null, doneCount: processedCount, totalCount, currentFileName: "" });

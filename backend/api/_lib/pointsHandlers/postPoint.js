@@ -8,6 +8,8 @@ import {
 import { ensurePointsStatusConstraint } from "../pointsStatus.js";
 import { createPointForCommand } from "../pointsWrite.js";
 import { syncParetoFilenameCsvs } from "../paretoFilenameSync.js";
+import { downloadPointCircuitText } from "../pointVerification.js";
+import { sha256Hex } from "../circuitHash.js";
 
 export async function handlePostPoint(req, res) {
     await ensureCommandRolesSchema();
@@ -46,6 +48,15 @@ export async function handlePostPoint(req, res) {
     }
 
     const command = cmdRes.rows[0];
+    let circuitText = "";
+    let contentHash = "";
+    if (fileName) {
+        const downloaded = await downloadPointCircuitText(fileName);
+        if (downloaded.ok) {
+            circuitText = downloaded.circuitText;
+            contentHash = sha256Hex(downloaded.circuitText);
+        }
+    }
 
     const created = await createPointForCommand({
         command,
@@ -60,9 +71,15 @@ export async function handlePostPoint(req, res) {
         manualSynthesis: Boolean(manualSynthesis),
         fileSize,
         batchSize,
+        contentHash,
+        circuitText,
     });
     if (!created.ok) {
-        res.status(created.statusCode).json({ error: created.error });
+        res.status(created.statusCode).json({
+            error: created.error,
+            code: created.code || null,
+            point: created.duplicatePoint || null,
+        });
         return;
     }
     try {

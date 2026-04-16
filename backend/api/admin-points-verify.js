@@ -12,6 +12,7 @@ import {
 } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
+import { readBoundedConcurrency, runAsyncPool } from "./_lib/asyncPool.js";
 
 const ALLOWED_POINT_STATUSES = new Set(["non-verified", "verified", "failed"]);
 
@@ -102,7 +103,9 @@ export default async function handler(req, res) {
     const totalCount = Number(pointsRows.length || 0);
     let doneCount = 0;
     report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: "" });
-    for (const point of pointsRows) {
+    const concurrency = readBoundedConcurrency(process.env.ADMIN_SCAN_CONCURRENCY, 4, 8);
+    await runAsyncPool(pointsRows, concurrency, async (point) => {
+        if (req?.abortSignal?.aborted) return;
         const pointId = String(point.id);
         const benchmark = String(point.benchmark || "");
         const fileName = String(point.file_name || "");
@@ -122,48 +125,40 @@ export default async function handler(req, res) {
                     reason: downloaded.reason,
                     recommendedStatus: "non-verified",
                 });
-                doneCount += 1;
-                report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
-                continue;
-            }
-
-            const verified = await verifyCircuitWithTruth({
-                benchmark,
-                circuitText: downloaded.circuitText,
-                checkerVersion,
-                timeoutMs: verifyTimeoutMs,
-                timeoutSeconds: verifyTimeoutSeconds,
-                signal: req?.abortSignal || null,
-                onProgress: (status) => report(status),
-            });
-            if (!verified.ok) {
-                log.push({
-                    pointId,
+            } else {
+                const verified = await verifyCircuitWithTruth({
                     benchmark,
-                    fileName,
-                    sourceStatus,
-                    ok: false,
-                    reason: verified.reason,
-                    recommendedStatus: "non-verified",
+                    circuitText: downloaded.circuitText,
+                    checkerVersion,
+                    timeoutMs: verifyTimeoutMs,
+                    timeoutSeconds: verifyTimeoutSeconds,
+                    signal: req?.abortSignal || null,
+                    onProgress: () => {},
                 });
-                doneCount += 1;
-                report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
-                continue;
+                if (!verified.ok) {
+                    log.push({
+                        pointId,
+                        benchmark,
+                        fileName,
+                        sourceStatus,
+                        ok: false,
+                        reason: verified.reason,
+                        recommendedStatus: "non-verified",
+                    });
+                } else {
+                    log.push({
+                        pointId,
+                        benchmark,
+                        fileName,
+                        sourceStatus,
+                        ok: true,
+                        equivalent: verified.equivalent,
+                        recommendedStatus: verified.equivalent ? "verified" : "failed",
+                        checkerVersion,
+                        reason: verified.equivalent ? "Equivalent." : "Not equivalent.",
+                    });
+                }
             }
-
-            log.push({
-                pointId,
-                benchmark,
-                fileName,
-                sourceStatus,
-                ok: true,
-                equivalent: verified.equivalent,
-                recommendedStatus: verified.equivalent ? "verified" : "failed",
-                checkerVersion,
-                reason: verified.equivalent ? "Equivalent." : "Not equivalent.",
-            });
-            doneCount += 1;
-            report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
         } catch (error) {
             log.push({
                 pointId,
@@ -174,15 +169,15 @@ export default async function handler(req, res) {
                 reason: String(error?.message || "Verification failed."),
                 recommendedStatus: "non-verified",
             });
-            doneCount += 1;
-            report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
         }
-    }
+        doneCount += 1;
+        report("scan", { done: false, error: null, doneCount, totalCount, currentFileName: fileName });
+    });
 
     res.status(200).json({
         ok: true,
         checkerVersion,
-        log,
+        log: log.sort((lhs, rhs) => String(lhs.pointId || "").localeCompare(String(rhs.pointId || ""))),
     });
     report("done", { done: true, error: null, doneCount, totalCount, currentFileName: "" });
 }

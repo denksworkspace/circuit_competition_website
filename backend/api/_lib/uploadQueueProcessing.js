@@ -2,10 +2,11 @@
 import { buildStoredFileName, uid } from "./uploadQueueToken.js";
 import { parseInputBenchFileName } from "./benchInputName.js";
 import { getAigStatsFromBenchText } from "./abc.js";
-import { checkDuplicatePointByCircuit } from "./duplicateCheck.js";
+import { checkDuplicatePointByCircuit, findRequestBatchDuplicate } from "./duplicateCheck.js";
 import { verifyCircuitWithTruth, CHECKER_ABC, CHECKER_ABC_FAST_HEX, CHECKER_NONE } from "./pointVerification.js";
 import { buildPresignedPutUrl } from "./s3Presign.js";
 import { createPointForCommand } from "./pointsWrite.js";
+import { sha256Hex } from "./circuitHash.js";
 import {
     FILE_PROCESS_STATE_PROCESSED,
     FILE_VERDICT_BLOCKED,
@@ -352,13 +353,34 @@ export async function processUploadQueueFile({
         checkerEnabled,
         checkerVerdict: checkerOut.checkerVerdict,
     });
+    const contentHash = sha256Hex(circuitText);
 
-    const duplicateCheck = await checkDuplicatePointByCircuit({
+    const requestDuplicate = await findRequestBatchDuplicate({
+        requestId: requestRow?.id || "",
+        fileId: fileRow?.id || "",
         benchmark: parserOut.parsed.benchmark,
         delay: parserOut.parsed.delay,
         area: parserOut.parsed.area,
-        circuitText,
+        contentHash,
     });
+
+    const duplicateCheck = requestDuplicate
+        ? {
+            duplicate: true,
+            point: {
+                id: requestDuplicate.pointId || requestDuplicate.id,
+                fileName: requestDuplicate.fileName,
+                sender: "",
+            },
+            blockedByCheckError: false,
+            errorReason: "",
+        }
+        : await checkDuplicatePointByCircuit({
+            benchmark: parserOut.parsed.benchmark,
+            delay: parserOut.parsed.delay,
+            area: parserOut.parsed.area,
+            circuitText,
+        });
     throwIfAborted(signal);
     let verdict = finalStatus;
     let verdictReason = "";
@@ -400,6 +422,7 @@ export async function processUploadQueueFile({
         parsedBenchmark: String(parserOut.parsed.benchmark || ""),
         parsedDelay: Number(parserOut.parsed.delay),
         parsedArea: Number(parserOut.parsed.area),
+        contentHash,
         finalFileName: null,
         pointId: null,
         applied: false,
@@ -449,7 +472,17 @@ export async function applyUploadQueueFileRow({
         manualSynthesis: Boolean(requestRow.manualSynthesis),
         fileSize: fileRow.fileSize,
         batchSize: requestRow.totalCount,
+        contentHash: String(fileRow.contentHash || "").trim() || sha256Hex(circuitText),
+        circuitText,
     });
+    if (!created.ok && String(created.code || "") === "POINT_DUPLICATE") {
+        return {
+            ok: false,
+            duplicate: true,
+            duplicatePoint: created.duplicatePoint || null,
+            error: created.error || "Identical point already exists.",
+        };
+    }
     if (!created.ok) {
         return { ok: false, error: created.error || "Failed to save point." };
     }

@@ -3,6 +3,37 @@ import { applyDbEnvSelection } from "../server/dbEnvSelection.mjs";
 
 applyDbEnvSelection();
 
+async function ensurePointsDuplicateGuardIndex() {
+    const duplicateCheckRes = await sql`
+      select benchmark, delay, area, content_hash
+      from public.points
+      where lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        and content_hash is not null
+        and btrim(content_hash) <> ''
+      group by benchmark, delay, area, content_hash
+      having count(*) > 1
+      limit 1
+    `;
+    if (duplicateCheckRes.rows.length > 0) {
+        const duplicate = duplicateCheckRes.rows[0];
+        console.warn("points schema migration: duplicate guard index skipped because duplicates already exist", {
+            benchmark: String(duplicate?.benchmark || ""),
+            delay: Number(duplicate?.delay),
+            area: Number(duplicate?.area),
+            contentHash: String(duplicate?.content_hash || ""),
+        });
+        return false;
+    }
+    await sql`
+      create unique index if not exists points_active_duplicate_guard_uidx
+      on public.points(benchmark, delay, area, content_hash)
+      where lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        and content_hash is not null
+        and btrim(content_hash) <> ''
+    `;
+    return true;
+}
+
 async function migratePointsSchema() {
     await sql`begin`;
     try {
@@ -89,6 +120,7 @@ async function migratePointsSchema() {
           create index if not exists points_benchmark_content_hash_idx
           on public.points(benchmark, content_hash)
         `;
+        await ensurePointsDuplicateGuardIndex();
         await sql`commit`;
     } catch (error) {
         await sql`rollback`;

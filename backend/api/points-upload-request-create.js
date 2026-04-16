@@ -195,7 +195,28 @@ export default async function handler(req, res) {
     }
 
     const createdReq = await sql`
-      select *
+      select
+        id,
+        command_id,
+        status,
+        stop_requested,
+        selected_parser,
+        selected_checker,
+        parser_timeout_seconds,
+        checker_timeout_seconds,
+        description,
+        manual_synthesis,
+        auto_manual_window,
+        total_count,
+        done_count,
+        verified_count,
+        pareto_front_count,
+        current_file_name,
+        current_phase,
+        error,
+        created_at,
+        updated_at,
+        finished_at
       from public.upload_requests
       where id = ${requestId}
       limit 1

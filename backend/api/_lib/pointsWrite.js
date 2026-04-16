@@ -7,6 +7,9 @@ import {
 } from "./commandUploadSettings.js";
 import { addActionLog } from "./actionLogs.js";
 import { ensurePointsStatusConstraint } from "./pointsStatus.js";
+import { checkDuplicatePointByCircuit } from "./duplicateCheck.js";
+import { downloadPointCircuitText } from "./pointVerification.js";
+import { sha256Hex } from "./circuitHash.js";
 
 export const MAX_DESCRIPTION_LEN = 200;
 
@@ -52,6 +55,8 @@ export async function createPointForCommand({
     manualSynthesis = false,
     fileSize,
     batchSize,
+    contentHash = "",
+    circuitText = "",
 }) {
     await ensurePointsStatusConstraint();
 
@@ -107,6 +112,7 @@ export async function createPointForCommand({
     if (!isValidStatus(normalizedStatus)) {
         return { ok: false, statusCode: 400, error: "Invalid status." };
     }
+    const normalizedContentHash = String(contentHash || "").trim() || (circuitText ? sha256Hex(circuitText) : "");
 
     let quotaRow = null;
 
@@ -129,14 +135,67 @@ export async function createPointForCommand({
             quotaRow = quotaUpdate.rows[0];
         }
 
+        let duplicatePoint = null;
+        if (circuitText) {
+            const duplicateResult = await checkDuplicatePointByCircuit({
+                benchmark: String(benchmark),
+                delay,
+                area,
+                circuitText,
+            });
+            if (duplicateResult.blockedByCheckError) {
+                return {
+                    ok: false,
+                    statusCode: 422,
+                    error: duplicateResult.errorReason || "Failed to verify duplicates against existing points.",
+                };
+            }
+            duplicatePoint = duplicateResult.point;
+            if (duplicateResult.duplicate) {
+                return {
+                    ok: false,
+                    statusCode: 409,
+                    error: "Identical point already exists.",
+                    code: "POINT_DUPLICATE",
+                    duplicatePoint,
+                };
+            }
+        } else if (normalizedContentHash) {
+            const duplicateRes = await sql`
+              select id, file_name, sender
+              from public.points
+              where benchmark = ${String(benchmark)}
+                and delay = ${delay}
+                and area = ${area}
+                and content_hash = ${normalizedContentHash}
+                and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+              order by created_at desc
+              limit 1
+            `;
+            if (duplicateRes.rows.length > 0) {
+                duplicatePoint = {
+                    id: String(duplicateRes.rows[0].id || ""),
+                    fileName: String(duplicateRes.rows[0].file_name || ""),
+                    sender: String(duplicateRes.rows[0].sender || ""),
+                };
+                return {
+                    ok: false,
+                    statusCode: 409,
+                    error: "Identical point already exists.",
+                    code: "POINT_DUPLICATE",
+                    duplicatePoint,
+                };
+            }
+        }
+
         const insert = await sql`
             insert into public.points (
                 id, benchmark, delay, area, description, sender, file_name, status,
-                lifecycle_status, checker_version, manual_synthesis, command_id
+                lifecycle_status, checker_version, manual_synthesis, command_id, content_hash
             )
             values (
                 ${id}, ${String(benchmark)}, ${delay}, ${area}, ${descriptionTrimmed}, ${command.name}, ${fileName}, ${normalizedStatus},
-                'main', ${checkerVersion ?? null}, ${Boolean(manualSynthesis)}, ${command.id}
+                'main', ${checkerVersion ?? null}, ${Boolean(manualSynthesis)}, ${command.id}, ${normalizedContentHash || null}
             )
             returning id, benchmark, delay, area, description, sender, file_name, status, checker_version, manual_synthesis
         `;
@@ -184,7 +243,34 @@ export async function createPointForCommand({
         }
         const message = String(error?.message || "").toLowerCase();
         if (message.includes("unique") || message.includes("duplicate")) {
-            return { ok: false, statusCode: 409, error: "Point with this file name already exists." };
+            let duplicatePoint = null;
+            if (normalizedContentHash) {
+                const duplicateRes = await sql`
+                  select id, file_name, sender
+                  from public.points
+                  where benchmark = ${String(benchmark)}
+                    and delay = ${delay}
+                    and area = ${area}
+                    and content_hash = ${normalizedContentHash}
+                    and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+                  order by created_at desc
+                  limit 1
+                `;
+                if (duplicateRes.rows.length > 0) {
+                    duplicatePoint = {
+                        id: String(duplicateRes.rows[0].id || ""),
+                        fileName: String(duplicateRes.rows[0].file_name || ""),
+                        sender: String(duplicateRes.rows[0].sender || ""),
+                    };
+                }
+            }
+            return {
+                ok: false,
+                statusCode: 409,
+                error: duplicatePoint ? "Identical point already exists." : "Point with this file name already exists.",
+                code: duplicatePoint ? "POINT_DUPLICATE" : "POINT_FILE_NAME_DUPLICATE",
+                duplicatePoint,
+            };
         }
         return { ok: false, statusCode: 500, error: "Failed to save point." };
     }

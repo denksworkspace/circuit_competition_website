@@ -117,6 +117,7 @@ export async function ensureUploadQueueSchema() {
                 parsed_benchmark text,
                 parsed_delay integer,
                 parsed_area integer,
+                content_hash text,
                 final_file_name text,
                 pareto_state text not null default '',
                 replaced_pareto_coords text not null default '',
@@ -136,6 +137,10 @@ export async function ensureUploadQueueSchema() {
             await sql`
               alter table public.upload_request_files
               add column if not exists manual_review_required boolean not null default false
+            `;
+            await sql`
+              alter table public.upload_request_files
+              add column if not exists content_hash text
             `;
             await sql`
               alter table public.upload_request_files
@@ -223,6 +228,7 @@ export function normalizeUploadRequestFileRow(row) {
         parsedBenchmark: row.parsed_benchmark ? String(row.parsed_benchmark) : null,
         parsedDelay: row.parsed_delay == null ? null : Number(row.parsed_delay),
         parsedArea: row.parsed_area == null ? null : Number(row.parsed_area),
+        contentHash: row.content_hash ? String(row.content_hash) : null,
         finalFileName: row.final_file_name ? String(row.final_file_name) : null,
         paretoState: String(row.pareto_state || ""),
         replacedParetoCoords: (() => {

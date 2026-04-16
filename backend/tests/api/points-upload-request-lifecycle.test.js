@@ -45,6 +45,7 @@ vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
     loadUploadRequestSnapshot: vi.fn(),
     markRemainingAsNonProcessed: vi.fn(),
     refreshUploadRequestCounters: vi.fn(),
+    withUploadRequestLock: vi.fn(async (_requestId, task) => await task()),
 }));
 vi.mock("../../api/_lib/queueS3.js", () => ({
     deleteQueueObject: vi.fn(),

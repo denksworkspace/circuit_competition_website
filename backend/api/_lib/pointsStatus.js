@@ -2,6 +2,44 @@
 import { sql } from "@vercel/postgres";
 
 let pointsStatusConstraintReadyPromise = null;
+let duplicateGuardIndexWarningShown = false;
+
+async function ensurePointsDuplicateGuardIndex() {
+    const duplicateCheckRes = await sql`
+      select benchmark, delay, area, content_hash
+      from public.points
+      where lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        and content_hash is not null
+        and btrim(content_hash) <> ''
+      group by benchmark, delay, area, content_hash
+      having count(*) > 1
+      limit 1
+    `;
+    if (duplicateCheckRes.rows.length > 0) {
+        if (!duplicateGuardIndexWarningShown) {
+            duplicateGuardIndexWarningShown = true;
+            const duplicate = duplicateCheckRes.rows[0];
+            console.warn(
+                "points duplicate guard index skipped: existing duplicates remain",
+                {
+                    benchmark: String(duplicate?.benchmark || ""),
+                    delay: Number(duplicate?.delay),
+                    area: Number(duplicate?.area),
+                    contentHash: String(duplicate?.content_hash || ""),
+                }
+            );
+        }
+        return false;
+    }
+    await sql`
+      create unique index if not exists points_active_duplicate_guard_uidx
+      on public.points(benchmark, delay, area, content_hash)
+      where lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+        and content_hash is not null
+        and btrim(content_hash) <> ''
+    `;
+    return true;
+}
 
 export async function ensurePointsStatusConstraint() {
     if (!pointsStatusConstraintReadyPromise) {
@@ -17,6 +55,10 @@ export async function ensurePointsStatusConstraint() {
             await sql`
               alter table public.points
               add column if not exists manual_synthesis boolean not null default false
+            `;
+            await sql`
+              alter table public.points
+              add column if not exists content_hash text
             `;
             await sql`
               do $$
@@ -92,6 +134,11 @@ export async function ensurePointsStatusConstraint() {
                 )
               )
             `;
+            await sql`
+              create index if not exists points_benchmark_content_hash_idx
+              on public.points(benchmark, content_hash)
+            `;
+            await ensurePointsDuplicateGuardIndex();
         })().catch((error) => {
             pointsStatusConstraintReadyPromise = null;
             throw error;

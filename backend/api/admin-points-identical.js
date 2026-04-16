@@ -1,5 +1,4 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-import crypto from "node:crypto";
 import { sql } from "@vercel/postgres";
 import { ensureCommandRolesSchema, ROLE_ADMIN } from "./_roles.js";
 import { parseBody, rejectMethod } from "./_lib/http.js";
@@ -7,20 +6,8 @@ import { downloadPointCircuitText } from "./_lib/pointVerification.js";
 import { setVerifyProgress } from "./_lib/verifyProgress.js";
 import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 import { syncParetoFilenameCsvs } from "./_lib/paretoFilenameSync.js";
-
-function normalizeCircuitTextForHash(textRaw) {
-    return String(textRaw || "")
-        .replace(/^\uFEFF/, "")
-        .replace(/\r\n?/g, "\n")
-        .trimEnd();
-}
-
-function sha256Hex(textRaw) {
-    return crypto
-        .createHash("sha256")
-        .update(normalizeCircuitTextForHash(textRaw), "utf8")
-        .digest("hex");
-}
+import { sha256Hex } from "./_lib/circuitHash.js";
+import { readBoundedConcurrency, runAsyncPool } from "./_lib/asyncPool.js";
 
 let pointsContentHashSchemaReadyPromise = null;
 
@@ -87,44 +74,27 @@ async function scanIdenticalGroups(req, res, report) {
     const totalCount = Number(pointsRes.rows.length || 0);
     report("scan", { done: false, doneCount: 0, totalCount, currentFileName: "" });
 
-    for (const row of pointsRes.rows) {
-        if (req?.abortSignal?.aborted) {
-            report("cancelled", { done: true, error: "Stopped by admin." });
-            return;
-        }
+    const scanRows = [];
+    const concurrency = readBoundedConcurrency(process.env.ADMIN_SCAN_CONCURRENCY, 4, 8);
+    await runAsyncPool(pointsRes.rows, concurrency, async (row) => {
+        if (req?.abortSignal?.aborted) return;
         const pointId = String(row.id || "");
         const fileName = String(row.file_name || "");
         const benchmark = String(row.benchmark || "");
-        report("scan", {
-            done: false,
-            doneCount: scanned + failures.length,
-            totalCount,
-            currentFileName: fileName,
-        });
         let hash = String(row.content_hash || "").trim();
         if (!hash) {
             const downloaded = await downloadPointCircuitText(fileName, { signal: req?.abortSignal || null });
             if (!downloaded.ok) {
                 const reason = downloaded.reason || "Failed to download point file.";
-                failures.push({
-                    pointId,
-                    fileName,
-                    benchmark,
-                    reason,
-                });
-                log.push({
-                    pointId,
-                    fileName,
-                    success: false,
-                    reason,
-                });
+                failures.push({ pointId, fileName, benchmark, reason });
+                log.push({ pointId, fileName, success: false, reason });
                 report("scan", {
                     done: false,
                     doneCount: scanned + failures.length,
                     totalCount,
                     currentFileName: fileName,
                 });
-                continue;
+                return;
             }
             hash = sha256Hex(downloaded.circuitText);
             await sql`
@@ -134,10 +104,7 @@ async function scanIdenticalGroups(req, res, report) {
                 and (content_hash is null or btrim(content_hash) = '')
             `;
         }
-
-        const key = `${benchmark}|${hash}`;
-        if (!byHash.has(key)) byHash.set(key, []);
-        byHash.get(key).push({
+        scanRows.push({
             id: pointId,
             benchmark,
             delay: Number(row.delay),
@@ -160,6 +127,15 @@ async function scanIdenticalGroups(req, res, report) {
             totalCount,
             currentFileName: fileName,
         });
+    });
+    if (req?.abortSignal?.aborted) {
+        report("cancelled", { done: true, error: "Stopped by admin." });
+        return;
+    }
+    for (const item of scanRows) {
+        const key = `${item.benchmark}|${item.hash}`;
+        if (!byHash.has(key)) byHash.set(key, []);
+        byHash.get(key).push(item);
     }
 
     const groups = Array.from(byHash.values())

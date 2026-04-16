@@ -42,6 +42,9 @@ describe("api/admin-points-identical", () => {
             if (text.includes("from public.commands") && text.includes("auth_key")) {
                 return Promise.resolve({ rows: [{ id: 1, role: "admin" }], rowCount: 1 });
             }
+            if (text.includes("group by benchmark, delay, area, content_hash")) {
+                return Promise.resolve({ rows: [], rowCount: 0 });
+            }
             if (text.includes("from public.points") && text.includes("content_hash")) {
                 return Promise.resolve({
                     rows: [
@@ -88,7 +91,9 @@ describe("api/admin-points-identical", () => {
         expect(updateHashQueries).toHaveLength(2);
         const pointsScanQuery = sql.mock.calls.find((call) => {
             const text = queryTextFromSqlCall(call);
-            return text.includes("from public.points") && text.includes("content_hash");
+            return text.includes("from public.points")
+                && text.includes("content_hash")
+                && text.includes("lower(coalesce(lifecycle_status, 'main')) = 'main'");
         });
         expect(queryTextFromSqlCall(pointsScanQuery || [])).toContain("lower(coalesce(lifecycle_status, 'main')) = 'main'");
     });
@@ -98,6 +103,9 @@ describe("api/admin-points-identical", () => {
             const text = Array.isArray(strings) ? strings.join(" ").toLowerCase() : "";
             if (text.includes("from public.commands") && text.includes("auth_key")) {
                 return Promise.resolve({ rows: [{ id: 1, role: "admin" }], rowCount: 1 });
+            }
+            if (text.includes("group by benchmark, delay, area, content_hash")) {
+                return Promise.resolve({ rows: [], rowCount: 0 });
             }
             if (text.includes("from public.points") && text.includes("content_hash")) {
                 return Promise.resolve({
