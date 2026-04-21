@@ -73,6 +73,10 @@ describe("server/dbEnvSelection", () => {
         process.env.USE_RESERVE_DB = "2";
         process.env.DATABASE_URL = "postgresql://primary-db";
         process.env.POSTGRES_URL = "postgresql://primary-pooler";
+        delete process.env.EXTRA_DATABASE_URL;
+        delete process.env.EXTRA_POSTGRES_URL;
+        delete process.env.DATABASE_URL_EXTRA;
+        delete process.env.POSTGRES_URL_EXTRA;
 
         expect(() => applyDbEnvSelection()).toThrow(
             "USE_RESERVE_DB=2 but EXTRA DB env is missing. Set EXTRA_DATABASE_URL/EXTRA_POSTGRES_URL (or DATABASE_URL_EXTRA/POSTGRES_URL_EXTRA)."
