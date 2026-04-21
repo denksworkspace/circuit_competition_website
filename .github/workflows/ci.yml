@@ -52,6 +52,10 @@ jobs:
       RESERVE_DATABASE_URL: ${{ secrets.RESERVE_DATABASE_URL }}
       POSTGRES_URL_RESERVE: ${{ secrets.POSTGRES_URL_RESERVE }}
       DATABASE_URL_RESERVE: ${{ secrets.DATABASE_URL_RESERVE }}
+      EXTRA_POSTGRES_URL: ${{ secrets.EXTRA_POSTGRES_URL }}
+      EXTRA_DATABASE_URL: ${{ secrets.EXTRA_DATABASE_URL }}
+      POSTGRES_URL_EXTRA: ${{ secrets.POSTGRES_URL_EXTRA }}
+      DATABASE_URL_EXTRA: ${{ secrets.DATABASE_URL_EXTRA }}
       BACKEND_HEALTHCHECK_URL: ${{ secrets.BACKEND_HEALTHCHECK_URL }}
       FRONTEND_HEALTHCHECK_URL: ${{ secrets.FRONTEND_HEALTHCHECK_URL }}
       MAINTENANCE_API_URL: ${{ secrets.MAINTENANCE_API_URL }}
@@ -99,9 +103,16 @@ jobs:
           use_reserve="$(printf '%s' "${USE_RESERVE_DB:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
           reserve_postgres_url="${RESERVE_POSTGRES_URL:-${POSTGRES_URL_RESERVE:-}}"
           reserve_database_url="${RESERVE_DATABASE_URL:-${DATABASE_URL_RESERVE:-}}"
+          extra_postgres_url="${EXTRA_POSTGRES_URL:-${POSTGRES_URL_EXTRA:-}}"
+          extra_database_url="${EXTRA_DATABASE_URL:-${DATABASE_URL_EXTRA:-}}"
           if [ "$use_reserve" = "1" ] || [ "$use_reserve" = "true" ] || [ "$use_reserve" = "yes" ] || [ "$use_reserve" = "on" ] || [ "$use_reserve" = "reserve" ]; then
             if [ -z "$reserve_postgres_url" ] && [ -z "$reserve_database_url" ]; then
               echo "::error::USE_RESERVE_DB is enabled, but reserve DB secrets are missing. Set RESERVE_POSTGRES_URL/RESERVE_DATABASE_URL (or POSTGRES_URL_RESERVE/DATABASE_URL_RESERVE)."
+              exit 1
+            fi
+          elif [ "$use_reserve" = "2" ] || [ "$use_reserve" = "extra" ]; then
+            if [ -z "$extra_postgres_url" ] && [ -z "$extra_database_url" ]; then
+              echo "::error::USE_RESERVE_DB=2, but EXTRA DB secrets are missing. Set EXTRA_POSTGRES_URL/EXTRA_DATABASE_URL (or POSTGRES_URL_EXTRA/DATABASE_URL_EXTRA)."
               exit 1
             fi
           else
@@ -159,6 +170,24 @@ jobs:
             export POSTGRES_URL="$selected_postgres_url"
             export DATABASE_URL="$selected_database_url"
             echo "Using reserve DB for migration (USE_RESERVE_DB=1)."
+          elif [ "$use_reserve" = "2" ] || [ "$use_reserve" = "extra" ]; then
+            selected_postgres_url="${EXTRA_POSTGRES_URL:-${POSTGRES_URL_EXTRA:-}}"
+            selected_database_url="${EXTRA_DATABASE_URL:-${DATABASE_URL_EXTRA:-}}"
+            if [ -z "$selected_postgres_url" ] && [ -z "$selected_database_url" ]; then
+              echo "::error::USE_RESERVE_DB=2, but EXTRA DB secrets are missing."
+              exit 1
+            fi
+            if [ -z "$selected_postgres_url" ] && [ -n "$selected_database_url" ]; then
+              selected_postgres_url="$selected_database_url"
+            fi
+            if [ -z "$selected_database_url" ] && [ -n "$selected_postgres_url" ]; then
+              selected_database_url="$selected_postgres_url"
+            fi
+            export EXTRA_POSTGRES_URL="$selected_postgres_url"
+            export EXTRA_DATABASE_URL="$selected_database_url"
+            export POSTGRES_URL="$selected_postgres_url"
+            export DATABASE_URL="$selected_database_url"
+            echo "Using EXTRA DB for migration (USE_RESERVE_DB=2)."
           else
             if [ -z "${POSTGRES_URL:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
               export POSTGRES_URL="${DATABASE_URL}"
