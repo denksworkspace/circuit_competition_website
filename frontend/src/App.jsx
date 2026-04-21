@@ -809,7 +809,7 @@ export default function App() {
 
     function downloadBenchmarksExcel() {
         const rows = points.filter((p) => p.benchmark !== "test");
-        const header = ["bench", "pareto_front", "minimal_area"];
+        const header = ["bench", "minimum area", "minimum delay", "pareto front"];
 
         const lines = [header];
         for (let bench = 200; bench <= 299; bench += 1) {
@@ -824,10 +824,12 @@ export default function App() {
                 .map((p) => `(${Math.trunc(p.delay)}, ${Math.trunc(p.area)})`)
                 .join(", ");
             const minimalArea = benchPoints.reduce((best, point) => Math.min(best, Number(point.area)), Number.POSITIVE_INFINITY);
+            const minimalDepth = benchPoints.reduce((best, point) => Math.min(best, Number(point.delay)), Number.POSITIVE_INFINITY);
             const row = [
                 String(bench),
-                paretoPoints,
                 Number.isFinite(minimalArea) ? String(Math.trunc(minimalArea)) : "",
+                Number.isFinite(minimalDepth) ? String(Math.trunc(minimalDepth)) : "",
+                paretoPoints,
             ];
 
             lines.push(row);
