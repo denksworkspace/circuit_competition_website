@@ -7,6 +7,10 @@ import { ensureTruthTablesSchema } from "./_lib/truthTables.js";
 import { ensureActionLogsSchema } from "./_lib/actionLogs.js";
 import { authenticateAdmin } from "./_lib/adminUsers/utils.js";
 import { setExportProgress } from "./_lib/exportProgress.js";
+import { ensureUploadQueueSchema } from "./_lib/uploadQueue.js";
+import { ensureMaintenanceSettingsSchema } from "./_lib/maintenanceMode.js";
+import { ensureSiteActivityLogsSchema } from "./_lib/siteActivityLogs.js";
+import { ensurePointsStatusConstraint } from "./_lib/pointsStatus.js";
 
 function buildFileName() {
     return `database-export-${new Date().toISOString().replace(/[:.]/g, "-")}.sql`;
@@ -14,11 +18,21 @@ function buildFileName() {
 
 const BACKUP_TABLES = [
     "commands",
+    "app_runtime_settings",
     "benchmark_registry",
     "truth_tables",
     "points",
+    "upload_requests",
+    "upload_request_files",
     "command_action_logs",
+    "site_activity_logs",
 ];
+
+const ID_SEQUENCE_TABLES = new Set([
+    "commands",
+    "command_action_logs",
+    "site_activity_logs",
+]);
 
 function quoteIdentifier(identRaw) {
     const ident = String(identRaw || "");
@@ -65,6 +79,20 @@ function buildInsertStatements(tableName, columns, rows) {
     return statements;
 }
 
+function buildIdSequenceResetStatement(tableName) {
+    if (!ID_SEQUENCE_TABLES.has(tableName)) return null;
+    const tableIdent = quotePublicTable(tableName);
+    const tableNameLiteral = toSqlLiteral(`public.${tableName}`);
+    return [
+        "SELECT setval(",
+        `  pg_get_serial_sequence(${tableNameLiteral}, 'id'),`,
+        `  COALESCE((SELECT MAX("id") FROM ${tableIdent}), 1),`,
+        `  EXISTS(SELECT 1 FROM ${tableIdent})`,
+        ")",
+        `WHERE pg_get_serial_sequence(${tableNameLiteral}, 'id') IS NOT NULL;`,
+    ].join("\n");
+}
+
 export default async function handler(req, res) {
     if (rejectMethod(req, res, ["GET"])) return;
 
@@ -77,8 +105,12 @@ export default async function handler(req, res) {
 
     await ensureCommandRolesSchema();
     await ensureCommandUploadSettingsSchema();
+    await ensurePointsStatusConstraint();
     await ensureTruthTablesSchema();
+    await ensureUploadQueueSchema();
+    await ensureMaintenanceSettingsSchema();
     await ensureActionLogsSchema();
+    await ensureSiteActivityLogsSchema();
 
     const admin = await authenticateAdmin(authKey);
     if (!admin) {
@@ -97,20 +129,38 @@ export default async function handler(req, res) {
     });
 
     try {
-        const [commandsRes, pointsRes, benchmarksRes, truthRes, logsRes] = await Promise.all([
+        const [
+            commandsRes,
+            settingsRes,
+            benchmarksRes,
+            truthRes,
+            pointsRes,
+            uploadRequestsRes,
+            uploadRequestFilesRes,
+            logsRes,
+            siteLogsRes,
+        ] = await Promise.all([
             sql`select * from public.commands order by id asc`,
-            sql`select * from public.points order by id asc`,
+            sql`select * from public.app_runtime_settings order by key asc`,
             sql`select * from public.benchmark_registry order by benchmark asc`,
             sql`select * from public.truth_tables order by benchmark asc`,
+            sql`select * from public.points order by id asc`,
+            sql`select * from public.upload_requests order by created_at asc, id asc`,
+            sql`select * from public.upload_request_files order by request_id asc, order_index asc, id asc`,
             sql`select * from public.command_action_logs order by id asc`,
+            sql`select * from public.site_activity_logs order by id asc`,
         ]);
 
         const tableRows = {
             commands: commandsRes.rows,
+            app_runtime_settings: settingsRes.rows,
             benchmark_registry: benchmarksRes.rows,
             truth_tables: truthRes.rows,
             points: pointsRes.rows,
+            upload_requests: uploadRequestsRes.rows,
+            upload_request_files: uploadRequestFilesRes.rows,
             command_action_logs: logsRes.rows,
+            site_activity_logs: siteLogsRes.rows,
         };
 
         const columnsByTable = {};
@@ -139,6 +189,8 @@ export default async function handler(req, res) {
             const columns = columnsByTable[tableName] || [];
             lines.push(`-- ${tableName}: ${rows.length} rows`);
             lines.push(...buildInsertStatements(tableName, columns, rows));
+            const sequenceReset = buildIdSequenceResetStatement(tableName);
+            if (sequenceReset) lines.push(sequenceReset);
             doneTables += 1;
             setExportProgress(progressToken, {
                 status: "building_sql",

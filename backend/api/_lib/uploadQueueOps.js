@@ -69,21 +69,7 @@ function buildReplacedCoordsPayload(replacedPoints) {
     );
 }
 
-async function computeUploadParetoState({ requestId, commandId, commandName = "" }) {
-    let resolvedCommandName = String(commandName || "").trim();
-    if (!resolvedCommandName) {
-        const commandRes = await withDbRetry(() => sql`
-          select name
-          from public.commands
-          where id = ${commandId}
-          limit 1
-        `);
-        resolvedCommandName = String(commandRes.rows[0]?.name || "").trim();
-    }
-    if (!resolvedCommandName) {
-        return { paretoFrontCount: 0, fileMetaById: new Map() };
-    }
-
+async function computeUploadParetoState({ requestId }) {
     const requestFilesRes = await withDbRetry(() => sql`
       select
         id,
@@ -112,8 +98,7 @@ async function computeUploadParetoState({ requestId, commandId, commandName = ""
     const pointsRes = await withDbRetry(() => sql`
       select id, benchmark, delay, area
       from public.points
-      where sender = ${resolvedCommandName}
-        and lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
+      where lower(coalesce(lifecycle_status, 'main')) <> 'deleted'
     `);
     const baselinePoints = pointsRes.rows
         .filter((row) => !requestPointIds.has(String(row.id || "")))
