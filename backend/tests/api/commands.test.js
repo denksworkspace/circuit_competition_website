@@ -52,6 +52,27 @@ describe("api/commands handler", () => {
         ]);
     });
 
+    it("allows view mode command list without auth key", async () => {
+        sql.mockResolvedValueOnce({
+            rows: [
+                { id: "2", name: "alpha", color: "#111", role: "admin" },
+                { id: "3", name: "beta", color: "#222", role: "participant" },
+            ],
+        });
+
+        const req = createMockReq({ method: "GET", query: { viewMode: "1" } });
+        const res = createMockRes();
+
+        await handler(req, res);
+
+        expect(ensureCommandRolesSchema).toHaveBeenCalledTimes(1);
+        expect(res.statusCode).toBe(200);
+        expect(res.body.commands).toEqual([
+            { id: 2, name: "alpha", color: "#111", role: "admin" },
+            { id: 3, name: "beta", color: "#222", role: "participant" },
+        ]);
+    });
+
     it("rejects missing auth key", async () => {
         const req = createMockReq({ method: "GET" });
         const res = createMockRes();

@@ -9,21 +9,25 @@ export function usePointActions({
     setLastAddedId,
     currentCommand,
     authKeyDraft,
+    readOnly = false,
 }) {
     const [actionPoint, setActionPoint] = useState(null);
 
     function getPointDownloadUrl(point) {
+        if (readOnly) return null;
         if (!point || !point.fileName || point.benchmark === "test" || !point.id) return null;
         return `download:${String(point.id)}`;
     }
 
     function canDeletePoint(point) {
+        if (readOnly) return false;
         if (!point) return false;
         if (point.benchmark === "test") return true;
         return Boolean(currentCommand && point.sender === currentCommand.name);
     }
 
     function canTestPoint(point) {
+        if (readOnly) return false;
         if (!point || point.benchmark === "test") return false;
         return Boolean(currentCommand);
     }

@@ -10,6 +10,7 @@ export const MAX_MULTI_FILE_BATCH_COUNT = 100;
 export const ROLE_ADMIN = "admin";
 export const ROLE_LEADER = "leader";
 export const ROLE_PARTICIPANT = "participant";
+export const ROLE_VIEW = "view";
 
 export const BENCH_INPUT_NAME_RE = /^(bench|ex)(2\d\d)_(\d+)_(\d+)\.bench$/i;
 

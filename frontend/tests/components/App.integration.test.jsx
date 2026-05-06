@@ -62,6 +62,8 @@ function bootstrapRoutes({ points = [], commands = [], authStatus = 200, authBod
             Promise.resolve(jsonResponse(200, { request: null, files: [] })),
         "GET /api/admin-users?authKey=key_ok&scope=all&limit=1000": () =>
             Promise.resolve(jsonResponse(200, { actionLogs: [] })),
+        "GET /api/maintenance-status?": () =>
+            Promise.resolve(jsonResponse(200, { maintenance: { enabled: false, activeForUser: false, bypass: false, message: "" } })),
     };
 }
 
@@ -180,6 +182,57 @@ describe("App integration", () => {
 
         expect(await screen.findByText("Invalid auth key.")).toBeInTheDocument();
         expect(screen.getByText("Access key required")).toBeInTheDocument();
+    });
+
+    it("enters persisted view mode with display-only controls", async () => {
+        const points = [
+            {
+                id: "p_view",
+                benchmark: 254,
+                delay: 10,
+                area: 100,
+                description: "schema",
+                sender: "team1",
+                fileName: "bench254_10_100_team1.bench",
+                status: "verified",
+                createdAt: "2026-04-01T00:00:00.000Z",
+            },
+        ];
+        const routes = {
+            ...bootstrapRoutes(),
+            "GET /api/points?viewMode=1": () => Promise.resolve(jsonResponse(200, { points })),
+            "GET /api/commands?viewMode=1": () =>
+                Promise.resolve(jsonResponse(200, {
+                    commands: [{ id: 1, name: "team1", color: "#111", role: "participant" }],
+                })),
+        };
+        installFetchRouter(routes);
+
+        const { unmount } = render(<App />);
+
+        fireEvent.click(await screen.findByRole("button", { name: "Enter view mode" }));
+
+        expect(await screen.findByText("Circuit Control Platform")).toBeInTheDocument();
+        expect(screen.getByText(/View!/)).toBeInTheDocument();
+        expect(screen.getByText("view")).toBeInTheDocument();
+        expect(localStorage.getItem("bench_view_mode")).toBe("1");
+        expect(localStorage.getItem("bench_auth_key")).toBeNull();
+        expect(screen.getByText("Find points")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Apply" })).toBeInTheDocument();
+        expect(screen.queryByText("Add a point")).not.toBeInTheDocument();
+        expect(screen.queryByText("Sent points")).not.toBeInTheDocument();
+        expect(screen.queryByText("Export benchmarks (CSV)")).not.toBeInTheDocument();
+        expect(screen.queryByText("Download circuit")).not.toBeInTheDocument();
+        expect(screen.queryByText("test checker")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+
+        unmount();
+        render(<App />);
+
+        expect(await screen.findByText("Circuit Control Platform")).toBeInTheDocument();
+        expect(screen.getByText(/View!/)).toBeInTheDocument();
     });
 
     it("clears invalid saved key on bootstrap", async () => {

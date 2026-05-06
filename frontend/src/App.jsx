@@ -9,6 +9,7 @@ import {
     MAX_MULTI_FILE_BATCH_COUNT,
     MAX_VALUE,
     ROLE_ADMIN,
+    ROLE_VIEW,
     STATUS_LIST,
 } from "./constants/appConstants.js";
 import { LoginPage } from "./components/app/LoginPage.jsx";
@@ -139,6 +140,7 @@ export default function App() {
         isAuthChecking,
         isBootstrapping,
         tryLogin,
+        enterViewMode,
         logout,
     } = useAppAuth({ setPoints, setCommands });
 
@@ -221,6 +223,7 @@ export default function App() {
     const metricsTimeoutQuotaSeconds = Math.max(1, Number(currentCommand?.abcMetricsTimeoutSeconds || 60));
     const [isAdminQuotaSettingsOpen, setIsAdminQuotaSettingsOpen] = useState(false);
     const isAdmin = currentCommand?.role === ROLE_ADMIN;
+    const isViewMode = currentCommand?.role === ROLE_VIEW;
     const canUseFastHex = isAdmin;
     const {
         isAdminSchemesExporting,
@@ -362,6 +365,7 @@ export default function App() {
         setLastAddedId,
         currentCommand,
         authKeyDraft,
+        readOnly: isViewMode,
     });
     const {
         selectedTestChecker,
@@ -475,6 +479,7 @@ export default function App() {
     } = useBenchUploadFlow({
         authKeyDraft,
         currentCommand,
+        readOnly: isViewMode,
         setPoints,
         setLastAddedId,
         onPointsPersisted: refreshParetoExportState,
@@ -1437,6 +1442,7 @@ export default function App() {
                 authError={authError}
                 onAuthKeyDraftChange={setAuthKeyDraft}
                 onLogin={tryLogin}
+                onEnterViewMode={enterViewMode}
             />
         );
     }
@@ -1459,24 +1465,26 @@ export default function App() {
                 </div>
 
                 <div className="topbarRight">
-                    <button
-                        type="button"
-                        className={hasNewPareto ? "bellButton hasNew" : "bellButton"}
-                        onClick={openParetoExportModal}
-                        aria-label="Open Pareto export"
-                        title={lastParetoExportAt
-                            ? `Last export: ${new Date(lastParetoExportAt).toISOString()}`
-                            : `No export yet. Baseline: ${toIsoDateTimeLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS)}`}
-                    >
-                        <img
-                            className="bellIcon paretoPortraitIcon"
-                            src={paretoPortraitImage}
-                            alt="Vilfredo Pareto portrait"
-                            loading="eager"
-                            decoding="async"
-                        />
-                        {hasNewPareto ? <span className="bellAlert">!</span> : null}
-                    </button>
+                    {!isViewMode ? (
+                        <button
+                            type="button"
+                            className={hasNewPareto ? "bellButton hasNew" : "bellButton"}
+                            onClick={openParetoExportModal}
+                            aria-label="Open Pareto export"
+                            title={lastParetoExportAt
+                                ? `Last export: ${new Date(lastParetoExportAt).toISOString()}`
+                                : `No export yet. Baseline: ${toIsoDateTimeLabel(DEFAULT_PARETO_EXPORT_BASELINE_UTC_MS)}`}
+                        >
+                            <img
+                                className="bellIcon paretoPortraitIcon"
+                                src={paretoPortraitImage}
+                                alt="Vilfredo Pareto portrait"
+                                loading="eager"
+                                decoding="async"
+                            />
+                            {hasNewPareto ? <span className="bellAlert">!</span> : null}
+                        </button>
+                    ) : null}
                     <div className="hello helloWithMeta">
                         <span>Hello,</span>
                         <b className="helloName">{currentCommand.name}!</b>
@@ -1499,11 +1507,13 @@ export default function App() {
                             {maintenanceStatus.enabled ? "server off" : "server on"}
                         </span>
                     ) : null}
-                    <div className="pill subtle">
-                        Multi-file quota: {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
-                    </div>
+                    {!isViewMode ? (
+                        <div className="pill subtle">
+                            Multi-file quota: {formatGb(remainingUploadBytes)}/{formatGb(totalUploadQuotaBytes)} GB
+                        </div>
+                    ) : null}
                     <button className="btn ghost small" type="button" onClick={logout}>
-                        Log out
+                        {isViewMode ? "Log in" : "Log out"}
                     </button>
                 </div>
             </header>
@@ -1547,40 +1557,43 @@ export default function App() {
                         onFitViewToAllVisiblePoints={fitViewToAllVisiblePoints}
                         truthTableOn={truthTableOn}
                         chartPointCount={plottedPoints.length}
+                        readOnly={isViewMode}
                     />
 
-                    <SentPointsSection
-                        myPoints={myPointsFiltered}
-                        sentPageItems={sentPageItems}
-                        sentTotal={sentTotal}
-                        sentStart={sentStart}
-                        sentPages={sentPages}
-                        sentPageClamped={sentPageClamped}
-                        onSentPageChange={setSentPage}
-                        onFocusPoint={focusPoint}
-                        onDownloadCircuit={downloadCircuit}
-                        getPointDownloadUrl={getPointDownloadUrl}
-                        submissionStatusFilter={submissionStatusFilter}
-                        toggleSubmissionStatus={toggleSubmissionStatus}
-                        submissionBenchmarkFilter={submissionBenchmarkFilter}
-                        submissionBenchmarkMenuRef={submissionBenchmarkMenuRef}
-                        submissionBenchmarkMenuOpen={submissionBenchmarkMenuOpen}
-                        submissionBenchmarkInputValue={submissionBenchmarkInputValue}
-                        onSubmissionBenchmarkInputChange={onSubmissionBenchmarkInputChange}
-                        onSubmissionBenchmarkInputFocus={onSubmissionBenchmarkInputFocus}
-                        onSubmissionBenchmarkInputBlur={onSubmissionBenchmarkInputBlur}
-                        onSubmissionBenchmarkInputKeyDown={onSubmissionBenchmarkInputKeyDown}
-                        submissionBenchmarkInputSuggestions={submissionBenchmarkInputSuggestions}
-                        onSelectSubmissionBenchmark={onSelectSubmissionBenchmark}
-                        submissionSortOrder={submissionSortOrder}
-                        onSubmissionSortOrderChange={setSubmissionSortOrder}
-                        submissionParetoOnly={submissionParetoOnly}
-                        onSubmissionParetoOnlyChange={setSubmissionParetoOnly}
-                        selectedSubmissionIdSet={selectedSubmissionIdSet}
-                        onToggleSubmissionSelected={setSubmissionSelected}
-                        onOpenDeleteSelectedModal={openDeleteSelectedSubmissionsModal}
-                        onResetSubmissionSelection={resetSubmissionSelection}
-                    />
+                    {!isViewMode ? (
+                        <SentPointsSection
+                            myPoints={myPointsFiltered}
+                            sentPageItems={sentPageItems}
+                            sentTotal={sentTotal}
+                            sentStart={sentStart}
+                            sentPages={sentPages}
+                            sentPageClamped={sentPageClamped}
+                            onSentPageChange={setSentPage}
+                            onFocusPoint={focusPoint}
+                            onDownloadCircuit={downloadCircuit}
+                            getPointDownloadUrl={getPointDownloadUrl}
+                            submissionStatusFilter={submissionStatusFilter}
+                            toggleSubmissionStatus={toggleSubmissionStatus}
+                            submissionBenchmarkFilter={submissionBenchmarkFilter}
+                            submissionBenchmarkMenuRef={submissionBenchmarkMenuRef}
+                            submissionBenchmarkMenuOpen={submissionBenchmarkMenuOpen}
+                            submissionBenchmarkInputValue={submissionBenchmarkInputValue}
+                            onSubmissionBenchmarkInputChange={onSubmissionBenchmarkInputChange}
+                            onSubmissionBenchmarkInputFocus={onSubmissionBenchmarkInputFocus}
+                            onSubmissionBenchmarkInputBlur={onSubmissionBenchmarkInputBlur}
+                            onSubmissionBenchmarkInputKeyDown={onSubmissionBenchmarkInputKeyDown}
+                            submissionBenchmarkInputSuggestions={submissionBenchmarkInputSuggestions}
+                            onSelectSubmissionBenchmark={onSelectSubmissionBenchmark}
+                            submissionSortOrder={submissionSortOrder}
+                            onSubmissionSortOrderChange={setSubmissionSortOrder}
+                            submissionParetoOnly={submissionParetoOnly}
+                            onSubmissionParetoOnlyChange={setSubmissionParetoOnly}
+                            selectedSubmissionIdSet={selectedSubmissionIdSet}
+                            onToggleSubmissionSelected={setSubmissionSelected}
+                            onOpenDeleteSelectedModal={openDeleteSelectedSubmissionsModal}
+                            onResetSubmissionSelection={resetSubmissionSelection}
+                        />
+                    ) : null}
                 </div>
 
                 <aside className="side">
@@ -1611,24 +1624,25 @@ export default function App() {
                         onShowParetoOnlyChange={setShowParetoOnly}
                     />
 
-                    <AddPointSection
-                        formatGb={formatGb}
-                        maxSingleUploadBytes={maxSingleUploadBytes}
-                        remainingUploadBytes={remainingUploadBytes}
-                        totalUploadQuotaBytes={totalUploadQuotaBytes}
-                        maxMultiFileBatchCount={maxMultiFileBatchCount}
-                        addPointFromFile={addPointFromFile}
-                        fileInputRef={fileInputRef}
-                        benchFiles={benchFiles}
-                        canAdd={canAdd}
-                        onFileChange={onFileChange}
-                        descriptionDraft={descriptionDraft}
-                        onDescriptionDraftChange={(value) => {
-                            setDescriptionDraft(value.slice(0, MAX_DESCRIPTION_LEN));
-                            setUploadError(" ");
-                        }}
-                        uploadError={uploadError}
-                        uploadVerdictNote={uploadVerdictNote}
+                    {!isViewMode ? (
+                        <AddPointSection
+                            formatGb={formatGb}
+                            maxSingleUploadBytes={maxSingleUploadBytes}
+                            remainingUploadBytes={remainingUploadBytes}
+                            totalUploadQuotaBytes={totalUploadQuotaBytes}
+                            maxMultiFileBatchCount={maxMultiFileBatchCount}
+                            addPointFromFile={addPointFromFile}
+                            fileInputRef={fileInputRef}
+                            benchFiles={benchFiles}
+                            canAdd={canAdd}
+                            onFileChange={onFileChange}
+                            descriptionDraft={descriptionDraft}
+                            onDescriptionDraftChange={(value) => {
+                                setDescriptionDraft(value.slice(0, MAX_DESCRIPTION_LEN));
+                                setUploadError(" ");
+                            }}
+                            uploadError={uploadError}
+                            uploadVerdictNote={uploadVerdictNote}
                             isUploading={isUploading}
                             isUploadStopping={isUploadStopping}
                             uploadProgress={uploadProgress}
@@ -1637,27 +1651,28 @@ export default function App() {
                             uploadLogText={uploadLogText}
                             onDownloadUploadLog={downloadUploadLog}
                             onStopUpload={requestStopUpload}
-                        selectedChecker={selectedChecker}
-                        onSelectedCheckerChange={setSelectedChecker}
-                        canUseFastHex={canUseFastHex}
-                        selectedParser={selectedParser}
-                        onSelectedParserChange={setSelectedParser}
-                        checkerTleSecondsDraft={checkerTleSecondsDraft}
-                        onCheckerTleSecondsDraftChange={setCheckerTleSecondsDraft}
-                        checkerTleMaxSeconds={verifyTimeoutQuotaSeconds}
-                        parserTleSecondsDraft={parserTleSecondsDraft}
-                        onParserTleSecondsDraftChange={setParserTleSecondsDraft}
-                        parserTleMaxSeconds={metricsTimeoutQuotaSeconds}
-                        manualSynthesis={manualSynthesis}
-                        onManualSynthesisChange={setManualSynthesis}
-                        autoManualWindow={autoManualWindow}
-                        onAutoManualWindowChange={setAutoManualWindow}
-                        isUploadSettingsOpen={isUploadSettingsOpen}
-                        onToggleUploadSettings={() => setIsUploadSettingsOpen((v) => !v)}
-                        showManualApplyButton={showManualApplyButton}
-                        onOpenManualApply={openManualApplyModal}
-                        uploadDisabledReason={uploadDisabledReason}
-                    />
+                            selectedChecker={selectedChecker}
+                            onSelectedCheckerChange={setSelectedChecker}
+                            canUseFastHex={canUseFastHex}
+                            selectedParser={selectedParser}
+                            onSelectedParserChange={setSelectedParser}
+                            checkerTleSecondsDraft={checkerTleSecondsDraft}
+                            onCheckerTleSecondsDraftChange={setCheckerTleSecondsDraft}
+                            checkerTleMaxSeconds={verifyTimeoutQuotaSeconds}
+                            parserTleSecondsDraft={parserTleSecondsDraft}
+                            onParserTleSecondsDraftChange={setParserTleSecondsDraft}
+                            parserTleMaxSeconds={metricsTimeoutQuotaSeconds}
+                            manualSynthesis={manualSynthesis}
+                            onManualSynthesisChange={setManualSynthesis}
+                            autoManualWindow={autoManualWindow}
+                            onAutoManualWindowChange={setAutoManualWindow}
+                            isUploadSettingsOpen={isUploadSettingsOpen}
+                            onToggleUploadSettings={() => setIsUploadSettingsOpen((v) => !v)}
+                            showManualApplyButton={showManualApplyButton}
+                            onOpenManualApply={openManualApplyModal}
+                            uploadDisabledReason={uploadDisabledReason}
+                        />
+                    ) : null}
 
                     {isAdmin ? (
                         <AdminSettingsSection
@@ -1804,12 +1819,13 @@ export default function App() {
                         testingPointLabel={testingPointLabel}
                         canDeletePoint={canDeletePoint}
                         onConfirmAndDeletePoint={confirmAndDeletePoint}
+                        readOnly={isViewMode}
                     />
                 </aside>
             </main>
 
             <PointActionModal
-                actionPoint={actionPoint}
+                actionPoint={isViewMode ? null : actionPoint}
                 closePointActionModal={closePointActionModal}
                 onDownloadCircuit={downloadCircuit}
                 getPointDownloadUrl={getPointDownloadUrl}
@@ -1825,7 +1841,7 @@ export default function App() {
             />
 
             <ManualPointApplyModal
-                open={isManualApplyOpen}
+                open={!isViewMode && isManualApplyOpen}
                 rows={manualApplyRows}
                 onToggle={setManualApplyChecked}
                 onApply={applyManualRows}
@@ -1835,7 +1851,7 @@ export default function App() {
             />
 
             <SubmissionsDeleteModal
-                open={isSubmissionsDeleteModalOpen}
+                open={!isViewMode && isSubmissionsDeleteModalOpen}
                 rows={submissionsDeleteRows}
                 onToggle={setSubmissionsDeleteChecked}
                 onApply={applyDeleteSelectedSubmissions}
@@ -1845,7 +1861,7 @@ export default function App() {
             />
 
             <ParetoExportModal
-                open={isParetoExportModalOpen}
+                open={!isViewMode && isParetoExportModalOpen}
                 dateMode={paretoExportDateMode}
                 onDateModeChange={setParetoExportDateMode}
                 fromDate={paretoExportDate}

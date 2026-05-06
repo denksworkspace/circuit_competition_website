@@ -1,13 +1,44 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
 import { useEffect, useState } from "react";
-import { fetchCommandByAuthKey, fetchCommands, fetchPoints } from "../services/apiClient.js";
+import { ROLE_VIEW } from "../constants/appConstants.js";
+import { fetchCommandByAuthKey, fetchCommands, fetchPoints, fetchViewCommands, fetchViewPoints } from "../services/apiClient.js";
+
+const AUTH_KEY_STORAGE = "bench_auth_key";
+const VIEW_MODE_STORAGE = "bench_view_mode";
+
+function buildViewCommand() {
+    return {
+        id: -1,
+        name: "View",
+        color: "#6b7280",
+        role: ROLE_VIEW,
+        maxSingleUploadBytes: 0,
+        totalUploadQuotaBytes: 0,
+        uploadedBytesTotal: 0,
+        remainingUploadBytes: 0,
+        maxMultiFileBatchCount: 1,
+        abcVerifyTimeoutSeconds: 60,
+        abcMetricsTimeoutSeconds: 60,
+        hasNewPareto: false,
+        lastParetoExportAt: null,
+    };
+}
 
 export function useAppAuth({ setPoints, setCommands }) {
-    const [authKeyDraft, setAuthKeyDraft] = useState(() => localStorage.getItem("bench_auth_key") || "");
+    const [authKeyDraft, setAuthKeyDraft] = useState(() => localStorage.getItem(AUTH_KEY_STORAGE) || "");
     const [currentCommand, setCurrentCommand] = useState(null);
     const [authError, setAuthError] = useState("");
     const [isAuthChecking, setIsAuthChecking] = useState(false);
     const [isBootstrapping, setIsBootstrapping] = useState(true);
+
+    async function loadViewMode() {
+        const [rows, dbCommands] = await Promise.all([fetchViewPoints(), fetchViewCommands()]);
+        setPoints(rows);
+        setCommands(dbCommands);
+        setCurrentCommand(buildViewCommand());
+        setAuthKeyDraft("");
+        setAuthError("");
+    }
 
     async function tryLogin(e) {
         e.preventDefault();
@@ -21,7 +52,8 @@ export function useAppAuth({ setPoints, setCommands }) {
             const cmd = await fetchCommandByAuthKey(k);
             if (!cmd) throw new Error("Invalid key.");
             const [rows, dbCommands] = await Promise.all([fetchPoints(k), fetchCommands(k)]);
-            localStorage.setItem("bench_auth_key", k);
+            localStorage.setItem(AUTH_KEY_STORAGE, k);
+            localStorage.removeItem(VIEW_MODE_STORAGE);
             setPoints(rows);
             setCommands(dbCommands);
             setCurrentCommand(cmd);
@@ -36,8 +68,26 @@ export function useAppAuth({ setPoints, setCommands }) {
         }
     }
 
+    async function enterViewMode() {
+        setIsAuthChecking(true);
+        try {
+            localStorage.removeItem(AUTH_KEY_STORAGE);
+            localStorage.setItem(VIEW_MODE_STORAGE, "1");
+            await loadViewMode();
+        } catch (err) {
+            localStorage.removeItem(VIEW_MODE_STORAGE);
+            setAuthError(err?.message || "Failed to enter view mode.");
+            setCurrentCommand(null);
+            setPoints([]);
+            setCommands([]);
+        } finally {
+            setIsAuthChecking(false);
+        }
+    }
+
     function logout() {
-        localStorage.removeItem("bench_auth_key");
+        localStorage.removeItem(AUTH_KEY_STORAGE);
+        localStorage.removeItem(VIEW_MODE_STORAGE);
         setCurrentCommand(null);
         setAuthKeyDraft("");
         setAuthError("");
@@ -47,7 +97,26 @@ export function useAppAuth({ setPoints, setCommands }) {
 
     useEffect(() => {
         let alive = true;
-        const savedKey = (localStorage.getItem("bench_auth_key") || "").trim();
+        const savedKey = (localStorage.getItem(AUTH_KEY_STORAGE) || "").trim();
+        const savedViewMode = localStorage.getItem(VIEW_MODE_STORAGE) === "1";
+        if (!savedKey && savedViewMode) {
+            loadViewMode()
+                .catch(() => {
+                    if (!alive) return;
+                    localStorage.removeItem(VIEW_MODE_STORAGE);
+                    setCurrentCommand(null);
+                    setPoints([]);
+                    setCommands([]);
+                    setAuthError("View mode is unavailable.");
+                })
+                .finally(() => {
+                    if (!alive) return;
+                    setIsBootstrapping(false);
+                });
+            return () => {
+                alive = false;
+            };
+        }
         if (!savedKey) {
             setPoints([]);
             setCommands([]);
@@ -69,7 +138,7 @@ export function useAppAuth({ setPoints, setCommands }) {
             })
             .catch(() => {
                 if (!alive) return;
-                localStorage.removeItem("bench_auth_key");
+                localStorage.removeItem(AUTH_KEY_STORAGE);
                 setCurrentCommand(null);
                 setPoints([]);
                 setCommands([]);
@@ -94,6 +163,7 @@ export function useAppAuth({ setPoints, setCommands }) {
         isAuthChecking,
         isBootstrapping,
         tryLogin,
+        enterViewMode,
         logout,
     };
 }

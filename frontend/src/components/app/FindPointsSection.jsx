@@ -23,6 +23,7 @@ export function FindPointsSection({
     testingPointLabel,
     canDeletePoint,
     onConfirmAndDeletePoint,
+    readOnly = false,
 }) {
     return (
         <section className="card listCard">
@@ -44,13 +45,15 @@ export function FindPointsSection({
                         placeholder="e.g. bench256_123"
                     />
                 </label>
-                <label className="field">
-                    <span>test checker</span>
-                    <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
-                        <option value="ABC">ABC</option>
-                        {canUseFastHex ? <option value="ABC_FAST_HEX">ABC fast hex</option> : null}
-                    </select>
-                </label>
+                {!readOnly ? (
+                    <label className="field">
+                        <span>test checker</span>
+                        <select value={selectedTestChecker} onChange={(e) => onSelectedTestCheckerChange(e.target.value)}>
+                            <option value="ABC">ABC</option>
+                            {canUseFastHex ? <option value="ABC_FAST_HEX">ABC fast hex</option> : null}
+                        </select>
+                    </label>
+                ) : null}
             </div>
 
             <div className="list compactList deleteListFixed">
@@ -82,14 +85,16 @@ export function FindPointsSection({
                         <button className="btn ghost small" onClick={() => onFocusPoint(p)}>
                             Find
                         </button>
-                        <button
-                            className="btn ghost small"
-                            onClick={() => onDownloadCircuit(p)}
-                            disabled={!getPointDownloadUrl(p)}
-                        >
-                            Download circuit
-                        </button>
-                        {canTestPoint(p) ? (
+                        {!readOnly ? (
+                            <button
+                                className="btn ghost small"
+                                onClick={() => onDownloadCircuit(p)}
+                                disabled={!getPointDownloadUrl(p)}
+                            >
+                                Download circuit
+                            </button>
+                        ) : null}
+                        {!readOnly && canTestPoint(p) ? (
                             <button
                                 className="btn ghost small"
                                 onClick={() => onTestPoint(p, selectedTestChecker)}
@@ -99,7 +104,7 @@ export function FindPointsSection({
                                 {testingPointId === p.id ? (testingPointLabel || "Testing...") : "Test"}
                             </button>
                         ) : null}
-                        {canDeletePoint(p) ? (
+                        {!readOnly && canDeletePoint(p) ? (
                             <button
                                 className="btn danger small"
                                 onClick={(e) => {

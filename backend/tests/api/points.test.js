@@ -71,6 +71,32 @@ describe("api/points handler", () => {
         expect(res.body.points[0].area).toBe(20);
     });
 
+    it("GET allows view mode points without auth key", async () => {
+        sql.mockResolvedValueOnce({
+            rows: [
+                {
+                    id: "id1",
+                    benchmark: "254",
+                    delay: "10",
+                    area: "20",
+                    description: "schema",
+                    sender: "team",
+                    file_name: "f.bench",
+                    status: "verified",
+                    checker_version: null,
+                },
+            ],
+        });
+
+        const req = createMockReq({ method: "GET", query: { viewMode: "1" } });
+        const res = createMockRes();
+        await handler(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.points[0].sender).toBe("team");
+        expect(res.body.points[0].delay).toBe(10);
+    });
+
     it("GET rejects missing auth key", async () => {
         const req = createMockReq({ method: "GET" });
         const res = createMockRes();

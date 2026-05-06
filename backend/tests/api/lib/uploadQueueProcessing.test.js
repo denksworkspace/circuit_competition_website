@@ -171,7 +171,7 @@ describe("api/_lib/uploadQueueProcessing", () => {
         expect(result.defaultChecked).toBe(false);
     });
 
-    it("assigns warning verdict for circuits containing both LUT and GND gate calls", async () => {
+    it("does not assign warning verdict for circuits containing both LUT and GND gate calls", async () => {
         parseInputBenchFileName
             .mockReturnValueOnce({
                 ok: true,
@@ -202,10 +202,10 @@ describe("api/_lib/uploadQueueProcessing", () => {
             circuitText: "n1 = LUT(a, b)\nn2 = gnd(n1)\n",
         });
 
-        expect(result.verdict).toBe("warning");
+        expect(result.verdict).toBe("non-verified");
         expect(result.canApply).toBe(true);
-        expect(result.defaultChecked).toBe(false);
-        expect(result.verdictReason).toContain("LUT and GND");
+        expect(result.defaultChecked).toBe(true);
+        expect(result.verdictReason).toBe("verification skipped or checker unavailable");
     });
 
     it("applies warning verdict rows as non-verified point status", async () => {

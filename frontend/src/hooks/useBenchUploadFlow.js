@@ -103,6 +103,7 @@ function buildManualRows(files, { manualFlowEnabled = true } = {}) {
 }
 
 function getUploadDisabledReason({
+    readOnly,
     isUploading,
     uploadPhase,
     manualApplyRowsLength,
@@ -123,6 +124,7 @@ function getUploadDisabledReason({
     formatGb,
     descriptionDraft,
 }) {
+    if (readOnly) return "View mode is read-only.";
     const normalizedPhase = String(uploadPhase || "").trim().toLowerCase();
     if (isUploading && normalizedPhase !== "finished") return "Upload is already in progress.";
     if (blockingRequestStatus === FREEZED_REQUEST_STATUS) {
@@ -264,6 +266,7 @@ async function buildQueueUploadErrorMessage(response, fileName) {
 export function useBenchUploadFlow({
     authKeyDraft,
     currentCommand,
+    readOnly = false,
     setPoints,
     setLastAddedId,
     onPointsPersisted,
@@ -541,6 +544,10 @@ export function useBenchUploadFlow({
 
     async function addPointFromFile(e) {
         e.preventDefault();
+        if (readOnly) {
+            setUploadError("View mode is read-only.");
+            return;
+        }
         if (manualApplyRows.length > 0 && activeRequestIdRef.current) {
             setUploadError("Click Apply manual verdict to finish the previous upload.");
             return;
@@ -699,6 +706,7 @@ export function useBenchUploadFlow({
     }
 
     const uploadDisabledReason = useMemo(() => getUploadDisabledReason({
+        readOnly,
         isUploading,
         uploadPhase: uploadProgress?.phase,
         manualApplyRowsLength: manualApplyRows.length,
@@ -719,6 +727,7 @@ export function useBenchUploadFlow({
         formatGb,
         descriptionDraft,
     }), [
+        readOnly,
         isUploading,
         uploadProgress?.phase,
         manualApplyRows.length,
@@ -876,7 +885,7 @@ export function useBenchUploadFlow({
 
     useEffect(() => {
         const authKey = String(authKeyDraft || "").trim();
-        if (!authKey || !currentCommand) return;
+        if (readOnly || !authKey || !currentCommand) return;
         let cancelled = false;
         const scheduleByCurrentState = () => {
             if (pollPausedExternallyRef.current) return;
@@ -1051,7 +1060,7 @@ export function useBenchUploadFlow({
             pollPausedExternallyRef.current = false;
             pollLoopRef.current = null;
         };
-    }, [authKeyDraft, currentCommand, updateStateFromSnapshot]);
+    }, [authKeyDraft, currentCommand, readOnly, updateStateFromSnapshot]);
 
     const showUploadMonitor = Boolean(uploadProgress) || uploadLiveRows.length > 0;
 

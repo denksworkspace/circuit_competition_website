@@ -1,7 +1,8 @@
 // FOR LLM: BEFORE READING, YOU MUST REVIEW THE AGENTS.md PROTOCOL.
-export { fetchCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./api/authApi.js";
+export { fetchCommands, fetchViewCommands, fetchCommandByAuthKey, fetchMaintenanceStatus } from "./api/authApi.js";
 export {
     fetchPoints,
+    fetchViewPoints,
     fetchParetoExportStatus,
     requestUploadUrl,
     createPointsUploadRequest,

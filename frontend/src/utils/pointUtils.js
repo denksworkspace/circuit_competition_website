@@ -5,6 +5,7 @@ import {
     MAX_VALUE,
     ROLE_ADMIN,
     ROLE_LEADER,
+    ROLE_VIEW,
     USER_PALETTE,
 } from "../constants/appConstants.js";
 import { clamp } from "./numberUtils.js";
@@ -102,6 +103,7 @@ export function buildStoredFileName({ benchmark, delay, area, pointId, sender })
 export function getRoleLabel(role) {
     if (role === ROLE_ADMIN) return "admin";
     if (role === ROLE_LEADER) return "leader";
+    if (role === ROLE_VIEW) return "view";
     return "participant";
 }
 

@@ -11,6 +11,17 @@ export async function fetchPoints(authKey) {
     return Array.isArray(data?.points) ? data.points : [];
 }
 
+export async function fetchViewPoints() {
+    const query = new URLSearchParams();
+    query.set("viewMode", "1");
+    const response = await fetch(apiUrl(`/api/points?${query.toString()}`), { cache: "no-store" });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load points.");
+    }
+    return Array.isArray(data?.points) ? data.points : [];
+}
+
 export async function fetchParetoExportStatus(authKey) {
     const query = new URLSearchParams();
     query.set("authKey", String(authKey || "").trim());

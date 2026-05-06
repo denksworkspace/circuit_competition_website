@@ -6,6 +6,7 @@ export function LoginPage({
     authError,
     onAuthKeyDraftChange,
     onLogin,
+    onEnterViewMode,
 }) {
     return (
         <div className="loginPage">
@@ -35,6 +36,14 @@ export function LoginPage({
 
                     <button className="btn primary" type="submit" disabled={isBootstrapping || isAuthChecking}>
                         {isAuthChecking ? "Checking..." : "Enter"}
+                    </button>
+                    <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={onEnterViewMode}
+                        disabled={isBootstrapping || isAuthChecking}
+                    >
+                        Enter view mode
                     </button>
                 </form>
             </div>

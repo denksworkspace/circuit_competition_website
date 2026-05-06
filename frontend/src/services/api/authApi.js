@@ -11,6 +11,17 @@ export async function fetchCommands(authKey) {
     return Array.isArray(data?.commands) ? data.commands : [];
 }
 
+export async function fetchViewCommands() {
+    const query = new URLSearchParams();
+    query.set("viewMode", "1");
+    const response = await fetch(apiUrl(`/api/commands?${query.toString()}`), { cache: "no-store" });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to load commands.");
+    }
+    return Array.isArray(data?.commands) ? data.commands : [];
+}
+
 export async function fetchCommandByAuthKey(authKey) {
     const response = await fetch(apiUrl("/api/auth"), {
         method: "POST",

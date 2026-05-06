@@ -13,7 +13,7 @@ export function Diamond({ cx, cy, r, fill, stroke, strokeWidth, onClick }) {
             tabIndex={-1}
             focusable="false"
             onMouseDown={(event) => event.preventDefault()}
-            style={{ cursor: "pointer" }}
+            style={{ cursor: onClick ? "pointer" : "default" }}
         />
     );
 }

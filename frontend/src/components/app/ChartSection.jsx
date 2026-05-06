@@ -51,6 +51,7 @@ export function ChartSection({
     onFitViewToAllVisiblePoints,
     truthTableOn,
     chartPointCount,
+    readOnly = false,
 }) {
     const sliderPercent = dateSliderMaxDays > 0
         ? Math.min(100, Math.max(0, (dateSliderDayOffset / dateSliderMaxDays) * 100))
@@ -77,7 +78,13 @@ export function ChartSection({
                         </div>
                     </div>
                     <div className="cardHint">
-                        Click any point on the chart to open actions: <b>Download</b>, <b>Test</b>, and <b>Delete</b>.
+                        {readOnly
+                            ? "Use filters and view controls to analyze the visible Pareto frontier."
+                            : (
+                                <>
+                                    Click any point on the chart to open actions: <b>Download</b>, <b>Test</b>, and <b>Delete</b>.
+                                </>
+                            )}
                     </div>
                 </div>
 
@@ -86,7 +93,7 @@ export function ChartSection({
                         <span className="dot" style={{ background: truthTableOn ? "#16a34a" : "#dc2626" }} />
                         {truthTableOn ? "truth table on" : "truth table off"}
                     </span>
-                    {isTestBenchSelected ? (
+                    {isTestBenchSelected && !readOnly ? (
                         <>
                             <button className="btn ghost" onClick={onGenerateRandomTestPoints}>
                                 Generate random points
@@ -97,9 +104,11 @@ export function ChartSection({
                         </>
                     ) : null}
 
-                    <button className="btn ghost" onClick={onDownloadBenchmarksExcel}>
-                        Export benchmarks (CSV)
-                    </button>
+                    {!readOnly ? (
+                        <button className="btn ghost" onClick={onDownloadBenchmarksExcel}>
+                            Export benchmarks (CSV)
+                        </button>
+                    ) : null}
                 </div>
             </div>
 
@@ -188,7 +197,7 @@ export function ChartSection({
 
                                 const fill = baseFill;
 
-                                const onClick = () => onOpenPointActionModal(payload.id);
+                                const onClick = readOnly ? undefined : () => onOpenPointActionModal(payload.id);
 
                                 if (isLatest) {
                                     return (
@@ -216,7 +225,7 @@ export function ChartSection({
                                         tabIndex={-1}
                                         focusable="false"
                                         onMouseDown={(e) => e.preventDefault()}
-                                        style={{ cursor: "pointer" }}
+                                        style={{ cursor: readOnly ? "default" : "pointer" }}
                                     />
                                 );
                             }}
