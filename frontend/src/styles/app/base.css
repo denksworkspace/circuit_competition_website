@@ -43,6 +43,24 @@ body {
     gap: 2px;
 }
 
+.brandTitleRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.brandMetricPills {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.brandMetricPill {
+    font-weight: 800;
+}
+
 .title {
     font-size: 16px;
     font-weight: 800;

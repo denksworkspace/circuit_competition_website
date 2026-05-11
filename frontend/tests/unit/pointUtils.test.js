@@ -4,6 +4,7 @@ import {
     buildAxis,
     buildStoredFileName,
     commandColor,
+    computeBenchmarkMinimumTotals,
     computeParetoFrontOriginal,
     computePlottedPoint,
     getRoleLabel,
@@ -131,5 +132,25 @@ describe("pointUtils", () => {
 
         const front = computeParetoFrontOriginal(points);
         expect(front.map((p) => p.id)).toEqual(["b", "d"]);
+    });
+
+    it("computeBenchmarkMinimumTotals sums benchmark minimum area and delay values", () => {
+        const totals = computeBenchmarkMinimumTotals([
+            { benchmark: "test", delay: 1, area: 1, status: "verified" },
+            { benchmark: "199", delay: 2, area: 2, status: "verified" },
+            { benchmark: "200", delay: 10, area: 80, status: "verified" },
+            { benchmark: "200", delay: 5, area: 100, status: "non-verified" },
+            { benchmark: "200", delay: 1, area: 1, status: "failed" },
+            { benchmark: "201", delay: 20, area: 30, status: "verified" },
+            { benchmark: "201", delay: "bad", area: 10, status: "verified" },
+            { benchmark: "202", delay: 1, area: 1 },
+            { benchmark: "300", delay: 1, area: 1, status: "verified" },
+        ]);
+
+        expect(totals).toEqual({
+            areaTotal: 110,
+            delayTotal: 25,
+            benchmarkCount: 2,
+        });
     });
 });

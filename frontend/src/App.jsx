@@ -26,6 +26,7 @@ import { MaintenanceScreen } from "./components/app/MaintenanceScreen.jsx";
 import { ParetoExportModal } from "./components/app/ParetoExportModal.jsx";
 import {
     buildAxis,
+    computeBenchmarkMinimumTotals,
     computeParetoFrontOriginal,
     computePlottedPoint,
     getRoleLabel,
@@ -734,6 +735,7 @@ export default function App() {
         }
         return ids;
     }, [points]);
+    const benchmarkMinimumTotals = useMemo(() => computeBenchmarkMinimumTotals(points), [points]);
 
     function clearAllTestNoConfirm() {
         setPoints((prev) => prev.filter((p) => p.benchmark !== "test"));
@@ -1461,7 +1463,23 @@ export default function App() {
         <div className="page">
             <header className="topbar">
                 <div className="brand">
-                    <div className="title">Circuit Control Platform</div>
+                    <div className="brandTitleRow">
+                        <div className="title">Circuit Control Platform</div>
+                        <div className="brandMetricPills" aria-label="Benchmark minimum totals">
+                            <span
+                                className="pill subtle brandMetricPill"
+                                title="Sum of minimum area values for benchmarks 200-299 with non-verified or verified points"
+                            >
+                                min area sum: {formatIntNoGrouping(benchmarkMinimumTotals.areaTotal)}
+                            </span>
+                            <span
+                                className="pill subtle brandMetricPill"
+                                title="Sum of minimum delay values for benchmarks 200-299 with non-verified or verified points"
+                            >
+                                min delay sum: {formatIntNoGrouping(benchmarkMinimumTotals.delayTotal)}
+                            </span>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="topbarRight">

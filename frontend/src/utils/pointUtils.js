@@ -166,3 +166,47 @@ export function computeParetoFrontOriginal(points) {
 
     return front;
 }
+
+const BENCHMARK_MINIMUM_TOTAL_STATUSES = new Set(["non-verified", "verified"]);
+
+export function computeBenchmarkMinimumTotals(points, benchmarkStart = 200, benchmarkEnd = 299) {
+    const byBenchmark = new Map();
+
+    for (const point of Array.isArray(points) ? points : []) {
+        const benchmark = Number(point?.benchmark);
+        const delay = Number(point?.delay);
+        const area = Number(point?.area);
+        const status = String(point?.status || "").trim().toLowerCase();
+
+        if (!Number.isInteger(benchmark) || benchmark < benchmarkStart || benchmark > benchmarkEnd) continue;
+        if (!BENCHMARK_MINIMUM_TOTAL_STATUSES.has(status)) continue;
+        if (!Number.isFinite(delay) || !Number.isFinite(area)) continue;
+
+        const current = byBenchmark.get(benchmark) || {
+            minimalArea: Number.POSITIVE_INFINITY,
+            minimalDelay: Number.POSITIVE_INFINITY,
+        };
+        current.minimalArea = Math.min(current.minimalArea, area);
+        current.minimalDelay = Math.min(current.minimalDelay, delay);
+        byBenchmark.set(benchmark, current);
+    }
+
+    let areaTotal = 0;
+    let delayTotal = 0;
+    let benchmarkCount = 0;
+
+    for (let benchmark = benchmarkStart; benchmark <= benchmarkEnd; benchmark += 1) {
+        const current = byBenchmark.get(benchmark);
+        if (!current) continue;
+
+        if (Number.isFinite(current.minimalArea)) areaTotal += Math.trunc(current.minimalArea);
+        if (Number.isFinite(current.minimalDelay)) delayTotal += Math.trunc(current.minimalDelay);
+        benchmarkCount += 1;
+    }
+
+    return {
+        areaTotal,
+        delayTotal,
+        benchmarkCount,
+    };
+}
