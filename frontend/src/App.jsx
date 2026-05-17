@@ -321,9 +321,12 @@ export default function App() {
         isBulkIdenticalApplying,
         bulkIdenticalApplyProgress,
         bulkIdenticalPickerGroupId,
+        isProcessingQueuePushRunning,
+        processingQueuePushSummary,
         runBulkVerifyAllPoints,
         runBulkMetricsAudit,
         runBulkIdenticalAudit,
+        pushProcessingPoints,
         setBulkIdenticalGroupChecked,
         openBulkIdenticalGroupPicker,
         closeBulkIdenticalGroupPicker,
@@ -1815,6 +1818,9 @@ export default function App() {
                             applySelectedBulkVerifyCandidates={applySelectedBulkVerifyCandidates}
                             closeBulkVerifyApplyModal={closeBulkVerifyApplyModal}
                             bulkIdenticalApplyProgress={bulkIdenticalApplyProgress}
+                            pushProcessingPoints={pushProcessingPoints}
+                            isProcessingQueuePushRunning={isProcessingQueuePushRunning}
+                            processingQueuePushSummary={processingQueuePushSummary}
                         />
                     ) : null}
 

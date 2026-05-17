@@ -35,6 +35,7 @@ export {
     fetchAdminMaintenanceSettings,
     updateAdminMaintenanceSettings,
     recalculateParetoFilenameCsvs,
+    pushProcessingQueuePoints,
 } from "./api/adminApi.js";
 export {
     planTruthTablesUpload,

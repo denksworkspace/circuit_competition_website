@@ -27,6 +27,7 @@ import {
     isUploadStopRequested,
     loadUploadRequestSnapshot,
     markRemainingAsNonProcessed,
+    requeueStuckProcessingFiles,
     refreshUploadRequestCounters,
     withUploadRequestLock,
 } from "./_lib/uploadQueueOps.js";
@@ -105,11 +106,24 @@ async function loadRunResponseSnapshot({ requestId, command, includeFiles }) {
 
 async function finalizeParetoIfCompleted({ requestId, command, counters }) {
     const pendingCount = Number(counters?.pendingCount);
+    const processingCount = Number(counters?.processingCount);
     if (!Number.isFinite(pendingCount) || pendingCount > 0) return;
+    if (Number.isFinite(processingCount) && processingCount > 0) return;
     await finalizeUploadRequestPareto({
         requestId,
         commandId: command.id,
         commandName: command.name,
+    });
+}
+
+async function requeueProcessingFilesIfQueueLooksDrained({ requestId, command, includeFiles }) {
+    const recovered = await requeueStuckProcessingFiles(requestId);
+    if (Number(recovered?.requeuedCount || 0) <= 0) return null;
+    await refreshUploadRequestCounters(requestId);
+    return await loadRunResponseSnapshot({
+        requestId,
+        command,
+        includeFiles,
     });
 }
 
@@ -310,10 +324,20 @@ export default async function handler(req, res) {
         const nextFile = await findNextPendingUploadFile(requestId);
         if (!nextFile) {
             try {
+                const recoveredSnapshot = await requeueProcessingFilesIfQueueLooksDrained({
+                    requestId,
+                    command,
+                    includeFiles: includeFilesInResponse,
+                });
+                if (recoveredSnapshot) {
+                    res.status(200).json(recoveredSnapshot);
+                    return;
+                }
                 let counters = await refreshUploadRequestCounters(requestId);
                 await finalizeParetoIfCompleted({ requestId, command, counters });
                 let statusesToSync = new Set();
                 if (Number(counters?.pendingCount || 0) <= 0
+                    && Number(counters?.processingCount || 0) <= 0
                     && (Boolean(initialRequest.autoManualWindow) || Number(counters?.manualPendingCount || 0) <= 0)
                     && Number(counters?.savablePendingCount || 0) > 0) {
                     const autoSaved = await saveAutoEligibleRows({
@@ -571,11 +595,20 @@ export default async function handler(req, res) {
             } else {
                 const pending = await findNextPendingUploadFile(requestId);
                 if (!pending) {
+                    const recoveredSnapshot = await requeueProcessingFilesIfQueueLooksDrained({
+                        requestId,
+                        command,
+                        includeFiles: false,
+                    });
+                    if (recoveredSnapshot) {
+                        refreshedCounters = await refreshUploadRequestCounters(requestId);
+                    }
                     if (!refreshedCounters || Number(refreshedCounters.pendingCount || 0) > 0) {
                         refreshedCounters = await refreshUploadRequestCounters(requestId);
                         await finalizeParetoIfCompleted({ requestId, command, counters: refreshedCounters });
                     }
                     if (Number(refreshedCounters?.pendingCount || 0) <= 0
+                        && Number(refreshedCounters?.processingCount || 0) <= 0
                         && (
                             Boolean(postRunSnapshot?.request?.autoManualWindow ?? initialRequest.autoManualWindow)
                             || Number(refreshedCounters?.manualPendingCount || 0) <= 0

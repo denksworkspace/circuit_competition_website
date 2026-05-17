@@ -48,6 +48,7 @@ vi.mock("../../api/_lib/uploadQueueOps.js", () => ({
     isUploadStopRequested: vi.fn(async () => false),
     loadUploadRequestSnapshot: vi.fn(),
     markRemainingAsNonProcessed: vi.fn(),
+    requeueStuckProcessingFiles: vi.fn(async () => ({ requeuedCount: 0 })),
     refreshUploadRequestCounters: vi.fn(),
     withUploadRequestLock: vi.fn(async (_requestId, task) => await task()),
 }));

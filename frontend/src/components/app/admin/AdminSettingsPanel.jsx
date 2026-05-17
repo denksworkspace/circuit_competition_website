@@ -74,6 +74,9 @@ export function AdminSettingsPanel({
     bulkIdenticalAuditSummary,
     bulkIdenticalAuditLogText,
     onDownloadBulkIdenticalAuditLog,
+    pushProcessingPoints,
+    isProcessingQueuePushRunning,
+    processingQueuePushSummary,
 }) {
     return (
         <div className="settingsPanel">
@@ -349,6 +352,20 @@ export function AdminSettingsPanel({
                         <button className="btn ghost" type="button" onClick={onDownloadBulkVerifyLog}>
                             Download bulk-check log
                         </button>
+                    ) : null}
+
+                    <button
+                        className="btn ghost"
+                        type="button"
+                        onClick={pushProcessingPoints}
+                        disabled={isProcessingQueuePushRunning}
+                    >
+                        {isProcessingQueuePushRunning ? "Pushing processing points..." : "push processing points"}
+                    </button>
+                    {isProcessingQueuePushRunning && processingQueuePushSummary ? (
+                        <div className="cardHint">
+                            Processed {Number(processingQueuePushSummary.done || 0)} / {Number(processingQueuePushSummary.total || 0)} processing queues
+                        </div>
                     ) : null}
 
                     <button

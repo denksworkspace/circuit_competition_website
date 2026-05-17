@@ -283,6 +283,7 @@ export async function refreshUploadRequestCounters(requestId) {
         count(*) filter (where lower(coalesce(process_state, '')) in ('processed', 'non-processed'))::int as done_count,
         count(*) filter (where lower(coalesce(verdict, '')) = 'verified')::int as verified_count,
         count(*) filter (where lower(coalesce(process_state, '')) = 'pending')::int as pending_count,
+        count(*) filter (where lower(coalesce(process_state, '')) = 'processing')::int as processing_count,
         count(*) filter (where not applied and can_apply)::int as savable_pending_count,
         count(*) filter (where not applied and can_apply and manual_review_required)::int as manual_pending_count
       from public.upload_request_files
@@ -297,13 +298,14 @@ export async function refreshUploadRequestCounters(requestId) {
     const doneCount = Math.max(0, Number(row.done_count || 0));
     const verifiedCount = Math.max(0, Number(row.verified_count || 0));
     const pendingCount = Math.max(0, Number(row.pending_count || 0));
+    const processingCount = Math.max(0, Number(row.processing_count || 0));
     const savablePendingCount = Math.max(0, Number(row.savable_pending_count || 0));
     const manualPendingCount = Math.max(0, Number(row.manual_pending_count || 0));
     const actionableManualPendingCount = manualPendingCount;
     let nextStatus = null;
-    if (pendingCount <= 0 && actionableManualPendingCount > 0 && !autoManualWindow) {
+    if (pendingCount <= 0 && processingCount <= 0 && actionableManualPendingCount > 0 && !autoManualWindow) {
         nextStatus = REQUEST_STATUS_WAITING_MANUAL_VERDICT;
-    } else if (pendingCount <= 0 && savablePendingCount <= 0) {
+    } else if (pendingCount <= 0 && processingCount <= 0 && savablePendingCount <= 0) {
         nextStatus = REQUEST_STATUS_COMPLETED;
     }
     await withDbRetry(() => sql`
@@ -329,9 +331,134 @@ export async function refreshUploadRequestCounters(requestId) {
         doneCount,
         verifiedCount,
         pendingCount,
+        processingCount,
         savablePendingCount,
         manualPendingCount: actionableManualPendingCount,
         nextStatus,
+    };
+}
+
+export async function requeueStuckProcessingFiles(requestId) {
+    const result = await withDbRetry(() => sql`
+      update public.upload_request_files
+      set process_state = ${FILE_PROCESS_STATE_PENDING},
+          verdict = 'pending',
+          verdict_reason = '',
+          can_apply = false,
+          default_checked = false,
+          manual_review_required = false,
+          checker_version = null,
+          parsed_benchmark = null,
+          parsed_delay = null,
+          parsed_area = null,
+          content_hash = null,
+          final_file_name = null,
+          pareto_state = '',
+          replaced_pareto_coords = '',
+          processed_at = null,
+          updated_at = now()
+      where request_id = ${requestId}
+        and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PROCESSING}
+        and not applied
+      returning id
+    `);
+    const requeuedCount = Number(result.rows.length || 0);
+    if (requeuedCount > 0) {
+        await withDbRetry(() => sql`
+          update public.upload_requests
+          set status = ${REQUEST_STATUS_PROCESSING},
+              stop_requested = false,
+              error = null,
+              finished_at = null,
+              current_phase = '',
+              current_file_name = '',
+              updated_at = now()
+          where id = ${requestId}
+            and lower(coalesce(status, '')) <> 'closed'
+        `);
+    }
+    return { requeuedCount };
+}
+
+export async function requeueAllStuckProcessingFiles({ onProgress = null } = {}) {
+    const progress = typeof onProgress === "function" ? onProgress : () => {};
+    const targetsRes = await withDbRetry(() => sql`
+      select distinct upload_request_files.request_id
+      from public.upload_request_files
+      join public.upload_requests on upload_requests.id = upload_request_files.request_id
+      where lower(coalesce(upload_request_files.process_state, '')) = ${FILE_PROCESS_STATE_PROCESSING}
+        and not upload_request_files.applied
+        and lower(coalesce(upload_requests.status, '')) <> 'closed'
+      order by upload_request_files.request_id asc
+    `);
+    const requestIds = targetsRes.rows.map((row) => String(row.request_id || "")).filter(Boolean);
+    const totalCount = requestIds.length;
+    let doneCount = 0;
+    let requeuedCount = 0;
+    const requeuedRequestIds = [];
+    progress({ doneCount, totalCount, currentRequestId: "" });
+
+    for (const requestId of requestIds) {
+        const result = await withDbRetry(() => sql`
+          with locked as (
+            select pg_try_advisory_xact_lock(hashtext(${requestId})) as ok
+          ),
+          requeued as (
+            update public.upload_request_files
+            set process_state = ${FILE_PROCESS_STATE_PENDING},
+                verdict = 'pending',
+                verdict_reason = '',
+                can_apply = false,
+                default_checked = false,
+                manual_review_required = false,
+                checker_version = null,
+                parsed_benchmark = null,
+                parsed_delay = null,
+                parsed_area = null,
+                content_hash = null,
+                final_file_name = null,
+                pareto_state = '',
+                replaced_pareto_coords = '',
+                processed_at = null,
+                updated_at = now()
+            where request_id = ${requestId}
+              and lower(coalesce(process_state, '')) = ${FILE_PROCESS_STATE_PROCESSING}
+              and not applied
+              and (select ok from locked)
+            returning request_id, id
+          ),
+          touched_requests as (
+            update public.upload_requests
+            set status = ${REQUEST_STATUS_PROCESSING},
+                stop_requested = false,
+                error = null,
+                finished_at = null,
+                current_phase = '',
+                current_file_name = '',
+                updated_at = now()
+            where id in (select distinct request_id from requeued)
+              and lower(coalesce(status, '')) <> 'closed'
+            returning id
+          )
+          select
+            count(requeued.id)::int as requeued_count,
+            count(distinct requeued.request_id)::int as request_count
+          from requeued
+        `);
+        const row = result.rows[0] || {};
+        const fileCount = Math.max(0, Number(row.requeued_count || 0));
+        if (fileCount > 0) {
+            requeuedCount += fileCount;
+            requeuedRequestIds.push(requestId);
+        }
+        doneCount += 1;
+        progress({ doneCount, totalCount, currentRequestId: requestId });
+    }
+
+    return {
+        requeuedCount,
+        requestCount: requeuedRequestIds.length,
+        requestIds: requeuedRequestIds,
     };
 }
 

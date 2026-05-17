@@ -214,7 +214,13 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         await handler(reqAny, resAny);
-        if (resAny.statusCode < 400 && url.pathname === "/api/points-upload-request-run") {
+        if (
+            resAny.statusCode < 400
+            && (
+                url.pathname === "/api/points-upload-request-run"
+                || url.pathname === "/api/admin-push-processing-points"
+            )
+        ) {
             kickUploadQueueWorker();
         }
     } catch (error) {

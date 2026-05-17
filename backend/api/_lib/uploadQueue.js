@@ -168,6 +168,10 @@ export async function ensureUploadQueueSchema() {
               create index if not exists upload_request_files_request_state_idx
               on public.upload_request_files(request_id, process_state, order_index)
             `;
+            await sql`
+              create index if not exists upload_request_files_state_request_idx
+              on public.upload_request_files(process_state, request_id)
+            `;
         })().catch((error) => {
             uploadQueueSchemaReadyPromise = null;
             throw error;

@@ -7,6 +7,7 @@ import {
     fetchVerifyPointProgress,
     runAdminIdenticalAudit,
     runAdminMetricsAudit,
+    pushProcessingQueuePoints,
 } from "../services/apiClient.js";
 import { uid } from "../utils/pointUtils.js";
 import { appendTextLog } from "../utils/uploadFlowUtils.js";
@@ -48,6 +49,8 @@ export function useAdminBulkActions({
     const [isBulkIdenticalApplying, setIsBulkIdenticalApplying] = useState(false);
     const [bulkIdenticalApplyProgress, setBulkIdenticalApplyProgress] = useState(null);
     const [bulkIdenticalPickerGroupId, setBulkIdenticalPickerGroupId] = useState("");
+    const [isProcessingQueuePushRunning, setIsProcessingQueuePushRunning] = useState(false);
+    const [processingQueuePushSummary, setProcessingQueuePushSummary] = useState(null);
 
     const bulkVerifyAbortRef = useRef(null);
     const bulkMetricsAbortRef = useRef(null);
@@ -55,6 +58,7 @@ export function useAdminBulkActions({
     const bulkVerifyProgressPollRef = useRef(null);
     const bulkMetricsProgressPollRef = useRef(null);
     const bulkIdenticalProgressPollRef = useRef(null);
+    const processingQueuePushProgressPollRef = useRef(null);
 
     useEffect(() => {
         return () => {
@@ -81,6 +85,10 @@ export function useAdminBulkActions({
             if (bulkIdenticalProgressPollRef.current) {
                 clearInterval(bulkIdenticalProgressPollRef.current);
                 bulkIdenticalProgressPollRef.current = null;
+            }
+            if (processingQueuePushProgressPollRef.current) {
+                clearInterval(processingQueuePushProgressPollRef.current);
+                processingQueuePushProgressPollRef.current = null;
             }
         };
     }, []);
@@ -443,6 +451,46 @@ export function useAdminBulkActions({
         bulkIdenticalAbortRef.current = null;
     }
 
+    async function pushProcessingPoints() {
+        if (isProcessingQueuePushRunning) return;
+        const controller = new AbortController();
+        const progressToken = uid();
+        setIsProcessingQueuePushRunning(true);
+        setProcessingQueuePushSummary({ done: 0, total: 0 });
+        setAdminPanelError("");
+        try {
+            if (processingQueuePushProgressPollRef.current) clearInterval(processingQueuePushProgressPollRef.current);
+            processingQueuePushProgressPollRef.current = setInterval(async () => {
+                if (controller.signal.aborted) return;
+                try {
+                    const progress = await fetchVerifyPointProgress({ token: progressToken, signal: controller.signal });
+                    setProcessingQueuePushSummary({
+                        done: Number(progress?.doneCount || 0),
+                        total: Number(progress?.totalCount || 0),
+                    });
+                } catch {
+                    // Ignore transient polling errors.
+                }
+            }, 500);
+            const result = await pushProcessingQueuePoints({ authKey: authKeyDraft, signal: controller.signal, progressToken });
+            setProcessingQueuePushSummary({
+                done: Number(result?.requests || 0),
+                total: Number(result?.requests || 0),
+            });
+            window.alert(
+                `Processed ${Number(result?.requests || 0)} processing queue(s).`
+            );
+        } catch (error) {
+            setAdminPanelError(error?.message || "Failed to push processing queue points.");
+        } finally {
+            if (processingQueuePushProgressPollRef.current) clearInterval(processingQueuePushProgressPollRef.current);
+            processingQueuePushProgressPollRef.current = null;
+            controller.abort();
+            setIsProcessingQueuePushRunning(false);
+            setProcessingQueuePushSummary(null);
+        }
+    }
+
     function setBulkVerifyCandidateChecked(pointId, checked) {
         setBulkVerifyCandidates((prev) => prev.map((row) => (row.pointId === pointId ? { ...row, checked } : row)));
     }
@@ -526,9 +574,12 @@ export function useAdminBulkActions({
         isBulkIdenticalApplying,
         bulkIdenticalApplyProgress,
         bulkIdenticalPickerGroupId,
+        isProcessingQueuePushRunning,
+        processingQueuePushSummary,
         runBulkVerifyAllPoints,
         runBulkMetricsAudit,
         runBulkIdenticalAudit,
+        pushProcessingPoints,
         setBulkIdenticalGroupChecked,
         openBulkIdenticalGroupPicker,
         closeBulkIdenticalGroupPicker,

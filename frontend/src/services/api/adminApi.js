@@ -249,3 +249,23 @@ export async function recalculateParetoFilenameCsvs({ authKey }) {
         statuses: Array.isArray(data?.statuses) ? data.statuses : [],
     };
 }
+
+export async function pushProcessingQueuePoints({ authKey, signal, progressToken }) {
+    const response = await fetch(apiUrl("/api/admin-push-processing-points"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({ authKey, progressToken }),
+    });
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+        throw new Error(data?.error || "Failed to push processing queue points.");
+    }
+    return {
+        ok: Boolean(data?.ok),
+        processedFiles: Number(data?.requeuedFiles || data?.processedFiles || 0),
+        requeuedFiles: Number(data?.requeuedFiles || 0),
+        requests: Number(data?.requests || 0),
+        requestIds: Array.isArray(data?.requestIds) ? data.requestIds : [],
+    };
+}
